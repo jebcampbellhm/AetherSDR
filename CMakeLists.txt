@@ -951,6 +951,9 @@ set(CORE_SOURCES
     src/core/backends/web888/Web888CapturePlan.cpp
     src/core/backends/web888/Web888CapturePool.cpp
     src/core/backends/web888/Web888IqProcessor.cpp
+    src/core/backends/web888/Web888DecoderPeriod.cpp
+    src/core/backends/web888/Web888DecoderRouter.cpp
+    src/core/backends/web888/Web888DecoderWav.cpp
     src/core/backends/RadioBackendFactory.cpp
     src/core/KiwiSdrManager.cpp
     src/core/ReceivePresentationSync.cpp

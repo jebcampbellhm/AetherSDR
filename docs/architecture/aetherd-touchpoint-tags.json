@@ -1487,6 +1487,24 @@
   "split": "",
   "confidence": "high"
  },
+ "core/backends/web888/Web888DecoderPeriod.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded decoder period assembly requiring an explicit verified sample-time anchor.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888DecoderRouter.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded per-mode decoder period routing, aggregate sample budget and revocable jobs below the backend seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888DecoderWav.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded PCM16 WAV serialization of current complete decoder jobs; no file or device effects.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/backends/web888/Web888IqProcessor.h": {
   "tag": "vendor(web888)",
   "note": "Bounded shared IQ DSP worker and owner-thread result delivery below the backend seam.",
