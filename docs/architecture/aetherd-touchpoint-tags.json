@@ -1462,5 +1462,35 @@
   "note": "Bounded filtered SND IQ wire payload, opt-in below the backend seam.",
   "split": "",
   "confidence": "high"
+ },
+ "core/backends/web888/Web888IqSplitter.h": {
+  "tag": "vendor(web888)",
+  "note": "Streaming USB decoder channelization of one filtered Web-888 IQ capture.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888IqCapture.h": {
+  "tag": "vendor(web888)",
+  "note": "Sound-only IQ session lifetime and revocable decoder outputs.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888CapturePlan.h": {
+  "tag": "vendor(web888)",
+  "note": "Pure receive-window planning and explicit listening capacity reservation.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888CapturePool.h": {
+  "tag": "vendor(web888)",
+  "note": "Owner-thread capture admission, listening budget, rollback and source lifetime below the backend seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888IqProcessor.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded shared IQ DSP worker and owner-thread result delivery below the backend seam.",
+  "split": "",
+  "confidence": "high"
  }
 }

@@ -946,6 +946,11 @@ set(CORE_SOURCES
     src/core/KiwiSdrCredentialStore.cpp
     src/core/KiwiSdrClient.cpp
     src/core/backends/web888/Web888Backend.cpp
+    src/core/backends/web888/Web888IqSplitter.cpp
+    src/core/backends/web888/Web888IqCapture.cpp
+    src/core/backends/web888/Web888CapturePlan.cpp
+    src/core/backends/web888/Web888CapturePool.cpp
+    src/core/backends/web888/Web888IqProcessor.cpp
     src/core/backends/RadioBackendFactory.cpp
     src/core/KiwiSdrManager.cpp
     src/core/ReceivePresentationSync.cpp

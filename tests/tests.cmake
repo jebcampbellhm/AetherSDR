@@ -3112,6 +3112,16 @@ target_include_directories(web888_backend_test PRIVATE src)
 target_link_libraries(web888_backend_test PRIVATE aethercore Qt6::Core Qt6::Network)
 add_test(NAME web888_backend_test COMMAND web888_backend_test)
 
+add_executable(web888_iq_test tests/web888_iq_test.cpp)
+target_include_directories(web888_iq_test PRIVATE src tests)
+target_link_libraries(web888_iq_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_iq_test COMMAND web888_iq_test)
+
+add_executable(web888_capture_pool_test tests/web888_capture_pool_test.cpp)
+target_include_directories(web888_capture_pool_test PRIVATE src tests)
+target_link_libraries(web888_capture_pool_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_capture_pool_test COMMAND web888_capture_pool_test)
+
 add_executable(web888_connection_test tests/web888_connection_test.cpp)
 target_include_directories(web888_connection_test PRIVATE src tests)
 target_link_libraries(web888_connection_test PRIVATE aethercore Qt6::Core)
