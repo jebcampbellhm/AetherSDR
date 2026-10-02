@@ -1499,6 +1499,12 @@
   "split": "",
   "confidence": "high"
  },
+ "core/backends/web888/Web888DecoderProcess.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded local decoder process handoff for Web-888 routed audio jobs.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/backends/web888/Web888DecoderWav.h": {
   "tag": "vendor(web888)",
   "note": "Bounded PCM16 WAV serialization of current complete decoder jobs; no file or device effects.",

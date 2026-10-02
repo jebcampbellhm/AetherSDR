@@ -3147,6 +3147,11 @@ target_include_directories(web888_decoder_wav_test PRIVATE src tests)
 target_link_libraries(web888_decoder_wav_test PRIVATE aethercore Qt6::Core)
 add_test(NAME web888_decoder_wav_test COMMAND web888_decoder_wav_test)
 
+add_executable(web888_decoder_process_test tests/web888_decoder_process_test.cpp)
+target_include_directories(web888_decoder_process_test PRIVATE src tests)
+target_link_libraries(web888_decoder_process_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_decoder_process_test COMMAND web888_decoder_process_test)
+
 add_executable(web888_wspr_signal_test tests/web888_wspr_signal_test.cpp)
 target_include_directories(web888_wspr_signal_test PRIVATE src tests)
 target_link_libraries(web888_wspr_signal_test PRIVATE aethercore Qt6::Core)
