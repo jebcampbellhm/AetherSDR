@@ -3107,6 +3107,26 @@ target_include_directories(kiwi_sdr_session_test PRIVATE src)
 target_link_libraries(kiwi_sdr_session_test PRIVATE aethercore Qt6::Core Qt6::Network)
 add_test(NAME kiwi_sdr_session_test COMMAND kiwi_sdr_session_test)
 
+add_executable(web888_backend_test tests/web888_backend_test.cpp)
+target_include_directories(web888_backend_test PRIVATE src)
+target_link_libraries(web888_backend_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_backend_test COMMAND web888_backend_test)
+
+add_executable(web888_connection_test tests/web888_connection_test.cpp)
+target_include_directories(web888_connection_test PRIVATE src tests)
+target_link_libraries(web888_connection_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_connection_test COMMAND web888_connection_test)
+
+add_executable(web888_connection_panel_test
+    tests/web888_connection_panel_test.cpp
+    src/gui/ConnectionPanel.cpp
+    src/gui/FramelessResizer.cpp
+    src/gui/FramelessWindowTitleBar.cpp)
+target_include_directories(web888_connection_panel_test PRIVATE src tests)
+target_link_libraries(web888_connection_panel_test PRIVATE aethercore Qt6::Core Qt6::Network Qt6::Widgets)
+add_test(NAME web888_connection_panel_test COMMAND web888_connection_panel_test)
+set_tests_properties(web888_connection_panel_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
 add_executable(kiwi_sdr_waterfall_scale_test
     tests/kiwi_sdr_waterfall_scale_test.cpp
     src/core/KiwiSdrProtocol.cpp

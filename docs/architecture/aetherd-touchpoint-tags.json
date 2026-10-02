@@ -1193,6 +1193,18 @@
   "split": "",
   "confidence": "high"
  },
+ "core/backends/web888/Web888Backend.h": {
+  "tag": "vendor(web888)",
+  "note": "Local experimental native RX backend. Owns the Web-888 session below IRadioBackend; selected through the neutral factory.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/RadioBackendFactory.h": {
+  "tag": "universal",
+  "note": "Backend composition boundary. Accepts a family key and returns IRadioBackend; concrete vendor types stay below the seam.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/backends/kiwi/KiwiSessionId.h": {
   "tag": "vendor(kiwi)",
   "note": "Shared Kiwi/Web-888 wire-session identifier allocator; server timestamp namespace and signed-parser bounds.",

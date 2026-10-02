@@ -10,6 +10,13 @@
 
 namespace AetherSDR {
 
+// Absent preserves the established host retry behavior. Manual sessions must
+// not repeat admission failures (password, busy, access policy) automatically.
+struct ConnectionRecovery {
+    enum class Mode { HostRetry, Manual };
+    Mode mode{Mode::HostRetry};
+};
+
 struct TxPowerBand {
     double lowHz = 0.0;
     double highHz = 0.0;
@@ -198,6 +205,11 @@ enum class FmTonePresentation {
 // to the legacy shape (e.g. PROC's 0..2). Set every field explicitly in every
 // backend and record it in docs/architecture/radio-capabilities-map.md.
 struct RadioCapabilities {
+    std::optional<ConnectionRecovery> connectionRecovery;
+    bool automaticReconnectAllowed() const
+    {
+        return !connectionRecovery || connectionRecovery->mode == ConnectionRecovery::Mode::HostRetry;
+    }
     // Identity
     QString family;   // backend id: "flex", "kiwi", … (stable, lowercase)
     QString model;    // radio model string as reported by the hardware

@@ -208,6 +208,7 @@ int main(int argc, char** argv)
 
         // 2. Every family, cold: construct, wire, tear down, twice around.
         const QStringList cycle = {
+            QStringLiteral("web888"),
             QStringLiteral("sim"),  QStringLiteral("hl2"),  QStringLiteral("anan"),
             QStringLiteral("icom"), QStringLiteral("rtl"),  QStringLiteral("flex"),
             QStringLiteral("hl2"),  QStringLiteral("sim"),  QStringLiteral("icom"),

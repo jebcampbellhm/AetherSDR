@@ -5,6 +5,7 @@
 #include "core/IConnectionAutomation.h"
 
 #include <QWidget>
+#include <QVariantMap>
 #include <QMargins>
 #include <QPoint>
 #include <QRect>
@@ -73,6 +74,7 @@ public:
     // RTL-SDR USB dongles (RTL2832U / R820T). USB-addressed (device index +
     // serial), not network. Receive-only (Principle VI).
     static constexpr const char* kFamilyRtl  = "rtl";
+    static constexpr const char* kFamilyWeb888 = "web888";
 
     // IConnectionAutomation — engine-facing connect/disconnect/dialog hook.
     QList<RadioInfo> automationLocalRadios() const override;
@@ -120,6 +122,9 @@ public slots:
 
 signals:
     void connectRequested(const RadioInfo& radio);
+    // Explicit manual attempt; options may contain a session-only credential.
+    // They must not be added to discovery records or saved route profiles.
+    void connectWithOptionsRequested(const RadioInfo& radio, const QVariantMap& options);
     void wanConnectRequested(const WanRadioInfo& radio);
     void wanDisconnectClientsRequested(const WanRadioInfo& radio);
     void disconnectRequested();
@@ -289,6 +294,8 @@ private:
     QWidget*     m_manualIcomCivCustomRow{nullptr};
     QLineEdit*   m_manualIcomUserEdit{nullptr};
     QLineEdit*   m_manualIcomPassEdit{nullptr};
+    QWidget*    m_manualWeb888PassRow{nullptr};
+    QLineEdit*  m_manualWeb888PassEdit{nullptr};
     QComboBox*   m_manualIcomPortCombo{nullptr};
     QSpinBox*    m_manualIcomBasePortSpin{nullptr};
     // The model chooser. Non-editable: it enumerates a known set with an escape

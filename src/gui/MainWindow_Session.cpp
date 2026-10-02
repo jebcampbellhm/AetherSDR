@@ -328,8 +328,7 @@ void MainWindow::wireDiscovery()
         }
     });
 
-    connect(m_connPanel, &ConnectionPanel::connectRequested,
-            this, [this](const RadioInfo& info){
+    const auto requestConnection = [this](const RadioInfo& info, const QVariantMap& options) {
         QList<quint32> disconnectHandles;
         if (!confirmClientSlotAvailability(info, &disconnectHandles)) {
             m_connPanel->setStatusText("Connection canceled");
@@ -341,7 +340,10 @@ void MainWindow::wireDiscovery()
         m_connPanel->setStatusText("Connecting…");
         m_userDisconnected = false;
         setPanadapterConnectionAnimation(true, "Connecting to radio…");
-        m_radioModel.connectToRadio(info);
+        m_radioModel.connectToRadioWithOptions(info, options);
+        if (!options.isEmpty()) {
+            return; // Explicit session options are never persisted for startup.
+        }
         auto& s = AppSettings::instance();
         s.setValue("LastConnectedRadioSerial", info.serial);
         if (info.isRouted) {
@@ -350,7 +352,10 @@ void MainWindow::wireDiscovery()
             s.remove("LastRoutedRadioIp");
         }
         s.save();
-    });
+    };
+    connect(m_connPanel, &ConnectionPanel::connectRequested, this,
+            [requestConnection](const RadioInfo& info) { requestConnection(info, {}); });
+    connect(m_connPanel, &ConnectionPanel::connectWithOptionsRequested, this, requestConnection);
 
     // Start the AetherModem KISS TNC headlessly at launch if the user enabled
     // "Start TNC on Startup" — constructs the (hidden, persistent) AetherModem
@@ -805,8 +810,6 @@ void MainWindow::wireRadioModel()
     connect(&m_radioModel, &RadioModel::capabilitiesChanged,
             this, &MainWindow::applyTxAudioCapabilities);
 
-    connect(&m_radioModel, &RadioModel::connectionError,
-            this, &MainWindow::onConnectionError);
     // Radio configuration advice: shown, but it does NOT touch the session.
     // Deliberately not onConnectionError — see IRadioBackend::configurationWarning.
     // Advice belongs in the panel while it is open. Mid-session warnings need
@@ -838,6 +841,13 @@ void MainWindow::wireRadioModel()
     };
     connect(&m_radioModel, &RadioModel::guiClientRegistrationFailed,
             this, showTerminalConnectionFailure);
+    connect(&m_radioModel, &RadioModel::connectionError, this,
+            [this, showTerminalConnectionFailure](const QString& message) {
+        if (!m_radioModel.backendCapabilities().automaticReconnectAllowed()) {
+            showTerminalConnectionFailure(message);
+        }
+        onConnectionError(message);
+    });
     connect(&m_radioModel, &RadioModel::radioWakeFailed,
             this, showTerminalConnectionFailure);
     connect(&m_radioModel, &RadioModel::certFingerprintMismatch,

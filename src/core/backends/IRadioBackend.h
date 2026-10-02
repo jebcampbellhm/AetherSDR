@@ -824,10 +824,9 @@ signals:
     void disconnected();
     void connectionError(const QString& reason);
 
-    // A RADIO-CONFIGURATION problem the operator should fix that does not end the
-    // session. connectionError is fatal (RadioModel always starts its reconnect timer
-    // on it), so advice sent there becomes a reconnect loop. If it does not stop the
-    // radio working, it belongs here.
+    // A nonfatal radio-configuration problem the operator should fix.
+    // connectionError ends the session and may trigger host retry unless the
+    // backend declares manual recovery; advice about a working session belongs here.
     void configurationWarning(const QString& message);
 
     void capabilitiesChanged();

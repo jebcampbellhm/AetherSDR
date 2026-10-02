@@ -945,6 +945,8 @@ set(CORE_SOURCES
     src/core/KiwiSdrRedirectPolicy.cpp
     src/core/KiwiSdrCredentialStore.cpp
     src/core/KiwiSdrClient.cpp
+    src/core/backends/web888/Web888Backend.cpp
+    src/core/backends/RadioBackendFactory.cpp
     src/core/KiwiSdrManager.cpp
     src/core/ReceivePresentationSync.cpp
     src/core/KiwiPublicDirectory.cpp
