@@ -130,6 +130,7 @@ enum class StreamMode {
 enum class FrameLayout {
     Unknown,
     SndPcm16,
+    SndIq16,
     SndObservedPcm16WithMeter,
     SndCompressed,
     WaterfallDirectBins,

@@ -3093,6 +3093,20 @@ target_include_directories(kiwi_sdr_protocol_test PRIVATE src)
 target_link_libraries(kiwi_sdr_protocol_test PRIVATE Qt6::Core)
 add_test(NAME kiwi_sdr_protocol_test COMMAND kiwi_sdr_protocol_test)
 
+# Socket-free concurrent allocation; no radio or wall clock is involved.
+find_package(Threads REQUIRED)
+add_executable(kiwi_session_id_test tests/kiwi_session_id_test.cpp)
+target_include_directories(kiwi_session_id_test PRIVATE src)
+target_link_libraries(kiwi_session_id_test PRIVATE Threads::Threads)
+set_target_properties(kiwi_session_id_test PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+add_test(NAME kiwi_session_id_test COMMAND kiwi_session_id_test)
+
+# Socket-free startup/teardown with injected HTTP and WebSocket opening.
+add_executable(kiwi_sdr_session_test tests/kiwi_sdr_session_test.cpp)
+target_include_directories(kiwi_sdr_session_test PRIVATE src)
+target_link_libraries(kiwi_sdr_session_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME kiwi_sdr_session_test COMMAND kiwi_sdr_session_test)
+
 add_executable(kiwi_sdr_waterfall_scale_test
     tests/kiwi_sdr_waterfall_scale_test.cpp
     src/core/KiwiSdrProtocol.cpp

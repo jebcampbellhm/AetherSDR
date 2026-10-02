@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/PcmFrame.h"
+#include "core/backends/kiwi/KiwiIqBlock.h"
 
 #include "KiwiSdrProtocol.h"
 
@@ -19,6 +20,7 @@ class QTimer;
 #ifdef HAVE_WEBSOCKETS
 class QNetworkAccessManager;
 class QNetworkReply;
+class QNetworkRequest;
 class QUrl;
 class QWebSocket;
 #endif
@@ -62,6 +64,12 @@ class KiwiSdrClient : public QObject {
     Q_OBJECT
 
 public:
+    // Fixed for the lifetime of the client: closing a paired W/F transport
+    // independently can cause the server to close its surviving SND partner.
+    enum class Streams { SoundAndWaterfall, SoundOnly };
+    // A native slice must own its receiver and retain the configured endpoint.
+    enum class Admission { AllowMonitor, IndependentReceiver };
+
     enum class State {
         Disconnected,
         Connecting,
@@ -75,6 +83,11 @@ public:
     Q_ENUM(State)
 
     explicit KiwiSdrClient(QObject* parent = nullptr);
+    explicit KiwiSdrClient(Streams streams, QObject* parent = nullptr);
+    KiwiSdrClient(Streams streams, Admission admission, QObject* parent = nullptr);
+    enum class SoundFormat { DemodulatedAudio, FilteredIq };
+    KiwiSdrClient(Streams streams, Admission admission, SoundFormat format,
+                  QObject* parent = nullptr);
     ~KiwiSdrClient() override;
 
     State state() const { return m_state; }
@@ -144,6 +157,7 @@ signals:
                              const QString& mode, int filterLowHz,
                              int filterHighHz, const QString& panId);
     void decodedAudioReady(const QByteArray& pcm24kStereoFloat);
+    void filteredIqReady(const AetherSDR::KiwiIqBlock& block);
     void pcmFrameReady(const AetherSDR::PcmFrame& frame);
     void waterfallRowReady(const QString& panId, const QVector<float>& binsDbm,
                            double lowFreqMhz, double highFreqMhz,
@@ -163,6 +177,8 @@ protected:
 #ifdef HAVE_WEBSOCKETS
     // Keep connection-state tests off the HTTP worker as well as WebSockets.
     virtual void startStatusPreflight(const QUrl& url);
+    virtual void openSoundTransport(const QNetworkRequest& request);
+    virtual void openWaterfallTransport(const QNetworkRequest& request);
 #endif
 
 private:
@@ -170,6 +186,7 @@ private:
     void publishDecodedAudio(const QByteArray& pcm);
     friend class KiwiSdrWaterfallSetupTest;
     friend class KiwiSdrWaterfallZoomCapTest;
+    friend class KiwiSdrSessionTest;
     enum class StreamKind {
         Sound,
         Waterfall,
@@ -293,6 +310,13 @@ private:
     bool retryWithSecureWebSocket(bool transportEstablished);
 #endif
 
+    const Streams m_streams;
+    const Admission m_admission;
+    const SoundFormat m_soundFormat;
+    bool m_iqSequenceValid{false};
+    quint32 m_iqSequence{0};
+    double m_iqSampleRateHz{0};
+    quint64 m_transportGeneration{0};
     State m_state{State::Disconnected};
     QString m_stateDetail;
     QString m_endpoint;

@@ -5,10 +5,12 @@
 #include "LogManager.h"
 #include "Resampler.h"
 #include "WaterfallRate.h"
+#include "core/backends/kiwi/KiwiSessionId.h"
 
 #include <QCoreApplication>
 #include <QDateTime>
 #include <QList>
+#include <QRandomGenerator>
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
@@ -55,7 +57,6 @@ constexpr int kWaterfallAutoMinRows = kWaterfallAutoHistoryRows;
 constexpr float kWaterfallAutoReuseToleranceDb = 5.0f;
 constexpr quint64 kMaxSequenceGapPaddingFrames = 8;
 constexpr int kWaterfallGuiMinIntervalMs = 33;
-constexpr quint64 kWebSocketSessionIdBase = 1ULL << 62;
 constexpr const char* kSoundCompressionEnv = "AETHER_KIWI_SND_COMP";
 constexpr const char* kWaterfallCompressionEnv = "AETHER_KIWI_WF_COMP";
 
@@ -368,8 +369,28 @@ KiwiSdrReceiverTelemetry::KiwiSdrReceiverTelemetry()
 }
 
 KiwiSdrClient::KiwiSdrClient(QObject* parent)
-    : QObject(parent)
+    : KiwiSdrClient(Streams::SoundAndWaterfall, parent)
 {
+}
+
+KiwiSdrClient::KiwiSdrClient(Streams streams, QObject* parent)
+    : KiwiSdrClient(streams, Admission::AllowMonitor, parent)
+{
+}
+
+KiwiSdrClient::KiwiSdrClient(Streams streams, Admission admission, QObject* parent)
+    : KiwiSdrClient(streams, admission, SoundFormat::DemodulatedAudio, parent)
+{
+}
+
+KiwiSdrClient::KiwiSdrClient(Streams streams, Admission admission, SoundFormat format,
+                           QObject* parent)
+    : QObject(parent), m_streams(streams), m_admission(admission), m_soundFormat(format)
+{
+    m_waterfallAvailable = m_streams == Streams::SoundAndWaterfall;
+    if (!m_waterfallAvailable) {
+        m_waterfallAvailabilityDetail = tr("This receiver session carries audio only.");
+    }
     m_keepaliveTimer = new QTimer(this);
     m_keepaliveTimer->setInterval(kKeepaliveIntervalMs);
     connect(m_keepaliveTimer, &QTimer::timeout,
@@ -465,6 +486,8 @@ void KiwiSdrClient::connectToEndpoint(const QString& endpoint,
     m_loggedWaterfallFrameShape = false;
     m_soundSampleRateHz = 12000.0;
     m_soundAudioRateText.clear();
+    m_iqSequenceValid = false;
+    m_iqSampleRateHz = 0;
     m_soundResamplerRateHz = 0.0;
     m_soundResampler.reset();
     KiwiSdrProtocol::resetSoundAdpcmState(&m_soundAdpcmState);
@@ -520,8 +543,9 @@ void KiwiSdrClient::connectToEndpoint(const QString& endpoint,
     m_waterfallRequestPanId.clear();
     m_waterfallRequestLowMhz = 0.0;
     m_waterfallRequestHighMhz = 0.0;
-    m_waterfallAvailable = true;
-    m_waterfallAvailabilityDetail.clear();
+    m_waterfallAvailable = m_streams == Streams::SoundAndWaterfall;
+    m_waterfallAvailabilityDetail = m_waterfallAvailable
+        ? QString() : tr("This receiver session carries audio only.");
     m_waterfallRxChannel = -1;
     m_waterfallChannelCount = -1;
     m_waterfallSetupResent = false;
@@ -600,6 +624,11 @@ void KiwiSdrClient::handleStatusPreflightFinished(QNetworkReply* reply)
     }
 
     if (httpStatus >= 300 && httpStatus < 400) {
+        if (m_admission == Admission::IndependentReceiver) {
+            setState(State::Error, tr("The configured receiver redirected its status request. Use its direct endpoint."));
+            cleanupSockets();
+            return;
+        }
         if (redirectUrl.isEmpty()) {
             setState(
                 State::Error,
@@ -800,14 +829,23 @@ void KiwiSdrClient::openWebSockets()
     // no_wf/<ts>/<stream> and bare <ts>/<stream> — the /ws prefix fails all
     // three and the server silently drops every frame, so use the bare Kiwi
     // path there (same shape the Web-888 browser client uses).
+    const QString streamPath = m_streams == Streams::SoundOnly
+        ? QStringLiteral("no_wf") : QStringLiteral("kiwi");
     const QString pathPrefix = m_receiverFamily
                 == KiwiSdrProtocol::KiwiSdrReceiverFamily::Web888
-        ? QStringLiteral("kiwi")
-        : QStringLiteral("ws/kiwi");
-    const quint64 sessionId =
-        kWebSocketSessionIdBase
-        + static_cast<quint64>(QDateTime::currentMSecsSinceEpoch());
-    const QString sessionIdText = QString::number(sessionId);
+        ? streamPath
+        : QStringLiteral("ws/") + streamPath;
+    // Shared across clients, reconnects and both receiver families. Random
+    // seeding also reduces collisions with other processes; uniqueness across
+    // processes is probabilistic, not a server reservation guarantee.
+    static kiwi::SessionIdAllocator sessionIds(QRandomGenerator::system()->generate64());
+    const auto sessionId = sessionIds.next();
+    if (!sessionId) {
+        setState(State::Error, tr("Receiver session IDs exhausted. Restart AetherSDR."));
+        cleanupSockets();
+        return;
+    }
+    const QString sessionIdText = QString::number(*sessionId);
     const QString secureAwareBase = QStringLiteral("%1://%2:%3/%4/%5")
         .arg(scheme)
         .arg(m_host)
@@ -815,12 +853,28 @@ void KiwiSdrClient::openWebSockets()
         .arg(pathPrefix)
         .arg(sessionIdText);
     const QString soundUrl = secureAwareBase + QStringLiteral("/SND");
-    const QString waterfallUrl = secureAwareBase + QStringLiteral("/W/F");
+    const QString waterfallUrl = m_streams == Streams::SoundAndWaterfall
+        ? secureAwareBase + QStringLiteral("/W/F") : QString();
     const QString origin = webSocketOrigin(scheme, m_host, socketPort);
     resetProtocolTrace();
     traceConnectionInfo(scheme, socketPort, sessionIdText, origin,
                         soundUrl, waterfallUrl);
 
+    const quint64 generation = m_transportGeneration;
+    openSoundTransport(kiwiWebSocketRequest(soundUrl, origin));
+    if (generation != m_transportGeneration) {
+        return;
+    }
+    if (m_streams == Streams::SoundAndWaterfall) {
+        openWaterfallTransport(kiwiWebSocketRequest(waterfallUrl, origin));
+    }
+    if (generation == m_transportGeneration) {
+        updateWaterfallAvailability();
+    }
+}
+
+void KiwiSdrClient::openSoundTransport(const QNetworkRequest& request)
+{
     m_soundSocket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     connect(m_soundSocket, &QWebSocket::connected, this, [this]() {
         m_soundSocketConnected = true;
@@ -893,9 +947,12 @@ void KiwiSdrClient::openWebSockets()
     qCInfo(lcKiwiSdr).noquote()
         << "KiwiSDR SND URL"
         << QStringLiteral("endpoint=%1").arg(logEndpoint())
-        << soundUrl;
-    m_soundSocket->open(kiwiWebSocketRequest(soundUrl, origin));
+        << request.url();
+    m_soundSocket->open(request);
+}
 
+void KiwiSdrClient::openWaterfallTransport(const QNetworkRequest& request)
+{
     m_waterfallSocket = new QWebSocket(QString(), QWebSocketProtocol::VersionLatest, this);
     connect(m_waterfallSocket, &QWebSocket::connected, this, [this]() {
         m_waterfallSocketConnected = true;
@@ -955,8 +1012,8 @@ void KiwiSdrClient::openWebSockets()
     qCInfo(lcKiwiSdr).noquote()
         << "KiwiSDR W/F URL"
         << QStringLiteral("endpoint=%1").arg(logEndpoint())
-        << waterfallUrl;
-    m_waterfallSocket->open(kiwiWebSocketRequest(waterfallUrl, origin));
+        << request.url();
+    m_waterfallSocket->open(request);
 }
 #endif
 
@@ -1202,6 +1259,8 @@ bool KiwiSdrClient::diagnosticSoundCompressionRequested()
 
 void KiwiSdrClient::cleanupSockets()
 {
+    // Fence delayed retries and re-entrant startup before retiring transports.
+    ++m_transportGeneration;
     m_pcmProducer.invalidate();
     if (m_keepaliveTimer) {
         m_keepaliveTimer->stop();
@@ -1232,6 +1291,8 @@ void KiwiSdrClient::cleanupSockets()
     KiwiSdrProtocol::resetSoundAdpcmState(&m_soundAdpcmState);
     m_lastSoundFrameLayout = KiwiSdrProtocol::FrameLayout::Unknown;
     m_soundAudioRateText.clear();
+    m_iqSequenceValid = false;
+    m_iqSampleRateHz = 0;
     m_haveSoundAudioRate = false;
     m_haveSoundSampleRate = false;
     m_soundDiagWindowStartUtcMs = 0;
@@ -1260,8 +1321,9 @@ void KiwiSdrClient::cleanupSockets()
     if (m_waterfallRowFlushTimer) {
         m_waterfallRowFlushTimer->stop();
     }
-    m_waterfallAvailable = true;
-    m_waterfallAvailabilityDetail.clear();
+    m_waterfallAvailable = m_streams == Streams::SoundAndWaterfall;
+    m_waterfallAvailabilityDetail = m_waterfallAvailable
+        ? QString() : tr("This receiver session carries audio only.");
     m_waterfallRxChannel = -1;
     m_waterfallChannelCount = -1;
     m_waterfallCalibrationDb = 0;
@@ -1277,7 +1339,7 @@ void KiwiSdrClient::cleanupSockets()
     m_waterfallAutoScalePending = true;
     m_lastEmittedWaterfallRangeValid = false;
     m_lastEmittedWaterfallAutoRange = false;
-    emit waterfallAvailabilityChanged(true, QString());
+    emit waterfallAvailabilityChanged(m_waterfallAvailable, m_waterfallAvailabilityDetail);
 
 #ifdef HAVE_WEBSOCKETS
     if (m_statusReply) {
@@ -1308,7 +1370,7 @@ void KiwiSdrClient::sendSoundSetupCommands()
     sendSoundCommand(KiwiSdrProtocol::formatAuthCommand(m_password));
     sendSoundIdentityToServer();
     sendSoundCommand(KiwiSdrProtocol::formatSoundCompressionCommand(
-        diagnosticSoundCompressionRequested()));
+        m_soundFormat == SoundFormat::DemodulatedAudio && diagnosticSoundCompressionRequested()));
 }
 
 void KiwiSdrClient::sendSoundAudioRateAck()
@@ -1793,6 +1855,7 @@ QString KiwiSdrClient::identityDiagnosticText() const
 
 QString KiwiSdrClient::kiwiMode() const
 {
+    if (m_soundFormat == SoundFormat::FilteredIq) return QStringLiteral("iq");
     const QString mode = m_trackedMode.trimmed().toUpper();
     if (mode == QStringLiteral("LSB") || mode == QStringLiteral("DIGL")) {
         return QStringLiteral("lsb");
@@ -1812,6 +1875,8 @@ QString KiwiSdrClient::kiwiMode() const
 
 int KiwiSdrClient::kiwiLowCutHz() const
 {
+    if (m_soundFormat == SoundFormat::FilteredIq)
+        return -static_cast<int>((m_iqSampleRateHz > 0 ? m_iqSampleRateHz : m_soundSampleRateHz) / 2) + 500;
     if (m_trackedFilterLowHz < m_trackedFilterHighHz) {
         return m_trackedFilterLowHz;
     }
@@ -1837,6 +1902,8 @@ int KiwiSdrClient::kiwiLowCutHz() const
 
 int KiwiSdrClient::kiwiHighCutHz() const
 {
+    if (m_soundFormat == SoundFormat::FilteredIq)
+        return static_cast<int>((m_iqSampleRateHz > 0 ? m_iqSampleRateHz : m_soundSampleRateHz) / 2) - 500;
     if (m_trackedFilterLowHz < m_trackedFilterHighHz) {
         return m_trackedFilterHighHz;
     }
@@ -1980,6 +2047,30 @@ void KiwiSdrClient::publishDecodedAudio(const QByteArray& pcm)
 
 void KiwiSdrClient::handleSoundFrame(const QByteArray& frame)
 {
+    if (m_soundFormat == SoundFormat::FilteredIq) {
+        auto block = decodeKiwiIq(frame, m_iqSampleRateHz, m_trackedFrequencyMhz * 1e6);
+        if (block.samples.isEmpty()) {
+            m_iqSequenceValid = false;
+            return;
+        }
+        block.generation = m_transportGeneration;
+        block.discontinuity = !m_iqSequenceValid
+            || block.sequence != quint32(m_iqSequence + 1)
+            || (block.flags & 0x25); // filter/frequency change or restart
+        m_iqSequence = block.sequence;
+        m_iqSequenceValid = true;
+        m_soundFrameSeen = true;
+        m_lastSoundFrameUtcMs = QDateTime::currentMSecsSinceEpoch();
+        auto& capability = m_telemetry.protocol.sound;
+        capability.observed = true;
+        capability.uncompressedObserved = true;
+        capability.lastObservedLayout = KiwiSdrProtocol::FrameLayout::SndIq16;
+        capability.observedLayouts = {KiwiSdrProtocol::FrameLayout::SndIq16};
+        const auto generation = m_transportGeneration;
+        markSoundAudioReady();
+        if (generation == m_transportGeneration) emit filteredIqReady(block);
+        return; // never route complex samples into the speaker/PCM decoder
+    }
     m_soundFrameSeen = true;
     const qint64 nowUtcMs = QDateTime::currentMSecsSinceEpoch();
     const qint64 deltaMs = m_lastSoundFrameUtcMs > 0
@@ -2686,6 +2777,11 @@ void KiwiSdrClient::handleTextMessage(StreamKind stream, const QString& text)
                 sendSoundSampleRateCommands();
             }
         } else if (key == QStringLiteral("sample_rate")) {
+            if (m_soundFormat == SoundFormat::FilteredIq) {
+                const double rate = std::isfinite(value) && value >= 8000 && value <= 48000 ? value : 0;
+                if (rate != m_iqSampleRateHz) m_iqSequenceValid = false;
+                m_iqSampleRateHz = rate;
+            }
             m_haveSoundSampleRate = true;
             sendSoundSampleRateCommands();
         } else if (key == QStringLiteral("users")) {
@@ -2800,6 +2896,14 @@ bool KiwiSdrClient::updateCampStatusFromMetadata(
     const KiwiSdrProtocol::MsgToken& token)
 {
     const QString key = token.key.trimmed();
+    if (m_admission == Admission::IndependentReceiver
+        && (key == QStringLiteral("monitor") || key == QStringLiteral("qpos")
+            || key == QStringLiteral("camp") || key == QStringLiteral("audio_camp")
+            || key == QStringLiteral("camp_disconnect"))) {
+        setState(State::Busy, tr("An independent receiver is unavailable. Monitoring another receiver cannot provide a native slice."));
+        cleanupSockets();
+        return true;
+    }
     if (key.isEmpty()) {
         return false;
     }
@@ -2960,7 +3064,10 @@ void KiwiSdrClient::updateWaterfallAvailability()
 {
     bool available = true;
     QString detail;
-    if (m_waterfallRxChannel >= 0 && m_waterfallChannelCount > 0
+    if (m_streams == Streams::SoundOnly) {
+        available = false;
+        detail = tr("This receiver session carries audio only.");
+    } else if (m_waterfallRxChannel >= 0 && m_waterfallChannelCount > 0
         && m_waterfallRxChannel >= m_waterfallChannelCount) {
         available = false;
         detail = tr("No KiwiSDR waterfall channel is available. Audio is connected on receiver slot %1, but this server only provides %2 waterfall channels.")
@@ -2993,13 +3100,23 @@ void KiwiSdrClient::resetCapabilityState()
     m_telemetry.protocol = KiwiSdrProtocol::defaultProtocolState();
     m_telemetry.protocol.authMode =
         KiwiSdrProtocol::AuthMode::PublicPasswordless;
-    if (diagnosticSoundCompressionRequested()) {
+    if (m_soundFormat == SoundFormat::FilteredIq) {
+        m_telemetry.protocol.sound.mode = KiwiSdrProtocol::StreamMode::Iq;
+        m_telemetry.protocol.sound.supportedLayouts = {KiwiSdrProtocol::FrameLayout::SndIq16};
+        m_telemetry.protocol.unsupportedFeatureReasons = {
+            QStringLiteral("Filtered IQ only; raw ADC, coherent timing, GNSS and extensions are not supported")};
+    } else if (diagnosticSoundCompressionRequested()) {
         m_telemetry.protocol.sound.compressedRequested = true;
         m_telemetry.protocol.sound.uncompressedRequested = false;
     }
     if (diagnosticWaterfallCompressionRequested()) {
         m_telemetry.protocol.waterfall.compressedRequested = true;
         m_telemetry.protocol.waterfall.uncompressedRequested = false;
+    }
+    if (m_streams == Streams::SoundOnly) {
+        m_telemetry.protocol.waterfall.requested = false;
+        m_telemetry.protocol.waterfall.uncompressedRequested = false;
+        m_telemetry.protocol.waterfall.compressedRequested = false;
     }
 }
 
@@ -3643,7 +3760,7 @@ void KiwiSdrClient::sendKeepalive()
 #ifdef HAVE_WEBSOCKETS
 bool KiwiSdrClient::retryWithSecureWebSocket(bool transportEstablished)
 {
-    if (transportEstablished
+    if (m_admission == Admission::IndependentReceiver || transportEstablished
         || m_soundSocketConnected || m_waterfallSocketConnected
         || m_secureWebSocket || m_secureWebSocketRetryAttempted
         || m_host.isEmpty()) {
@@ -3696,12 +3813,13 @@ bool KiwiSdrClient::retryWithSecureWebSocket(bool transportEstablished)
     m_userDisconnecting = true;
     cleanupSockets();
     m_userDisconnecting = false;
+    const quint64 generation = m_transportGeneration;
     setState(State::Connecting,
              tr("Retrying %1 over secure KiwiSDR WebSocket.")
                  .arg(m_endpoint));
 
-    QTimer::singleShot(0, this, [this]() {
-        if (!m_userDisconnecting) {
+    QTimer::singleShot(0, this, [this, generation]() {
+        if (!m_userDisconnecting && generation == m_transportGeneration) {
             openWebSockets();
         }
     });

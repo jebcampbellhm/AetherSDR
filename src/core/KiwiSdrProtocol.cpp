@@ -795,6 +795,7 @@ QString streamModeName(StreamMode mode)
 
 QString frameLayoutName(FrameLayout layout)
 {
+    if (layout == FrameLayout::SndIq16) return QStringLiteral("snd-iq16");
     switch (layout) {
     case FrameLayout::Unknown:
         return QStringLiteral("unknown");
