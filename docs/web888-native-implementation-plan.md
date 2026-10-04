@@ -8,7 +8,33 @@ stash and a separate pre-split file snapshot remain available locally.
 
 Prepared 2026-09-25; local development started 2026-09-29. The original
 inspection was planning-only. The continuation below records subsequent work;
-no commits, PRs, firmware changes or live-radio operations have been performed.
+signed local commits now exist; no PRs, firmware changes or live-radio operations have been performed.
+
+## Upstream integration — 2026-10-04
+
+Merged 59 upstream commits through `8df6db2f` (v26.10.1) into `web888-native`.
+Both additions were retained in the RadioModel test-access declarations and
+architecture classification table. The merge is signed locally as `b8cc5e7d`.
+
+Upstream `f4e463c2` moves desktop audio commands to `requestSliceAudio`.
+Web-888 now implements that adapter for its existing speaker gain and mute;
+invalid values, other slice IDs, disconnected requests, external suppression
+and unsupported balance are explicitly refused. Clean decoder PCM remains
+independent of speaker gain/mute. The new behavioral regression failed on the
+unfixed merge at the gain-dispatch assertion (26 other selected tests passed).
+Evidence: `build-web888-evidence/upstream-audio-before.log`.
+
+After the fix, the Qt 6.12/MSVC desktop build succeeded and all 27 selected
+offline tests passed in 67.52 seconds. The synthetic worker benchmark represented
+five seconds across 12 captures/25 slices in 5614 ms wall time (1717.752 ms DSP),
+with zero dropped blocks; this is not real-time hardware qualification.
+Logs and the repeatable command script are under
+`build-web888-evidence/upstream-20261004-*`. Engine boundary (102 existing
+findings, zero blockers), capability records (70 booleans), command plane (369
+tracked uses), manifest, seam table, test registration, frozen CI gate, Qt pin,
+build-options documentation and whitespace checks passed.
+
+No receiver was contacted, and hardware qualification remains outstanding.
 
 ## Local implementation progress — 2026-09-29
 
@@ -18,8 +44,8 @@ no commits, PRs, firmware changes or live-radio operations have been performed.
 is installed under `C:\1_HAM\Qt\aether-pinned`, with the older kit retained.
 The merged desktop rebuilt in `build-web888-qt612` and all 24 selected offline
 regressions passed in 64.76 seconds. The local launcher now uses this build and
-its Qt runtime. Optional RADE/DSTAR/GPU-spectrum remain disabled as in the earlier
-local configuration; no credential-store dependency was added by this upgrade.
+its Qt runtime. Optional RADE/DSTAR remain disabled. GPU spectrum rendering is enabled
+(`AETHER_GPU_SPECTRUM=ON`; the old `ENABLE_GPU_SPECTRUM` argument was unused); no credential-store dependency was added by this upgrade.
 
 The new single-job decoder process adapter subsequently built and passed four
 focused lifecycle/routing/WAV tests and opt-in real WSJT-X 3.0.2 decoding for all

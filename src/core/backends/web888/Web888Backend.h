@@ -22,6 +22,7 @@ public:
     void setSliceMode(int sliceId, const QString& mode) override;
     void setSliceFilter(int sliceId, int lowHz, int highHz) override;
     void setSliceAgc(int sliceId, const QString& mode, int thresholdDb) override;
+    ReceiveDispatch requestSliceAudio(int sliceId, const SliceAudioRequest& request) override;
     void setSliceAudioMute(int sliceId, bool mute) override;
     void setSliceAudioGain(int sliceId, int gainPercent) override;
     void setPanCenter(const QString& panId, double hz, PanCenterIntent intent) override;

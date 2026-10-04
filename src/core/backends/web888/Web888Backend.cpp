@@ -325,6 +325,25 @@ void Web888Backend::setSliceAgc(int id, const QString& mode, int thresholdDb)
     }
 }
 
+ReceiveDispatch Web888Backend::requestSliceAudio(int id, const SliceAudioRequest& request)
+{
+    if (id != 0 || !m_connected || !request.valid()
+        || request.origin != SliceAudioRequest::Origin::Operator) {
+        return ReceiveDispatch::Unsupported;
+    }
+    switch (request.field) {
+    case SliceAudioRequest::Field::Gain:
+        setSliceAudioGain(id, request.value);
+        break;
+    case SliceAudioRequest::Field::Mute:
+        setSliceAudioMute(id, request.value != 0);
+        break;
+    case SliceAudioRequest::Field::Pan:
+        return ReceiveDispatch::Unsupported;
+    }
+    return ReceiveDispatch::Dispatched;
+}
+
 void Web888Backend::setSliceAudioMute(int id, bool mute)
 {
     if (id == 0 && m_connected) {

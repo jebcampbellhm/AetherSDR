@@ -122,12 +122,23 @@ int main(int argc, char** argv)
     backend.setSliceAgc(0, QStringLiteral("fast"), 100);
     CHECK(backend.client->receiverControls().agcDecayMs == KiwiSdrProtocol::kAgcFastDecayMs);
     CHECK(backend.client->receiverControls().agcThresholdDb == -100);
-    backend.setSliceAudioGain(0, 50);
+    CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Gain, 50})
+          == ReceiveDispatch::Dispatched);
+    CHECK(backend.requestSliceAudio(1, {SliceAudioRequest::Field::Gain, 100})
+          == ReceiveDispatch::Unsupported);
+    CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Gain, 101})
+          == ReceiveDispatch::Unsupported);
+    CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Pan, 50})
+          == ReceiveDispatch::Unsupported);
+    CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Mute, 1,
+          SliceAudioRequest::Origin::ExternalReceiveSuppression})
+          == ReceiveDispatch::Unsupported);
     emit backend.client->decodedAudioReady(pcm);
     CHECK(sliceFrame.stream().purpose == PcmPurpose::Slice && sliceFrame.stream().sliceId == 0);
     CHECK(speakerFrame.stream().purpose == PcmPurpose::Speaker);
     CHECK(sliceFrame.legacyStereo24() == pcm && speakerFrame.samples()[0] == 0.125f);
-    backend.setSliceAudioMute(0, true);
+    CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Mute, 1})
+          == ReceiveDispatch::Dispatched);
     emit backend.client->decodedAudioReady(pcm);
     CHECK(sliceFrame.legacyStereo24() == pcm && speakerFrame.samples()[0] == 0.0f);
     CHECK(sliceCount == 2 && speakerCount == 2);
@@ -164,6 +175,8 @@ int main(int argc, char** argv)
     const auto oldSpeaker = speakerFrame;
     backend.disconnectRadio();
     CHECK(!oldSlice.current() && !oldSpeaker.current());
+    CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Gain, 50})
+          == ReceiveDispatch::Unsupported);
     CHECK(disconnects == 1 && !backend.isConnected());
     probe.resetDisconnectGate();
     backend.connectRadio(request);
