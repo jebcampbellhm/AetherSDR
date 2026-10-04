@@ -296,6 +296,8 @@ void ep2WriteTxIq(std::array<std::uint8_t, kUsbPacketSize>& pkt,
                 const auto clamp = [](float v) -> std::int16_t {
                     // Symmetric clamp: 32767, not 32768. Letting a full-scale
                     // sample wrap to the negative rail is a click at best.
+                    // A NaN fails both comparisons, so it is zeroed first.
+                    if (!std::isfinite(v)) return 0;
                     if (v >  1.0f) v =  1.0f;
                     if (v < -1.0f) v = -1.0f;
                     return static_cast<std::int16_t>(v * 32767.0f);
@@ -709,6 +711,29 @@ std::optional<double> Ep4Stats::crestDb() const noexcept
     if (peak <= kEp4FloorDbfs || rms <= kEp4FloorDbfs)
         return std::nullopt;
     return peak - rms;
+}
+
+double Ep4Stats::meanCodes() const noexcept
+{
+    if (samples <= 0)
+        return 0.0;
+    // `sum` and `samples` both add in merge(), so for a block this is the
+    // mean of the 2048-sample concatenation, not an average of four packets.
+    return sum / static_cast<double>(samples);
+}
+
+double Ep4Stats::dcDbfs() const noexcept
+{
+    if (samples <= 0)
+        return kEp4FloorDbfs;
+    const double mean = std::abs(meanCodes());
+    // Exactly zero is the one "no level" case, and on the production path it
+    // is exact: `sum` is an integer-valued double. A non-zero mean under half
+    // a code is NOT clamped to the floor — it computes below it, as
+    // rmsDbfs() does for a sub-half-code deviation. See the header.
+    if (mean <= 0.0)
+        return kEp4FloorDbfs;
+    return 20.0 * std::log10(mean / static_cast<double>(kEp4FullScale));
 }
 
 void Ep4Stats::merge(const Ep4Stats& other) noexcept
