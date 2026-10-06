@@ -10,6 +10,24 @@ Prepared 2026-09-25; local development started 2026-09-29. The original
 inspection was planning-only. The continuation below records subsequent work;
 signed local commits now exist; no PRs, firmware changes or live-radio operations have been performed.
 
+## Upstream integration — 2026-10-06
+
+Merged 12 upstream commits through `5f09371e` into `web888-native`, signed
+merge `a5eb00a0`. The merge was conflict-free. Reviewed the unified title bar,
+connection-panel additions, shared test compilation changes and RadioModel
+callback lifetime fix against the local Web-888 changes; no additional source
+fix was required.
+
+The Qt 6.12/MSVC desktop build succeeded. All 27 selected offline receive,
+transport, IQ, decoder and connection tests passed in 72.46 seconds; the new
+`unified_title_bar_test` also built and passed (0.35 seconds for its CTest run).
+Engine boundary, touchpoint manifest, capability records, command-plane,
+generated seam, test registration, frozen CI gate, Qt pin and whitespace
+checks passed. Repeatable commands and output are in
+`build-web888-evidence/upstream-20261006-*`. No hardware, public receivers,
+transmissions or upstream publishing were involved. Linux/macOS and sanitizer
+runs remain unverified locally.
+
 ## Upstream integration — 2026-10-04
 
 Merged 59 upstream commits through `8df6db2f` (v26.10.1) into `web888-native`.
