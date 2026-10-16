@@ -541,4 +541,3 @@ qualification is claimed. Next timing work needs a qualified per-buffer clock or
 a separately measured host-clock mapping with explicit uncertainty; repeated SND
 headers cannot arm decoder routes. GPS PPS frequency correction is distinct from
 sample-time timestamping and was left untouched.
-

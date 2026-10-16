@@ -9,6 +9,7 @@ void Web888DecoderRouter::invalidate(Route& route)
     route.waiting.reset();
     route.buffer.reset();
     route.captureId.reset();
+    route.clock.reset();
 }
 
 int Web888DecoderRouter::disarmCapture(quint64 captureId)
@@ -72,11 +73,43 @@ bool Web888DecoderRouter::arm(const Web888DecoderAudio& first, qint64 tick)
     return true;
 }
 
+bool Web888DecoderRouter::arm(const Web888DecoderAudio& first,
+                              const Web888DecoderClockAnchor& anchor)
+{
+    const auto it = m_routes.find(first.sliceId);
+    if (it == m_routes.end()) return false;
+    invalidate(it->second);
+    // Initial conservative engineering gate: 100 ms worst-case uncertainty.
+    // This is not a claim of decoder tolerance or live clock qualification.
+    if ((anchor.source != Web888DecoderClockAnchor::Source::VerifiedFixture
+         && anchor.source != Web888DecoderClockAnchor::Source::QualifiedSampleClock)
+        || !anchor.lifetime || !anchor.lifetime->load(std::memory_order_acquire)
+        || anchor.captureId != first.captureId || anchor.generation != first.generation
+        || anchor.firstSampleIndex != first.firstSampleIndex
+        || anchor.filterDelaySeconds != first.filterDelaySeconds
+        || anchor.maximumErrorTicks < 0 || anchor.maximumErrorTicks > 1200
+        || anchor.validUntilSampleIndex <= first.firstSampleIndex) return false;
+    const quint64 available = anchor.validUntilSampleIndex - first.firstSampleIndex;
+    const qint64 period = it->second.samples;
+    if (anchor.firstSampleUtcTicks < 0) return false;
+    const qint64 remainder = anchor.firstSampleUtcTicks % period;
+    const quint64 needed = quint64(period + (remainder ? period - remainder : 0));
+    if (available < needed || !arm(first, anchor.firstSampleUtcTicks)) return false;
+    it->second.clock = anchor;
+    return true;
+}
+
 bool Web888DecoderRouter::push(const Web888DecoderAudio& audio)
 {
     const auto it = m_routes.find(audio.sliceId);
     if (it == m_routes.end()) return false;
     auto& route = it->second;
+    if (route.clock && (!route.clock->lifetime->load(std::memory_order_acquire)
+        || audio.firstSampleIndex >= route.clock->validUntilSampleIndex
+        || quint64(audio.mono.size()) > route.clock->validUntilSampleIndex - audio.firstSampleIndex)) {
+        invalidate(route);
+        return false;
+    }
     // Release the old job before assembly can finish a second full period.
     // Otherwise a boundary-crossing block can transiently retain three periods.
     if (route.waiting && route.buffer.bufferedSamples() + audio.mono.size() >= route.samples) {
@@ -87,7 +120,8 @@ bool Web888DecoderRouter::push(const Web888DecoderAudio& audio)
     if (!route.buffer.armed()) { invalidate(route); return false; }
     if (completed) {
         if (route.waiting) ++m_dropped;
-        route.waiting = Web888DecoderJob{std::move(*completed), route.preset.mode, route.lifetime};
+        route.waiting = Web888DecoderJob{std::move(*completed), route.preset.mode, route.lifetime,
+            route.clock ? route.clock->lifetime : nullptr};
     }
     return true;
 }
@@ -106,7 +140,8 @@ std::optional<Web888DecoderJob> Web888DecoderRouter::takeNext()
     for (size_t n = 0; n < m_routes.size(); ++n) {
         if (it == m_routes.end()) it = m_routes.begin();
         auto& route = it->second;
-        if (!route.buffer.armed()) invalidate(route);
+        if (!route.buffer.armed() || (route.clock
+            && !route.clock->lifetime->load(std::memory_order_acquire))) invalidate(route);
         if (route.waiting && route.waiting->current()) {
             m_lastTaken = it->first;
             auto job = std::move(route.waiting);

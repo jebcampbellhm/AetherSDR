@@ -1164,3 +1164,13 @@ on refused controls and the missing neutral ActiveSlice request handler. Added
 SliceModel-to-backend regressions; both targeted tests pass. Details and remaining
 rendering/RF limitations: [shared SSB validation](web888-shared-ssb-validation.md).
 Receiver remains at 24 kHz; test leases released (users=0).
+
+
+### Timed decoder clock contract — 2026-10-16
+
+After the signed shared-listening/monitoring checkpoint, added an explicit
+post-filter sample-to-UTC anchor contract to backend decoder admission. It binds
+stream identity, source provenance, uncertainty, finite sample coverage and clock
+revocation. Synthetic pipeline tests now exercise that contract for FT8/FT4/WSPR.
+Live decoding remains disabled pending independently qualified clock metadata;
+see [timing qualification](web888-timing-qualification.md).

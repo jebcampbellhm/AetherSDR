@@ -60,3 +60,44 @@ Qualify week rollover, timestamp masking and GPS loss/recovery explicitly.
 Choose a stated timing-quality policy with error bounds before allowing it to
 arm decoder routes. Synthetic/recorded verified anchors remain the only tested
 period-buffer inputs. Packet arrival time is not a substitute for sample time.
+
+
+## Explicit decoder clock gate — 2026-10-16
+
+The backend no longer accepts an unqualified integer UTC tick to arm a route.
+It requires a Web888DecoderClockAnchor identifying the exact capture, generation,
+first output sample index and filter delay. The UTC tick refers to that output
+sample AFTER all producer-side delay corrections; the router does not subtract
+the FIR delay again. Provenance is either an independently verified fixture or
+an independently qualified sample clock. Unqualified/unknown sources are refused.
+
+The anchor supplies an exclusive last-valid sample index, a worst-case error
+bound through that horizon (including drift), and a revocable clock lifetime.
+The initial conservative engineering limit is 1200 output ticks (100 ms), not
+an assertion of any mode's decoding tolerance. Admission requires enough valid
+samples to discard the initial partial period and assemble one complete period.
+Blocks extending beyond the horizon disarm the route. Clock revocation invalidates
+both pending and already-taken jobs. Existing gap, source lifetime, generation and
+filter-change checks remain in force. Other routes remain independent.
+
+This is a consumer contract, not a clock estimator or proof of provenance. Its
+producer remains responsible for the mapping and uncertainty evidence. The raw
+router tick overload remains a low-level fixture primitive, but the backend's
+production entry point requires the explicit contract. No GUI switch, firmware
+change or packet-arrival fallback was added. No live timed decoding was enabled.
+
+Next required increment: obtain a qualified per-buffer sample/UTC association
+from matching FPGA/driver/server metadata, or independently measure and bound a
+host-clock mapping including transport latency and clock error. Merely setting
+the source enum or observing GPS PPS lock is insufficient evidence. The firmware
+prototype and missing production RTL integration remain separate work.
+
+Validation: rebuilt the Windows desktop and affected tests. Seven regressions
+passed: backend, shared SSB, capture pool, decoder router, synthetic decoder
+pipeline, WAV serialization and decoder process (62.19 + 1.27 seconds). Rejection
+cases cover unqualified source, wrong stream/generation/index/delay, missing or
+revoked clock, invalid/excessive uncertainty, insufficient horizon and negative
+UTC. Tests cover partial-period horizon, expiry and already-taken job revocation.
+Strict boundary, capability, command-plane and registration checks passed with
+existing baselines. No receiver connection or settings change was made for this
+increment. This validates the gate, not a real clock source.

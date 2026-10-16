@@ -235,7 +235,14 @@ int main(int argc, char** argv)
         if (armNext) {
             armNext = false;
             // Fixture-defined time for the first post-filter sample; not wall time.
-            anchorAccepted = monitoring.armDigitalDecoder(out, 0);
+            Web888DecoderClockAnchor anchor;
+            anchor.source = Web888DecoderClockAnchor::Source::VerifiedFixture;
+            anchor.captureId = out.captureId; anchor.generation = out.generation;
+            anchor.firstSampleIndex = out.firstSampleIndex;
+            anchor.filterDelaySeconds = out.filterDelaySeconds;
+            anchor.validUntilSampleIndex = out.firstSampleIndex + 12000 * 240;
+            anchor.maximumErrorTicks = 0; anchor.lifetime = out.lifetime;
+            anchorAccepted = monitoring.armDigitalDecoder(out, anchor);
         }
     });
     CHECK(monitoring.applyDigitalProfile({a}, 24000, 3));

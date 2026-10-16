@@ -53,7 +53,15 @@ int main(int argc, char** argv)
             for (auto audio : outputs) {
                 audio.captureId = 1; audio.lifetime = lifetime;
                 if (!anchored.contains(audio.sliceId)) {
-                    failures += !router.arm(audio, epoch);
+                    Web888DecoderClockAnchor anchor;
+                    anchor.source = Web888DecoderClockAnchor::Source::VerifiedFixture;
+                    anchor.captureId = audio.captureId; anchor.generation = audio.generation;
+                    anchor.firstSampleIndex = audio.firstSampleIndex;
+                    anchor.firstSampleUtcTicks = epoch;
+                    anchor.filterDelaySeconds = audio.filterDelaySeconds;
+                    anchor.validUntilSampleIndex = audio.firstSampleIndex + 12000 * 240;
+                    anchor.maximumErrorTicks = 0; anchor.lifetime = lifetime;
+                    failures += !router.arm(audio, anchor);
                     anchored.insert(audio.sliceId);
                 }
                 routingFailures += !router.push(audio);

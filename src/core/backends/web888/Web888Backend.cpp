@@ -113,11 +113,11 @@ bool Web888Backend::configureDigitalDecoders(const QVector<Web888DigitalPreset>&
     return m_decoderRouter.configure(presets, budget, error);
 }
 
-bool Web888Backend::armDigitalDecoder(const Web888DecoderAudio& first, qint64 ticks)
+bool Web888Backend::armDigitalDecoder(const Web888DecoderAudio& first, const Web888DecoderClockAnchor& anchor)
 {
     if (!m_connected || m_stopping || !m_capturePool || !first.current()
         || !m_capturePool->activeIds().contains(first.captureId)) { return false; }
-    return m_decoderRouter.arm(first, ticks);
+    return m_decoderRouter.arm(first, anchor);
 }
 
 std::optional<Web888DecoderJob> Web888Backend::takeDigitalDecoderJob()

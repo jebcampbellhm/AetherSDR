@@ -154,6 +154,49 @@ int main()
     }
     CHECK(received.size() == 25 && retainedSamples == 15120000 && !stalledConsumer.queuedJobs());
     CHECK(stalledConsumer.disarmCapture(77) == 25);
+    // Qualified anchors bind the exact post-filter stream and have finite coverage.
+    CHECK(router.configure({routes[0]}, budget));
+    a.firstSampleIndex = 0; a.discontinuity = true;
+    a.lifetime = std::make_shared<std::atomic<bool>>(true);
+    auto clockLife = std::make_shared<std::atomic<bool>>(true);
+    Web888DecoderClockAnchor anchor;
+    anchor.source = Web888DecoderClockAnchor::Source::VerifiedFixture;
+    anchor.captureId = a.captureId; anchor.generation = a.generation;
+    anchor.filterDelaySeconds = a.filterDelaySeconds;
+    anchor.validUntilSampleIndex = 180000;
+    anchor.maximumErrorTicks = 1; anchor.lifetime = clockLife;
+    for (int invalid = 0; invalid < 10; ++invalid) {
+        auto bad = anchor;
+        switch (invalid) {
+        case 0: bad.source = Web888DecoderClockAnchor::Source::Unqualified; break;
+        case 1: ++bad.captureId; break;
+        case 2: ++bad.generation; break;
+        case 3: ++bad.firstSampleIndex; break;
+        case 4: bad.filterDelaySeconds = 0.25; break;
+        case 5: bad.maximumErrorTicks = -1; break;
+        case 6: bad.maximumErrorTicks = 1201; break;
+        case 7: bad.validUntilSampleIndex = 89999; break;
+        case 8: bad.lifetime.reset(); break;
+        case 9: bad.firstSampleUtcTicks = -1; break;
+        }
+        CHECK(!router.arm(a, bad) && !router.push(a));
+    }
+    CHECK(router.arm(a, anchor) && feed(router, a, 90000));
+    auto clockJob = router.takeNext(); CHECK(clockJob && clockJob->current());
+    clockLife->store(false); // revoke even a job already handed to the consumer
+    CHECK(!clockJob->current() && !router.push(a));
+    CHECK(!router.arm(a, anchor));
+    clockLife->store(true);
+    a.firstSampleIndex = 0; a.discontinuity = true;
+    CHECK(router.arm(a, anchor) && feed(router, a, 180000));
+    auto expires = router.takeNext(); CHECK(expires && expires->current());
+    CHECK(!feed(router, a, 6000) && !expires->current());
+    a.firstSampleIndex = 0;
+    auto partial = anchor; partial.firstSampleUtcTicks = 1;
+    partial.validUntilSampleIndex = 90000;
+    CHECK(!router.arm(a, partial)); // horizon must include discarded partial period
+    partial.validUntilSampleIndex = 180000;
+    CHECK(router.arm(a, partial));
     std::puts("Decoder routing budgets, fairness, replacement, gaps and revocation passed");
     return 0;
 }

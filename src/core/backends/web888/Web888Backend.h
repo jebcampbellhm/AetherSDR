@@ -38,7 +38,7 @@ public:
                                   quint64 sampleByteBudget, QString* error = nullptr);
     // Call from digitalAudioReady for its first block, using a qualified mapping
     // corrected for filter delay. Receipt time is not a sample UTC anchor.
-    bool armDigitalDecoder(const Web888DecoderAudio& first, qint64 firstSampleUtcTicks);
+    bool armDigitalDecoder(const Web888DecoderAudio& first, const Web888DecoderClockAnchor& anchor);
     std::optional<Web888DecoderJob> takeDigitalDecoderJob();
     int digitalCaptureCount() const;
     int pendingDigitalCaptureCount() const;

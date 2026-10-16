@@ -504,4 +504,3 @@ int main(int argc, char** argv)
     QTimer::singleShot(seconds * 1000, &app, finish);
     return app.exec();
 }
-
