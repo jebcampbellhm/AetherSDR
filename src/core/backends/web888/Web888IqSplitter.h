@@ -13,6 +13,7 @@ struct Web888DigitalSlice {
     double dialHz{}; // USB reference; RF = dial + audio frequency
     double lowHz{0};
     double highHz{3000};
+    bool lowerSideband{false}; // signed negative passband for interactive LSB
 };
 
 struct Web888DecoderAudio {

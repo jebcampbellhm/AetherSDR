@@ -415,6 +415,27 @@ KiwiSdrClient::KiwiSdrClient(Streams streams, Admission admission, SoundFormat f
             this, &KiwiSdrClient::flushPendingWaterfallRow);
 }
 
+void KiwiSdrClient::enableFilteredIq()
+{
+    if (m_soundFormat == SoundFormat::FilteredIq) { return; }
+    m_soundFormat = SoundFormat::FilteredIq;
+    m_iqSequenceValid = false;
+    resetCapabilityState();
+    updateProtocolStateFromMetadata();
+    sendSoundCommand(QStringLiteral("SET compression=0"));
+    sendTrackedSliceToServer();
+}
+
+void KiwiSdrClient::disableFilteredIq()
+{
+    if (m_soundFormat == SoundFormat::DemodulatedAudio) { return; }
+    m_soundFormat = SoundFormat::DemodulatedAudio;
+    m_iqSequenceValid = false;
+    resetCapabilityState();
+    updateProtocolStateFromMetadata();
+    sendTrackedSliceToServer();
+}
+
 KiwiSdrClient::~KiwiSdrClient()
 {
     m_userDisconnecting = true;
@@ -1408,8 +1429,11 @@ void KiwiSdrClient::sendSoundSampleRateCommands()
     const KiwiSdrReceiverControls c = normalizedControls(m_receiverControls);
     sendSoundCommand(KiwiSdrProtocol::formatSquelchCommand(
         c.squelchEnabled, c.squelchThresholdDb));
-    sendSoundCommand(QStringLiteral("SET genattn=0"));
-    sendSoundCommand(QStringLiteral("SET gen=0 mix=-1"));
+    // Web-888 does not implement the Kiwi signal-generator commands.
+    if (m_receiverFamily == KiwiSdrProtocol::KiwiSdrReceiverFamily::Kiwi) {
+        sendSoundCommand(QStringLiteral("SET genattn=0"));
+        sendSoundCommand(QStringLiteral("SET gen=0 mix=-1"));
+    }
     sendSoundCommand(KiwiSdrProtocol::formatAgcCommand(
         c.agcEnabled, c.agcHang, c.agcThresholdDb,
         c.agcGainDb, c.agcDecayMs));
@@ -2777,7 +2801,7 @@ void KiwiSdrClient::handleTextMessage(StreamKind stream, const QString& text)
                 sendSoundSampleRateCommands();
             }
         } else if (key == QStringLiteral("sample_rate")) {
-            if (m_soundFormat == SoundFormat::FilteredIq) {
+            {
                 const double rate = std::isfinite(value) && value >= 8000 && value <= 48000 ? value : 0;
                 if (rate != m_iqSampleRateHz) m_iqSequenceValid = false;
                 m_iqSampleRateHz = rate;

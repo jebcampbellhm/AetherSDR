@@ -1715,6 +1715,15 @@ bool ConnectionPanel::automationConnectLocalSerial(const QString& serial, QStrin
     return false;
 }
 
+QStringList ConnectionPanel::automationManualFamilies() const
+{
+    QStringList families;
+    for (int i = 0; i < m_manualRadioTypeCombo->count(); ++i) {
+        families.append(m_manualRadioTypeCombo->itemData(i).toString());
+    }
+    return families;
+}
+
 bool ConnectionPanel::automationConnectByIp(const QString& hostOrIp,
                                             const QString& family,
                                             QString* error)
@@ -2657,7 +2666,7 @@ void ConnectionPanel::updateManualFamilyHints()
                   "This build has no QtKeychain support, so the password is kept for this "
                   "session only.");
         m_manualHintLabel->setText(
-            web888 ? tr("Experimental receive-only connection: one receiver and waterfall. Enter the direct host or IP, optionally followed by :port (default 8073). Uses the system network route. The password is not saved; failures require a manual retry.")
+            web888 ? tr("Experimental receive-only connection: up to two independent receivers and waterfalls. Enter the direct host or IP, optionally followed by :port (default 8073). Uses the system network route. The password is not saved; failures require a manual retry.")
                 : icom
                 ? QStringLiteral(
                       "Enter the radio address and the network user name and password "
@@ -2885,8 +2894,8 @@ void ConnectionPanel::probeRadio(const QString& ip, bool restoreSavedFamily)
         info.address = QHostAddress(endpoint.host());
         info.port = quint16(endpoint.port(8073));
         info.isRouted = true;
-        info.maxSlices = 1;
-        info.maxPanadapters = 1;
+        info.maxSlices = 2;
+        info.maxPanadapters = 2;
         QVariantMap options;
         options.insert(QStringLiteral("web888.endpoint"), endpoint.toString());
         options.insert(QStringLiteral("web888.password"), m_manualWeb888PassEdit->text());

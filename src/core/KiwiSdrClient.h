@@ -86,6 +86,10 @@ public:
     explicit KiwiSdrClient(Streams streams, QObject* parent = nullptr);
     KiwiSdrClient(Streams streams, Admission admission, QObject* parent = nullptr);
     enum class SoundFormat { DemodulatedAudio, FilteredIq };
+    // Format transitions for shared Web-888 listening on the existing lease.
+    void enableFilteredIq();
+    void disableFilteredIq();
+    double filteredIqSampleRate() const { return m_iqSampleRateHz; }
     KiwiSdrClient(Streams streams, Admission admission, SoundFormat format,
                   QObject* parent = nullptr);
     ~KiwiSdrClient() override;
@@ -174,6 +178,7 @@ protected:
     // Transport seam for socket-free validation of waterfall command ordering.
     virtual bool waterfallTransportConnected() const;
     virtual void sendWaterfallCommand(const QString& command);
+    virtual void sendSoundCommand(const QString& command);
 #ifdef HAVE_WEBSOCKETS
     // Keep connection-state tests off the HTTP worker as well as WebSockets.
     virtual void startStatusPreflight(const QUrl& url);
@@ -285,7 +290,7 @@ private:
         return m_monitorMode || m_state == State::Camping;
     }
     void sendKeepalive();
-    void sendSoundCommand(const QString& command);
+
     void resetProtocolTrace();
     qint64 protocolTraceElapsedMs() const;
     void traceProtocolEvent(const QString& event);
@@ -312,7 +317,7 @@ private:
 
     const Streams m_streams;
     const Admission m_admission;
-    const SoundFormat m_soundFormat;
+    SoundFormat m_soundFormat;
     bool m_iqSequenceValid{false};
     quint32 m_iqSequence{0};
     double m_iqSampleRateHz{0};

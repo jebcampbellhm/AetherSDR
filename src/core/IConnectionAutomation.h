@@ -2,6 +2,7 @@
 
 #include <QList>
 #include <QString>
+#include <QStringList>
 
 #include "core/RadioDiscovery.h"  // RadioInfo
 
@@ -19,6 +20,9 @@ public:
 
     // Discovered local radios, for the `connect list`/`connect local` verbs.
     virtual QList<RadioInfo> automationLocalRadios() const = 0;
+
+    // Families available in the manual connection selector for this build.
+    virtual QStringList automationManualFamilies() const { return {}; }
 
     // Drive the normal connect path. Return false + fill *error on failure.
     virtual bool automationConnectLocalSerial(const QString& serial,

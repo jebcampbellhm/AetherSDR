@@ -1,6 +1,7 @@
 #include "TestSettingsProfile.h"
 #include "core/KiwiSdrClient.h"
 #include "core/backends/web888/Web888CapturePool.h"
+#include "core/backends/web888/Web888Backend.h"
 #include "core/backends/web888/Web888IqCapture.h"
 #include "core/backends/web888/Web888IqProcessor.h"
 #include <QCoreApplication>
@@ -65,6 +66,33 @@ protected:
     Web888IqCapture* createCapture(Web888IqProcessor* processor) override
     {
         auto* c = new Capture(processor, this); opened.append(c); return c;
+    }
+};
+
+class OfflineListener : public KiwiSdrClient {
+public:
+    explicit OfflineListener(QObject* parent)
+        : KiwiSdrClient(Streams::SoundAndWaterfall, Admission::IndependentReceiver, parent) {}
+#ifdef HAVE_WEBSOCKETS
+protected:
+    void startStatusPreflight(const QUrl&) override {}
+#endif
+};
+class MonitoringBackend : public Web888Backend {
+public:
+    OfflineListener* listener{};
+    Pool* pool{};
+protected:
+    KiwiSdrClient* createClient() override
+    {
+        listener = new OfflineListener(this);
+        return listener;
+    }
+    Web888CapturePool* createCapturePool() override
+    {
+        pool = new Pool;
+        pool->setParent(this);
+        return pool;
     }
 };
 
@@ -188,6 +216,101 @@ int main(int argc, char** argv)
     CHECK(!pool.applyProfile(endpoint, {a, b}, 36000, 3, 1, QString(300, QLatin1Char('x'))));
     CHECK(failed == failuresBeforeStart + 1); // synchronous refusal reports once
     CHECK(pool.activeCount() == 0 && pool.pendingCount() == 0 && !pool.changingProfile());
+    // Backend-owned capture accounting permanently reserves both interactive slots.
+    MonitoringBackend monitoring;
+    RadioConnectRequest request;
+    request.host = QStringLiteral("receiver.invalid");
+    request.port = 8073;
+    CHECK(!monitoring.applyDigitalProfile({a}, 24000, 3));
+    monitoring.connectRadio(request);
+    auto* primary = monitoring.listener;
+    emit primary->stateChanged(KiwiSdrClient::State::Connected, {});
+    CHECK(!monitoring.applyDigitalProfile({a, b}, 24000, 3));
+    CHECK(monitoring.pool->opened.isEmpty());
+    QVector<Web888DecoderAudio> monitored;
+    bool armNext = false, anchorAccepted = false;
+    QObject::connect(&monitoring, &Web888Backend::digitalAudioReady,
+                     [&](const auto& out) {
+        monitored.append(out);
+        if (armNext) {
+            armNext = false;
+            // Fixture-defined time for the first post-filter sample; not wall time.
+            anchorAccepted = monitoring.armDigitalDecoder(out, 0);
+        }
+    });
+    CHECK(monitoring.applyDigitalProfile({a}, 24000, 3));
+    CHECK(monitoring.pendingDigitalCaptureCount() == 1);
+    auto* digital = monitoring.pool->opened.last().data();
+    digital->data(24000);
+    CHECK(monitoring.digitalCaptureCount() == 1 && !monitored.isEmpty());
+    const auto digitalFrame = monitored.last();
+    CHECK(!monitoring.takeDigitalDecoderJob());
+    CHECK(monitoring.configureDigitalDecoders({a}, 2 * 1024 * 1024));
+    digital->data(24000);
+    CHECK(!monitoring.takeDigitalDecoderJob()); // configuration alone does not arm UTC
+    armNext = true;
+    digital->data(24000);
+    CHECK(anchorAccepted);
+    CHECK(monitoring.createPanadapter()); // the reserved second slot remains available
+    emit monitoring.listener->stateChanged(KiwiSdrClient::State::Connected, {});
+    monitoring.setSliceFrequency(1, 21074000);
+    CHECK(monitoring.digitalCaptureCount() == 1 && digitalFrame.current());
+    CHECK(!monitoring.applyDigitalProfile({b}, 24000, 3)); // replacement overlap needs room
+    CHECK(digitalFrame.current() && digital->running());
+    CHECK(monitoring.removePanadapter(QStringLiteral("1")));
+    CHECK(!monitoring.applyDigitalProfile({a, b}, 24000, 3)); // reservation survives closure
+    std::optional<Web888DecoderJob> routedJob;
+    for (int n = 0; n < 400 && !routedJob; ++n) {
+        digital->data(24000);
+        routedJob = monitoring.takeDigitalDecoderJob();
+    }
+    CHECK(routedJob && routedJob->current() && routedJob->mode == QStringLiteral("FT8"));
+    CHECK(routedJob->period.startUtcTicks == 0 && routedJob->period.audio.mono.size() == 180000);
+    monitoring.stopDigitalProfile();
+    CHECK(!routedJob->current() && !monitoring.takeDigitalDecoderJob());
+    CHECK(monitoring.isConnected() && !digitalFrame.current());
+    CHECK(monitoring.digitalCaptureCount() == 0);
+    // A failed digital lease revokes completed jobs without closing listening.
+    CHECK(monitoring.applyDigitalProfile({a}, 24000, 3));
+    digital = monitoring.pool->opened.last().data();
+    CHECK(monitoring.configureDigitalDecoders({a}, 2 * 1024 * 1024));
+    armNext = true;
+    anchorAccepted = false;
+    digital->data(24000);
+    CHECK(anchorAccepted);
+    routedJob.reset();
+    for (int n = 0; n < 400 && !routedJob; ++n) {
+        digital->data(24000);
+        routedJob = monitoring.takeDigitalDecoderJob();
+    }
+    CHECK(routedJob && routedJob->current());
+    int captureFailures = 0;
+    QObject::connect(&monitoring, &Web888Backend::digitalCaptureFailed,
+                     [&](quint64, const QString&) { ++captureFailures; });
+    digital->refuse();
+    CHECK(captureFailures == 1 && !routedJob->current());
+    CHECK(monitoring.isConnected() && monitoring.digitalCaptureCount() == 0);
+    CHECK(!monitoring.takeDigitalDecoderJob());
+    // An audio observer may synchronously stop monitoring during publication.
+    CHECK(monitoring.applyDigitalProfile({a}, 24000, 3));
+    digital = monitoring.pool->opened.last().data();
+    CHECK(monitoring.configureDigitalDecoders({a}, 2 * 1024 * 1024));
+    armNext = true;
+    bool stoppedFromAudio = false;
+    const auto stopConnection = QObject::connect(&monitoring, &Web888Backend::digitalAudioReady,
+        [&](const auto&) {
+            stoppedFromAudio = true;
+            monitoring.stopDigitalProfile();
+        });
+    digital->data(24000);
+    QObject::disconnect(stopConnection);
+    CHECK(stoppedFromAudio && monitoring.isConnected());
+    CHECK(monitoring.digitalCaptureCount() == 0 && !monitoring.takeDigitalDecoderJob());
+    CHECK(!monitored.last().current());
+    CHECK(monitoring.applyDigitalProfile({a}, 24000, 3));
+    monitoring.disconnectRadio(); // pending capture teardown is part of session teardown
+    CHECK(monitoring.pendingDigitalCaptureCount() == 0 && !monitoring.isConnected());
+
     std::fprintf(stdout, "Capture admission, reuse, capacity, rollback, timeout and lifetime checks passed\n");
     return 0;
 #endif

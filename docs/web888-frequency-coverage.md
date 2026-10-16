@@ -1,5 +1,12 @@
 # Web-888 digital frequency coverage
 
+Hardware note (2026-10-16): 12/24 kHz passed live transport rate checks, but the
+installed v2026.919 firmware at 36 kHz delivered about 40 ksample/s while
+advertising 36.014 ksample/s. The 36 kHz column below is an unqualified planning
+target pending resolution. At 24 kHz the 12-capture all-band base profile leaves
+only one of 13 RX channels free; reserve two listeners by reducing the digital
+band profile. See [live validation](web888-live-validation.md).
+
 Planning revision: 2026-09-29. Receive only; calculated coverage, not a hardware
 measurement. Eight bands, 80–10m; 60m and DXpedition/contest alternate frequencies
 are outside the base profile. Presets remain editable.

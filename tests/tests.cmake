@@ -4185,6 +4185,11 @@ target_include_directories(web888_backend_test PRIVATE src)
 target_link_libraries(web888_backend_test PRIVATE aethercore Qt6::Core Qt6::Network)
 add_test(NAME web888_backend_test COMMAND web888_backend_test)
 
+add_executable(web888_shared_ssb_test tests/web888_shared_ssb_test.cpp)
+target_include_directories(web888_shared_ssb_test PRIVATE src tests)
+target_link_libraries(web888_shared_ssb_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_shared_ssb_test COMMAND web888_shared_ssb_test)
+
 add_executable(web888_iq_test tests/web888_iq_test.cpp)
 target_include_directories(web888_iq_test PRIVATE src tests)
 target_link_libraries(web888_iq_test PRIVATE aethercore Qt6::Core Qt6::Network)
@@ -4240,7 +4245,10 @@ add_test(NAME web888_connection_test COMMAND web888_connection_test)
 
 add_executable(web888_connection_panel_test
     tests/web888_connection_panel_test.cpp
+    src/gui/DigitalMonitoringDialog.cpp
     src/gui/ConnectionPanel.cpp
+    src/gui/CanonWindow.cpp
+    src/gui/PersistentDialog.cpp
     src/gui/FramelessResizer.cpp
     src/gui/FramelessWindowTitleBar.cpp)
 target_include_directories(web888_connection_panel_test PRIVATE src tests)
@@ -9606,4 +9614,12 @@ if(HAVE_PIPEWIRE)
     target_include_directories(pipewire_rx_bridge_test PRIVATE src)
     target_link_libraries(pipewire_rx_bridge_test PRIVATE aethercore Qt6::Core)
     add_test(NAME pipewire_rx_bridge_test COMMAND pipewire_rx_bridge_test)
+endif()
+
+# Manual live hardware diagnostic: explicit target, never run by CTest/CI.
+# not registered: requires an operator-authorized real receiver and credentials.
+if(Qt6WebSockets_FOUND)
+    add_executable(web888_live_probe EXCLUDE_FROM_ALL tools/web888_live_probe.cpp)
+    target_include_directories(web888_live_probe PRIVATE src tests)
+    target_link_libraries(web888_live_probe PRIVATE aethercore Qt6::Core Qt6::Network)
 endif()

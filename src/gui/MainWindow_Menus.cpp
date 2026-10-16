@@ -36,6 +36,7 @@
 #include "RC28MappingDialog.h"
 #include "ShortcutDialog.h"
 #include "RadioHealthDialog.h"
+#include "DigitalMonitoringDialog.h"
 #include "SliceTroubleshootingDialog.h"
 #include "SpectrumWidget.h"
 #include "SupportDialog.h"
@@ -1630,6 +1631,10 @@ void MainWindow::buildMenuBar()
     });
 
     toolsMenu->addSeparator();
+    toolsMenu->addAction("Digital Monitoring...", this, [this, window = QPointer<DigitalMonitoringDialog>{}]() mutable {
+        if (!window) window = new DigitalMonitoringDialog(&m_radioModel, this);
+        window->show(); window->raise(); window->activateWindow();
+    });
     toolsMenu->addAction("Radio Health...", this, [this] {
         auto* dlg = new RadioHealthDialog(&m_radioModel, this);
         dlg->setAttribute(Qt::WA_DeleteOnClose);

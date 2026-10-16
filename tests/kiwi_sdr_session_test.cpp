@@ -30,6 +30,14 @@ public:
 
     bool requestedMonitor() const { return m_monitorQueueRequested || m_monitorMode; }
 
+    QStringList soundCommands;
+    void sampleRateSetup()
+    {
+        m_soundAudioRateAcked = true;
+        m_soundSampleRateCommandsSent = false;
+        sendSoundSampleRateCommands();
+    }
+
     QNetworkRequest sound;
     QNetworkRequest waterfall;
     int soundOpens = 0;
@@ -60,6 +68,7 @@ public:
 
 protected:
     void startStatusPreflight(const QUrl&) override {}
+    void sendSoundCommand(const QString& command) override { soundCommands.append(command); }
     void openSoundTransport(const QNetworkRequest& request) override
     {
         sound = request;
@@ -88,6 +97,18 @@ int main(int argc, char** argv)
     using namespace AetherSDR;
     using Family = KiwiSdrProtocol::KiwiSdrReceiverFamily;
     QSet<QString> ids;
+    for (const auto family : {Family::Kiwi, Family::Web888}) {
+        KiwiSdrSessionTest setup;
+        setup.setReceiverFamily(family);
+        setup.sampleRateSetup();
+        const bool expectGeneratorReset = family == Family::Kiwi;
+        if (setup.soundCommands.contains(QStringLiteral("SET genattn=0")) != expectGeneratorReset
+            || setup.soundCommands.contains(QStringLiteral("SET gen=0 mix=-1")) != expectGeneratorReset
+            || !setup.soundCommands.contains(QStringLiteral("SERVER DE CLIENT AetherSDR SND"))) {
+            qCritical() << "sample-rate setup sends unsupported generator commands";
+            return 1;
+        }
+    }
     for (const auto& token : {QStringLiteral("monitor=1"), QStringLiteral("qpos=1"),
                              QStringLiteral("camp=0,1"), QStringLiteral("audio_camp=1")}) {
         KiwiSdrSessionTest independent(KiwiSdrClient::Admission::IndependentReceiver);

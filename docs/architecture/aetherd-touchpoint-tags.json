@@ -572,8 +572,8 @@
  "core/PeripheralRemovalGuard.h": {
   "tag": "peripheral(4o3a)",
   "note": "Transient main-thread removal lease checked by TGXL, PGXL and Antenna Genius connection entry points. No GUI dependency, persisted state, radio-family wire or TX authority.",
- "split": "",
- "confidence": "high"
+  "split": "",
+  "confidence": "high"
  },
  "core/PeripheralEndpointFallback.h": {
   "tag": "peripheral(4o3a)",
@@ -1417,7 +1417,7 @@
  },
  "core/backends/hl2/Hl2HardwareOptions.h": {
   "tag": "vendor(hl2)",
-  "note": "Which HL2-compatible board is on the other end \u2014 local audio codec, what the dither bit switches on each board, companion filter board, CL1 reference, gateware ATU. Protocol 1 reports none of it, so it is an operator declaration; every rule in it is an HL2 gateware quirk with no generic half to split out.",
+  "note": "Which HL2-compatible board is on the other end — local audio codec, what the dither bit switches on each board, companion filter board, CL1 reference, gateware ATU. Protocol 1 reports none of it, so it is an operator declaration; every rule in it is an HL2 gateware quirk with no generic half to split out.",
   "split": "",
   "confidence": "high"
  },
@@ -1670,6 +1670,12 @@
  "core/AudioDevicePreferencePolicy.h": {
   "tag": "ui-support",
   "note": "Header-only policy over PC audio device ids: whether a device-list change keeps the engine's device, falls back to the system default or returns to the saved device, and whether a selection is written to the saved id (#6040); also which enumerable ids count as present and which as arrivals. Host audio, no radio state.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/DigitalMonitoringModel.h": {
+  "tag": "universal",
+  "note": "Capability-declared digital monitoring extension request correlation and session lifecycle; no vendor transport or sample UTC inference.",
   "split": "",
   "confidence": "high"
  }

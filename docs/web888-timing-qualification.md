@@ -1,6 +1,12 @@
 # Web-888 IQ timing: source findings and qualification boundary
 
-2026-09-30. Source inspection only; hardware remains in transit.
+Initial source inspection: 2026-09-30. Live follow-up: 2026-10-16.
+
+The live 24 kHz stream repeats most consecutive SND timestamps (672 of 687
+comparisons in a 15-second follow-up; no backward steps). The current source
+checkout sets receive-buffer ticks to zero. See [live validation](web888-live-validation.md)
+for counts, source revision and limitations. These headers are not qualified
+decoder anchors; the original source findings below remain historical evidence.
 
 ## Firmware evidence
 

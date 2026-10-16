@@ -90,6 +90,7 @@ public:
 
     // IConnectionAutomation — engine-facing connect/disconnect/dialog hook.
     QList<RadioInfo> automationLocalRadios() const override;
+    QStringList automationManualFamilies() const override;
     bool automationConnectLocalSerial(const QString& serial, QString* error = nullptr) override;
     bool automationConnectByIp(const QString& hostOrIp,
                                const QString& family = QString(),

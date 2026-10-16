@@ -1219,6 +1219,7 @@ set(MODEL_SOURCES
     src/models/AprsDigipeaterModel.cpp
     src/models/Nr2SettingsModel.cpp
     src/models/Rn2SettingsModel.cpp
+    src/models/DigitalMonitoringModel.cpp
     src/models/RadioModel.cpp
     src/models/RadioModel_TxCoordinator.cpp
     src/models/TxController.cpp
@@ -1513,6 +1514,7 @@ set(GUI_SOURCES
     src/gui/WindowCaptionButtons.cpp
     src/gui/SupportDialog.cpp
     src/gui/SliceTroubleshootingDialog.cpp
+    src/gui/DigitalMonitoringDialog.cpp
     src/gui/RadioHealthDialog.cpp
     src/gui/KeyboardMapWidget.cpp
     src/gui/ShortcutDialog.cpp

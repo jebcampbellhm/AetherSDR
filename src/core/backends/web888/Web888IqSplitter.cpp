@@ -22,7 +22,9 @@ bool Web888IqSplitter::configure(const QVector<Web888DigitalSlice>& slices, QStr
     for (const auto& s : slices) {
         if (s.id < 0 || ids.contains(s.id) || !std::isfinite(s.dialHz) || s.dialHz <= 0
             || !std::isfinite(s.lowHz) || !std::isfinite(s.highHz)
-            || s.lowHz < 0 || s.highHz > 5000 || s.highHz - s.lowHz < 100)
+            || (s.lowerSideband ? (s.lowHz < -5000 || s.highHz > 0)
+                                : (s.lowHz < 0 || s.highHz > 5000))
+            || s.highHz - s.lowHz < 100)
             return fail(error, "Invalid or duplicate USB decoder slice");
         ids.insert(s.id);
     }

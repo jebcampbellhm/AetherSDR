@@ -2762,7 +2762,10 @@ probe finds a radio, the panel emits its normal `connectRequested` signal and
 `MainWindow` performs the standard Multi-Flex/client-slot checks before
 `RadioModel` connects.
 
-The optional radio type selects which wire protocol to probe, matching the
+The optional radio type is validated against the connection provider's available
+manual families, so build-dependent entries such as Web-888 are accepted when
+shown in the selector. Unknown families are rejected before scheduling a connection.
+The radio type selects which wire protocol to probe, matching the
 dialog's **Radio type** dropdown: `flex` opens the TCP/4992 command plane, `hl2`
 sends a directed HPSDR Protocol 1 discovery datagram to UDP/1024, and `icom`
 uses the CI-V backend. They are disjoint — a Hermes-Lite 2 never answers the
