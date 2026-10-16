@@ -25,13 +25,14 @@ struct TransmitDelta {
     std::optional<QString> txSliceMode;
     std::optional<bool>    showTxInWaterfall;
     std::optional<bool>    metInRx;
+    std::optional<bool>    pttMicOverride;   // v4.3+ firmware only
 
     // ── Mic / monitor / processor ──
     std::optional<QString> micSelection;     // uppercased
     std::optional<int>     micLevel;         // 0..100
     std::optional<bool>    micAcc;
     std::optional<bool>    speechProcEnable;
-    std::optional<int>     speechProcLevel;  // 0..100
+    std::optional<int>     speechProcLevel;  // 0..SpeechProcessorControl::levelMaximum
     // compander / dexp are aliased on the wire: `compander` (or `dexp` when
     // compander is absent) drives BOTH the compander (mic) and dexp (phone)
     // member pairs; likewise compander_level / noise_gate_level.

@@ -38,7 +38,6 @@ class SpeApplet;
 class VkampApplet;
 class Kpa1500Applet;
 class LpMeterApplet;
-class Ctr2ProxyApplet;
 class TxApplet;
 class PhoneCwApplet;
 enum class MicMeterSessionState;
@@ -46,6 +45,7 @@ class PhoneApplet;
 class EqApplet;
 class WaveApplet;
 class AetherClockApplet;
+class WfmApplet;
 class MiniPanApplet;
 class ClientEqApplet;
 class ClientCompApplet;
@@ -111,13 +111,13 @@ public:
     VkampApplet*  vkampApplet()   { return m_vkampApplet; }
     Kpa1500Applet* kpa1500Applet() { return m_kpa1500Applet; }
     LpMeterApplet* lpMeterApplet() { return m_lpMeterApplet; }
-    Ctr2ProxyApplet* ctr2ProxyApplet() { return m_ctr2ProxyApplet; }
     TxApplet*       txApplet()       { return m_txApplet; }
     PhoneCwApplet*  phoneCwApplet()  { return m_phoneCwApplet; }
     PhoneApplet*    phoneApplet()    { return m_phoneApplet; }
     EqApplet*       eqApplet()       { return m_eqApplet; }
     WaveApplet*     waveApplet() const { return m_waveApplet; }
     AetherClockApplet* aetherClockApplet() const { return m_aetherClockApplet; }
+    WfmApplet* wfmApplet() const { return m_wfmApplet; }
     MiniPanApplet*  miniPanApplet() const { return m_miniPanApplet; }
     // Phase 7.1: each side has its own CEQ applet — clientEqTxApplet()
     // is the original "ceq" tile bound to TX, clientEqRxApplet() is
@@ -233,7 +233,7 @@ public:
     // connected radio produces per-slice audio / per-pan IQ streams
     // (RadioCapabilities::hasDaxStreams). Same not-markHardwareConditional
     // reasoning as setProfilesVisible above.
-    void setDaxStreamsVisible(bool visible);
+    void setDaxStreamsVisible(bool visible, bool nativeReceive = false);
 
     // Show/hide the EQ button and applet — the radio's own 8-band hardware
     // equalizer (RadioCapabilities::hasRadioSideDsp). Deliberately does NOT
@@ -385,6 +385,7 @@ private:
                                    const QString& appletKey,
                                    bool available);
     void markHardwareConditional(const QString& id);
+    void setWfmAvailable(bool available);
     void persistVuMeterSettings() const;
     void showStandardMeterContextMenu(QWidget* source, const QPoint& position);
     static const int kFavoriteCount = 5;
@@ -417,7 +418,6 @@ private:
     Kpa1500Applet* m_kpa1500Applet{nullptr};
     QPushButton* m_kpa1500Btn{nullptr};
     LpMeterApplet* m_lpMeterApplet{nullptr};
-    Ctr2ProxyApplet* m_ctr2ProxyApplet{nullptr};
     QPushButton* m_vkampBtn{nullptr};
     TxApplet*      m_txApplet{nullptr};
     PhoneCwApplet* m_phoneCwApplet{nullptr};
@@ -425,6 +425,7 @@ private:
     EqApplet*      m_eqApplet{nullptr};
     WaveApplet*    m_waveApplet{nullptr};
     AetherClockApplet* m_aetherClockApplet{nullptr};
+    WfmApplet* m_wfmApplet{nullptr};
     MiniPanApplet* m_miniPanApplet{nullptr};
     ClientEqApplet* m_clientEqTxApplet{nullptr};
     ClientEqApplet* m_clientEqRxApplet{nullptr};

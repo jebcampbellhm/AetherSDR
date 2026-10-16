@@ -60,8 +60,10 @@ class Ctr2HidIoWorker : public QObject {
 public:
     Ctr2HidIoWorker(Ctr2HidDeviceIo io, Ctr2HidThreadPort* port,
                     std::shared_ptr<std::atomic<quint64>> generation,
-                    std::shared_ptr<std::atomic<bool>> cancelled, const QString& deviceKey)
+                    std::shared_ptr<std::atomic<bool>> cancelled, const QString& deviceKey,
+                    quint32 hostCapabilities)
         : m_io(std::move(io))
+        , m_hostCapabilities(hostCapabilities)
         , m_port(port)
         , m_sharedGeneration(std::move(generation))
         , m_cancelled(std::move(cancelled))
@@ -78,6 +80,7 @@ public:
         if (m_previousRelease.valid()) {
             m_previousRelease.wait_for(kPreviousReleaseWait);
         }
+        negotiate();
         m_timer = new QTimer(this);
         m_timer->setTimerType(Qt::PreciseTimer);
         m_timer->setInterval(kPollIntervalMs);
@@ -117,6 +120,52 @@ public:
     }
 
 private:
+    // Asks the device which link extensions it offers (Feature report 0x02)
+    // and tells it the ones this host will use, and reads its firmware
+    // version (Feature report 0x03). A device without those reports (any
+    // stock CTR2) fails the Gets and stays plain link version 0. Runs before
+    // the first read, so the result reaches the port before any report.
+    void negotiate()
+    {
+        quint32 enabled = 0;
+        quint32 offered = 0;
+        std::optional<ctr2hid::deviceinfo::Info> info;
+        if (m_io.getFeature) {
+            std::array<unsigned char, 1 + ctr2hid::deviceinfo::kBytes> buf{};
+            buf[0] = ctr2hid::deviceinfo::kReportId;
+            const int n = m_io.getFeature(buf.data(), static_cast<int>(buf.size()));
+            ctr2hid::deviceinfo::Info decoded;
+            if (n == static_cast<int>(buf.size()) && buf[0] == ctr2hid::deviceinfo::kReportId
+                && ctr2hid::deviceinfo::decode(
+                    QByteArray(reinterpret_cast<const char*>(buf.data() + 1),
+                               ctr2hid::deviceinfo::kBytes), &decoded)) {
+                info = decoded;
+            }
+        }
+        if (m_io.getFeature && m_io.setFeature) {
+            std::array<unsigned char, 1 + ctr2hid::capabilities::kBytes> buf{};
+            buf[0] = ctr2hid::capabilities::kReportId;
+            const int n = m_io.getFeature(buf.data(), static_cast<int>(buf.size()));
+            if (n == static_cast<int>(buf.size()) && buf[0] == ctr2hid::capabilities::kReportId) {
+                const QByteArray offer(reinterpret_cast<const char*>(buf.data() + 1),
+                                       ctr2hid::capabilities::kBytes);
+                offered = ctr2hid::capabilities::decode(offer);
+                enabled = offered & m_hostCapabilities;
+            }
+            if (enabled) {
+                const QByteArray accept = ctr2hid::capabilities::encode(enabled);
+                buf[0] = ctr2hid::capabilities::kReportId;
+                std::copy(accept.begin(), accept.end(), buf.begin() + 1);
+                if (m_io.setFeature(buf.data(), static_cast<int>(buf.size())) < 0) {
+                    enabled = 0;   // the device was not told, so use nothing
+                }
+            }
+        }
+        QMetaObject::invokeMethod(m_port, [port = m_port, enabled, info, offered] {
+            port->deliverExtensions(enabled, info, offered);
+        }, Qt::QueuedConnection);
+    }
+
     bool writeReport(const char* report)
     {
         std::array<unsigned char, 1 + ctr2hid::kReportBytes> out{};
@@ -217,6 +266,7 @@ private:
     }
 
     Ctr2HidDeviceIo m_io;
+    quint32 m_hostCapabilities;
     Ctr2HidThreadPort* m_port;
     std::shared_ptr<std::atomic<quint64>> m_sharedGeneration;
     std::shared_ptr<std::atomic<bool>> m_cancelled;
@@ -232,7 +282,8 @@ private:
 } // namespace detail
 
 Ctr2HidThreadPort::Ctr2HidThreadPort(Ctr2HidDeviceIo io, const QString& description,
-                                     const QString& deviceKey, QObject* parent)
+                                     const QString& deviceKey, QObject* parent,
+                                     quint32 hostCapabilities)
     : Ctr2HidPort(parent)
     , m_generation(std::make_shared<std::atomic<quint64>>(0))
     , m_cancelled(std::make_shared<std::atomic<bool>>(false))
@@ -240,7 +291,8 @@ Ctr2HidThreadPort::Ctr2HidThreadPort(Ctr2HidDeviceIo io, const QString& descript
 {
     m_thread = new QThread(this);
     m_thread->setObjectName(QStringLiteral("Ctr2HidIo"));
-    m_worker = new detail::Ctr2HidIoWorker(std::move(io), this, m_generation, m_cancelled, deviceKey);
+    m_worker = new detail::Ctr2HidIoWorker(std::move(io), this, m_generation, m_cancelled, deviceKey,
+                                           hostCapabilities);
     m_worker->moveToThread(m_thread);
     connect(m_thread, &QThread::finished, m_worker, &QObject::deleteLater);
     m_thread->start();
@@ -303,6 +355,15 @@ void Ctr2HidThreadPort::deliverReceived(const QByteArray& reports)
 {
     if (m_open) {
         emit reportsReceived(reports);
+    }
+}
+
+void Ctr2HidThreadPort::deliverExtensions(quint32 extensions,
+                                          std::optional<ctr2hid::deviceinfo::Info> info,
+                                          quint32 offered)
+{
+    if (m_open) {
+        setExtensions(extensions, std::move(info), offered);
     }
 }
 

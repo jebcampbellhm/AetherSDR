@@ -1,10 +1,13 @@
 #pragma once
 
 #include "core/PcmFrame.h"
+#include "core/SpectrumDecodeScale.h"
 #include <map>
 
 #include "core/PacketLossConcealment.h"
 #include "core/VitaBinCoverage.h"
+#include "core/backends/flex/VitaSequenceLossReport.h"
+#include "VitaDscpMarker.h"
 
 #include <QObject>
 #include <QUdpSocket>
@@ -19,6 +22,7 @@
 #include <QMutexLocker>
 #include <atomic>
 #include <functional>
+#include <initializer_list>
 
 namespace AetherSDR {
 
@@ -36,6 +40,7 @@ class OpusCodec;
 class PanadapterStream : public QObject {
     Q_OBJECT
     friend class TxOperationIntegrationTestAccess;
+    friend class VitaDscpStreamTestAccess;
     // Inject the terminal transport in socket-free queue/cancellation tests.
     std::function<void(const QByteArray&)> m_packetSinkForTest;
 
@@ -70,7 +75,7 @@ public:
     bool    isRunning() const;
 
     // Update the dBm range used to scale incoming FFT bins for a specific stream.
-    void setDbmRange(quint32 streamId, float minDbm, float maxDbm, bool waitForEcho = false);
+    SpectrumDecodeScale setDbmRange(quint32 streamId, float minDbm, float maxDbm, bool waitForEcho = false);
     // Abandon an in-flight client range request so the next radio-authoritative
     // range can update the FFT decoder immediately (for example, on a band change).
     bool cancelPendingDbmRange(quint32 streamId);
@@ -86,6 +91,13 @@ public:
     void unregisterPanStream(quint32 streamId);
     void unregisterWfStream(quint32 streamId);
     void clearRegisteredStreams();
+    // The stream's next packet starts a new instance: no sequence error
+    // against the previous instance's last count, and the log line's counts
+    // and window start over. The unregister*() calls and clearRegisteredStreams()
+    // do this; RadioModel calls it for every stream the radio reports removed,
+    // which covers streams with no registration here (remote_audio_rx). Takes
+    // m_statsMutex.
+    void restartStreamSequence(quint32 streamId);
 
     // Layer A radio-side orphan detector (#3856): processDatagram() records any
     // FFT/waterfall packet whose stream id was registered earlier this session but
@@ -124,6 +136,7 @@ public:
         Clock  = 3,   // AetherClock time-signal decode engine
         CwDecoder = 4, // selected receiver CW decoder (pre-monitor DAX)
         RttyDecoder = 5, // selected receiver RTTY decoder (pre-monitor DAX)
+        Ax25Decoder = 6, // selected receiver AX.25/APRS decoder (pre-monitor DAX)
     };
     static const char* daxConsumerName(DaxConsumer who);
 
@@ -195,7 +208,8 @@ signals:
     // One DAX channel's RX audio as owning typed PCM.
     void daxPcmReady(int channel, const AetherSDR::PcmFrame& frame);
     void iqDataReady(int channel, const QByteArray& rawPayload, int sampleRate);
-    void spectrumReady(quint32 streamId, const QVector<float>& binsDbm, qint64 emittedNs);
+    void spectrumReady(quint32 streamId, const QVector<float>& binsDbm, qint64 emittedNs,
+                       const AetherSDR::SpectrumDecodeScale& decodeScale);
     // One row of waterfall data (intensity values, Width bins).
     void waterfallRowReady(quint32 streamId, const QVector<float>& binsDbm,
                            double lowFreqMhz, double highFreqMhz,
@@ -216,6 +230,8 @@ private slots:
 
 private:
     friend class PcmCompatibilityTestAccess;
+    friend class VitaSequenceLossLogTestAccess;
+    friend struct PanadapterDbmRangeTestAccess;
     PcmProducer m_pcmProducer;
     std::map<quint32, std::unique_ptr<PcmProducer>> m_daxPcm;
     void publishLegacyDaxAudio(quint32 streamId, int channel, const QByteArray& pcm);
@@ -226,6 +242,7 @@ private:
     // sequence-loss (which the adaptive throttle would react to). Logs the
     // granted size — the kernel caps the request at net.core.rmem_max. (#3810)
     void applyReceiveBufferSize();
+    void applyDscpEf(const QHostAddress& destination, std::initializer_list<quint16> ports);
     void decodeFFT(const uchar* raw, int totalBytes, bool hasTrailer, quint32 streamId);
     void decodeWaterfallTile(const uchar* raw, int totalBytes, bool hasTrailer, quint32 streamId);
     void decodeNarrowAudio(const uchar* raw, int totalBytes, bool hasTrailer, quint32 streamId);
@@ -300,10 +317,19 @@ private:
     QMap<quint32, WaterfallFrame> m_wfFrames;  // per-stream waterfall frame assembly
 
     // Per-stream packet sequence tracking (4-bit count in VITA-49 word0 bits 19:16)
+    // errorCount/totalCount are cumulative for the life of the process (the
+    // status bar and Network Diagnostics totals). The rest describes the
+    // current instance of the stream and is restarted when the stream is torn
+    // down, because the radio can reuse the id: see restartStreamSequence().
+    void restartAllStreamSequences();
     struct StreamStats {
         int  lastSeq{-1};
         int  errorCount{0};
         int  totalCount{0};
+        bool started{false};       // this instance has seen its first packet
+        int  startErrorCount{0};   // errorCount when this instance started
+        int  startTotalCount{0};   // totalCount before its first packet
+        VitaSequenceLossLimiter lossLog;
     };
 
 public:
@@ -355,15 +381,22 @@ private:
     QHash<quint32, OrphanRec> m_orphanStreams;
     QElapsedTimer             m_orphanClock;   // monotonic source for lastSeenMs
     QUdpSocket*     m_socket{nullptr};
+    VitaDscpMarker m_dscpMarker;
+    // Inject only the marking attempt; bind/send/teardown remain production.
+    std::function<VitaDscpResult(qintptr, const QHostAddress&, std::initializer_list<quint16>)> m_dscpApplyForTest;
     quint16         m_localPort{0};
 
     QMap<quint32, QPair<float,float>> m_dbmRanges;  // streamId → (min, max)
+    QMap<quint32, quint64> m_dbmRangeGenerations;
+    quint64 m_nextDbmRangeGeneration{0};
     QMap<quint32, QPair<float,float>> m_pendingDbmRanges;  // streamId → pending echoed range
     QMap<quint32, int> m_yPixels;  // streamId → ypixels for FFT bin scaling
     RadioConnection* m_conn{nullptr};
     QMap<quint32, FrameAssembler> m_frames;  // per-stream FFT frame assembly
     QMap<quint32, StreamStats> m_streamStats;  // keyed by stream ID
     mutable QMutex m_statsMutex;
+    QElapsedTimer m_seqLossClock;  // time base for StreamStats::lossLog; read only on new streams and errors
+    VitaSequenceLossBudget m_seqLossBudget;  // all streams' lines together; under m_statsMutex
     CategoryStats m_catStats[CatCount]{};
 
     struct AudioStreamTracker {

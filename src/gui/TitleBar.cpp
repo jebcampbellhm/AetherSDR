@@ -1,12 +1,16 @@
 #include "TitleBar.h"
+#include "RoundedMenu.h"
 #include "BrandMark.h"
 #include "FramelessMessageBox.h"
 #include "FramelessMoveHelper.h"
 #include "WindowChrome.h"
 #include "GuardedSlider.h"
+#include "MixerControlAvailability.h"
 #include "PersistentDialog.h"
 #include "RadioTabBar.h"
+#include "ReleaseTagText.h"
 #include "WindowCaptionButtons.h"
+#include "core/NetworkDiagnostics.h"
 #include "core/AppSettings.h"
 
 #include <QFrame>
@@ -104,52 +108,6 @@ QIcon buildAppMenuIcon(const QWidget* widget)
         icon.addPixmap(pm);
     }
     return icon;
-}
-
-// The hamburger's menus and every submenu under them get rounded corners.
-// A stylesheet border-radius only shapes what is painted, so each menu also
-// needs a see-through window, and no system drop shadow (square on Windows),
-// set before its native window is first created: submenus are reached on
-// their parent's aboutToShow, which runs before the submenu can open.
-constexpr const char* kRoundedMenuProperty = "aetherRoundedMenu";
-
-// Qt reserves a check-mark column only in a menu that has a checkable item,
-// so text would start further left in every other menu.  The stylesheet pads
-// those by the same width (`aetherHasChecks="false"`); the flag is refreshed
-// before each show because MainWindow edits some menus at runtime.
-constexpr const char* kHasChecksProperty = "aetherHasChecks";
-
-void syncMenuCheckColumn(QMenu* menu)
-{
-    bool hasChecks = false;
-    for (const QAction* action : menu->actions()) {
-        hasChecks = hasChecks || action->isCheckable();
-    }
-    const QVariant current = menu->property(kHasChecksProperty);
-    if (current.isValid() && current.toBool() == hasChecks) {
-        return;
-    }
-    menu->setProperty(kHasChecksProperty, hasChecks);
-    menu->style()->unpolish(menu);
-    menu->style()->polish(menu);
-}
-
-void roundMenuTree(QMenu* menu)
-{
-    if (!menu || menu->property(kRoundedMenuProperty).toBool()) {
-        return;
-    }
-    menu->setProperty(kRoundedMenuProperty, true);
-    menu->setAttribute(Qt::WA_TranslucentBackground);
-    menu->setWindowFlag(Qt::NoDropShadowWindowHint);
-    const auto prepare = [menu]() {
-        syncMenuCheckColumn(menu);
-        for (QAction* action : menu->actions()) {
-            roundMenuTree(action->menu());
-        }
-    };
-    prepare();
-    QObject::connect(menu, &QMenu::aboutToShow, menu, prepare);
 }
 
 // Build a 16×18 pop-out indicator: hollow square (the main waterfall
@@ -750,7 +708,7 @@ void TitleBar::updateChromeLayout()
     }
     const QScopedValueRollback<bool> updating(m_updatingChromeLayout, true);
     QWidget* host = window();
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     mac::updateNativeTitleVisibility(host);
 #endif
     const QMargins insets = WindowChrome::contentInsets(host);
@@ -805,7 +763,7 @@ QVariantMap TitleBar::barState() const
     if (m_captionButtons) {
         chrome.insert(QStringLiteral("captionButtons"), m_captionButtons->state());
     }
-#ifdef Q_OS_MAC
+#ifdef Q_OS_MACOS
     const QRectF nativeBounds = mac::nativeCaptionBounds(window());
     chrome.insert(QStringLiteral("nativeCaptionRect"),
                   QVariantList{nativeBounds.x(), nativeBounds.y(), nativeBounds.width(), nativeBounds.height()});
@@ -1146,24 +1104,13 @@ void TitleBar::setMenuBar(QMenuBar* mb)
     // it, and MainWindow keeps building menus into it.
     mb->hide();
 
-    // Rounded, slightly see-through panels (roundMenuTree), 8 px like the radio
-    // tabs; the inset keeps the selection clear of the curve.  Item text starts at one x in every
-    // menu: a 14 px check column, and the same 14 px added to the padding of
-    // menus that have none (syncMenuCheckColumn).
-    const char* roundedMenuRules =
-        "QMenu { background: {{color.titlebar.menu.background}}; color: {{color.text.primary}};"
-        " border: 1px solid {{color.background.2}}; border-radius: 8px; padding: 4px; }"
-        "QMenu::item { padding: 4px 24px 4px 12px; }"
-        "QMenu[aetherHasChecks=\"false\"]::item { padding-left: 26px; }"
-        "QMenu::indicator { width: 14px; height: 14px; }"
-        "QMenu::item:selected { background: {{color.background.2}}; border-radius: 4px; }"
-        "QMenu::separator { height: 1px; background: {{color.background.2}}; margin: 4px 8px; }";
+    // Rounded, slightly see-through panels (RoundedMenu.h).
     AetherSDR::ThemeManager::instance().applyStyleSheet(mb,
-        QStringLiteral("QMenuBar { background: transparent; }") + QLatin1String(roundedMenuRules));
+        QStringLiteral("QMenuBar { background: transparent; }") + kRoundedMenuRules);
 
     m_appMenu = new QMenu(this);
     m_appMenu->setObjectName(QStringLiteral("titleBarAppMenu"));
-    AetherSDR::ThemeManager::instance().applyStyleSheet(m_appMenu, roundedMenuRules);
+    AetherSDR::ThemeManager::instance().applyStyleSheet(m_appMenu, kRoundedMenuRules);
     m_appMenu->addActions(mb->actions());
     roundMenuTree(m_appMenu);
     for (QAction* a : mb->actions())
@@ -1349,12 +1296,8 @@ void TitleBar::setHeadphoneAvailable(bool available)
             QStringLiteral("Headphone volume level, 0 to 100 percent"));
         return;
     }
-    const QString muteReason = QStringLiteral(
-        "Unavailable: this radio has no headphone output. Its audio plays on "
-        "this computer; mute it with the speaker button.");
-    const QString volumeReason = QStringLiteral(
-        "Unavailable: this radio has no headphone output. Its audio plays on "
-        "this computer; set its level with the master volume slider.");
+    const QString muteReason = QString::fromLatin1(kHeadphoneMuteUnavailableReason);
+    const QString volumeReason = QString::fromLatin1(kHeadphoneLevelUnavailableReason);
     m_headphoneBtn->setToolTip(muteReason);
     m_headphoneBtn->setAccessibleDescription(muteReason);
     m_hpSlider->setToolTip(volumeReason);
@@ -1490,6 +1433,7 @@ void TitleBar::showFeatureRequestDialog()
     nam->setTransferTimeout(kTransferTimeoutMs);
     auto* reply = nam->get(QNetworkRequest(
         QUrl("https://api.github.com/repos/aethersdr/AetherSDR/releases/latest")));
+    NetworkDiagnostics::watch(reply, "feature request release lookup");
     connect(reply, &QNetworkReply::finished, this, [this, reply, nam] {
         reply->deleteLater();
         nam->deleteLater();
@@ -1502,11 +1446,7 @@ void TitleBar::showFeatureRequestDialog()
             auto currentVer = VersionNumber::parse(QCoreApplication::applicationVersion());
             if (!latestVer.isNull() && currentVer < latestVer) {
                 auto answer = FramelessMessageBox::warning(this, "Outdated Version",
-                    QString("<p>You are running <b>v%1</b> but <b>v%2</b> is available.</p>"
-                            "<p>Your issue may already be fixed in the latest release. "
-                            "Please update before filing a bug report.</p>"
-                            "<p>Continue anyway?</p>")
-                        .arg(QCoreApplication::applicationVersion(), latest),
+                    outdatedVersionPromptHtml(QCoreApplication::applicationVersion(), latest),
                     QMessageBox::Yes | QMessageBox::No, QMessageBox::No);
                 if (answer != QMessageBox::Yes) return;
             }
@@ -1525,8 +1465,8 @@ void TitleBar::showFeatureRequestDialogImpl()
         "  Page 2: https://github.com/aethersdr/AetherSDR/issues?state=open&per_page=100&page=2\n"
         "  ... continue until a page returns fewer than 100 issues.\n"
         "Do NOT rely on cached or training data for the issue list.\n\n"
-        "Also fetch CLAUDE.md fresh (do not use cached versions):\n"
-        "  https://raw.githubusercontent.com/aethersdr/AetherSDR/main/CLAUDE.md\n\n"
+        "Also fetch AGENTS.md fresh (do not use cached versions):\n"
+        "  https://raw.githubusercontent.com/aethersdr/AetherSDR/main/AGENTS.md\n\n"
         "I want to report an issue or request a feature for AetherSDR, a cross-platform\n"
         "Qt6/C++20 client for FlexRadio transceivers. It uses the FlexLib API over TCP/UDP.\n\n"
         "DUPLICATE CHECK — this is mandatory. Search the fetched issue list for keywords\n"
