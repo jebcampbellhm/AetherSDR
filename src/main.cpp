@@ -1,5 +1,6 @@
 #include "gui/MainWindow.h"
 #include "gui/ConnectionPanel.h"
+#include "gui/DisplaySessionMonitor.h"
 #include "gui/FramelessMessageBox.h"
 #include "gui/SliceColorManager.h"
 #include "core/AppSettings.h"
@@ -719,6 +720,7 @@ int main(int argc, char* argv[])
 
     int exitCode = 0;
     {
+        AetherSDR::DisplaySessionMonitor displaySessionMonitor(&app);
         AetherSDR::MainWindow window;
         window.show();
 

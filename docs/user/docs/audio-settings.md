@@ -39,7 +39,12 @@ When the operating system adds or removes an audio device, an **Audio Device Det
 
 ### Audio Buffer
 
-**Audio Buffer** sets how much received audio AetherSDR holds before playing it. The default is **100 ms**, adjustable from 50 to 1000 ms. Increase it if audio stutters over a VPN or SmartLink link with a lot of jitter; lower values reduce latency on a clean LAN. The **Audio Health** page in **Tools → Network Diagnostics...** shows the buffer level live. See [Runtime Monitor](./runtime-monitor.md).
+**Audio Buffer** limits how much incoming audio can queue. The default is **100 ms**, adjustable from 50 to 1000 ms. Increase it if audio stutters over a VPN or SmartLink link with a lot of jitter; a larger limit preserves more audio from bursty deliveries. The **Audio Health** page in **Tools → Network Diagnostics...** shows the buffer level live. See [Runtime Monitor](./runtime-monitor.md).
+
+Standalone Web-888 playback also uses a **360 ms** startup/refill reserve for
+bursty WebSocket delivery. Its queue capacity accommodates that reserve even
+when the configured Audio Buffer is smaller. This adds about 0.36 seconds to speaker startup;
+it does not delay the receiver's per-slice decoder export.
 
 ## Volume and mute
 

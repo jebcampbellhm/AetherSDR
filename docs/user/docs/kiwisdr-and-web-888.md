@@ -1,10 +1,13 @@
 ---
 title: "KiwiSDR and Web-888"
 slug: "/kiwisdr-and-web-888"
-description: "AetherSDR can use a remote KiwiSDR or Web-888 web receiver as a receive-only \"virtual RX antenna\" for a slice."
+description: "Connect directly to a Web-888, or use a KiwiSDR or Web-888 as an external receive-only antenna for a slice."
 ---
 
 AetherSDR can use a remote **KiwiSDR** or **Web-888** web receiver as a receive-only "virtual RX antenna" for a slice. While a slice uses one, its audio, S-meter and (optionally) its spectrum and waterfall come from that receiver instead of your radio. Public KiwiSDRs around the world can be browsed from inside AetherSDR.
+
+You can also connect directly to a **Web-888** from **Connect to Radio →
+Connect by IP → Radio type: Web-888**, without connecting another radio first.
 
 These receivers never transmit, and AetherSDR inhibits transmit on a panadapter that is showing one.
 
@@ -16,6 +19,30 @@ These receivers never transmit, and AetherSDR inhibits transmit on a panadapter 
 - [Support and Logging](./support-and-logging.md): KiwiSDR log categories for problem reports.
 
 ## Setup
+
+### Connecting directly to a Web-888
+
+Open **Connect to Radio → Connect by IP** and choose **Web-888** under
+**Radio type**. Enter the receiver's IP address, its HTTP port (usually
+**8073**), and its **user password** if required. Press **Connect by IP**, or
+press Enter in the password field.
+
+<img src="/img/screens/web888-connect-by-ip.png" width="760" alt="Connect to Radio with Connect by IP selected and Radio type set to Web-888. The form provides a separate port field showing 8073, a masked user-password field and a Forget button. The receiver address is empty." />
+
+*The standalone Web-888 connection form. Enter the address and port separately.*
+
+This opens a standalone, receive-only Web-888 session with one receiver and
+one spectrum/waterfall. No Demo session or second radio is required. Accepted
+passwords are saved in the operating system keychain when the build supports
+it; passwords never go in the settings database. Leave the password blank to
+reuse the saved password or connect to a passwordless receiver. Recent
+addresses retain the Web-888 type and port.
+Use **Forget** beside the password to remove the saved password for the entered
+address and port. An active connection stays open. See [Manual Connection](./manual-connection.md#connecting-to-a-web-888)
+for source-path guidance and password recovery.
+
+The separate KiwiSDR receiver setup below remains available for using an
+external receiver alongside another radio.
 
 ### Adding a receiver
 
@@ -77,6 +104,11 @@ A small **Flex** / **Kiwi** button at the bottom-left of a panadapter with a Kiw
 
 The 3D stacked-trace spectrum works on KiwiSDR sources too.
 
+If a Web-888 returns constant spectrum rows at narrow zoom, AetherSDR uses a
+wider receiver span while keeping your selected display span. Detail is limited
+to the receiver data available at that wider span. Reconnecting the receiver
+retries its advertised zoom range.
+
 ## Receive Sync and Diversity
 
 A remote receiver's audio and waterfall arrive later than your own radio's. **Settings → Receive Sync ▸** time-aligns them:
@@ -103,7 +135,23 @@ The **Kiwi DX** toggle in **SpotHub → Display** overlays the KiwiSDR DX Commun
 
 ## Troubleshooting
 
-### The receiver shows Busy or Waiting
+### The spectrum trace is below the display
+
+The receiver's spectrum level can change with its span, leaving it outside a
+fixed vertical range.
+
+1. Open the panadapter's **Display** panel and enable **Auto** beside **FFT Floor**.
+2. For a dark or saturated waterfall, click **Auto** beside **Black Level** to
+   recalculate the receiver's waterfall floor and ceiling.
+
+### A standalone Web-888 connection is refused
+
+Read the connection error and check the receiver's address, port and user
+password. If the receiver is full, wait for a free slot and retry. Standalone
+Web-888 sessions do not offer camping on another user's channel. See
+[Manual Connection](./manual-connection.md#a-web-888-connection-fails).
+
+### An external receiver shows Busy or Waiting
 
 Every channel on the receiver is in use.
 
@@ -111,7 +159,7 @@ Every channel on the receiver is in use.
 2. Accept a monitor (camp) session if one is offered.
 3. Or choose another receiver with **Browse Public…**.
 
-### The receiver shows Error
+### An external receiver shows Error
 
 The receiver refused the connection. Error messages name their source: the receiver's own refusal codes and messages.
 
@@ -126,6 +174,9 @@ AetherSDR's directory mirror is unreachable, so the browser shows the list it al
 2. Click **Refresh list** again later.
 
 ### Transmit is disabled on a panadapter
+
+Standalone Web-888 sessions are receive-only and have no transmit operation.
+For an external receiver assigned to another radio's slice:
 
 The panadapter is showing the KiwiSDR's spectrum and waterfall.
 

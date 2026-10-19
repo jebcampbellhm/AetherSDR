@@ -111,6 +111,7 @@ int main(int argc, char** argv)
         const QStringList families = {
             QStringLiteral("sim"), QStringLiteral("hl2"), QStringLiteral("anan"),
             QStringLiteral("icom"), QStringLiteral("rtl"), QStringLiteral("flex"),
+            QStringLiteral("web888"),
         };
         for (const QString& family : families) {
             if (!model.rebuildBackendForTest(family)) {

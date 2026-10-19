@@ -116,6 +116,8 @@ private:
     quint64 m_nextLease{0};
     int m_nextId{1};
     int m_activeSlice{0};
+    bool m_loadingCredentials{false};
+    bool m_saveCredentials{false};
     bool m_connected{false};
     bool m_stopping{false};
 };

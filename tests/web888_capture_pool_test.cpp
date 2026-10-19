@@ -219,6 +219,7 @@ int main(int argc, char** argv)
     // Backend-owned capture accounting permanently reserves both interactive slots.
     MonitoringBackend monitoring;
     RadioConnectRequest request;
+    request.params.insert(QStringLiteral("web888.password"), QString{});
     request.host = QStringLiteral("receiver.invalid");
     request.port = 8073;
     CHECK(!monitoring.applyDigitalProfile({a}, 24000, 3));

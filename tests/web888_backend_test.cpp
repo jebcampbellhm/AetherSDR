@@ -53,6 +53,7 @@ int main(int argc, char** argv)
     CHECK(caps.maxSlices == 4 && caps.maxPanadapters == 2 && backend.ownsRxAudio());
     CHECK(caps.receiveModeControl && caps.receiveAudioControl);
     RadioConnectRequest request;
+    request.params.insert(QStringLiteral("web888.password"), QString{});
     request.host = QStringLiteral("receiver.invalid");
     request.port = 8073;
     test::SeamThreadAffinityProbe probe(&backend);

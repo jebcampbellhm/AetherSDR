@@ -213,6 +213,7 @@ int main(int argc, char** argv)
             QStringLiteral("icom"), QStringLiteral("rtl"),  QStringLiteral("flex"),
             QStringLiteral("hl2"),  QStringLiteral("sim"),  QStringLiteral("icom"),
             QStringLiteral("flex"), QStringLiteral("anan"), QStringLiteral("flex"),
+            QStringLiteral("web888"), QStringLiteral("sim"), QStringLiteral("web888"),
         };
         std::printf("-- cold cycle\n");
         for (const QString& family : cycle) {
@@ -220,7 +221,7 @@ int main(int argc, char** argv)
         }
 
         // 3. #4599's defect class: per-backend wiring must not accumulate across
-        //    those twelve switches. A connection installed in setupBackend()
+        //    those switches. A connection installed in setupBackend()
         //    whose sender and receiver are both `this` survives
         //    teardownBackend() and gains one live copy per switch; its symptom
         //    is N capabilitiesChanged per connect edge.

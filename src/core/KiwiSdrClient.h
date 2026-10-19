@@ -239,6 +239,7 @@ private:
     bool isSupportedSoundFrame(
         const KiwiSdrProtocol::FrameObservation& observation) const;
     int effectiveWaterfallZoomCap() const;
+    bool recoverFlatWaterfallRow(const QVector<float>& bins, quint32 start, int zoom);
     bool parseWaterfallFrameHeader(const QByteArray& frame, quint32* start,
                                    int* zoom) const;
     QByteArray resampleSoundSamples(const QVector<float>& monoSamples);
@@ -412,6 +413,8 @@ private:
     // from kDefaultWaterfallZoomMax in connectToEndpoint().
     int m_waterfallZoomMax{14};
     int m_waterfallZoomCap{14};
+    int m_waterfallRecoveryZoomCap{20};
+    int m_waterfallFlatRows{0};
     bool m_waterfallZoomMaxFromServer{false};
     bool m_waterfallZoomCapFromServer{false};
     int m_waterfallFftBins{1024};

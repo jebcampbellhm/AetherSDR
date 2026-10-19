@@ -63,6 +63,7 @@ int main(int argc, char** argv)
     auto* monitoringBackend = ownedMonitor.get();
     radio.setBackendForTest(std::move(ownedMonitor), QStringLiteral("web888"));
     RadioConnectRequest monitorRequest;
+    monitorRequest.params.insert(QStringLiteral("web888.password"), QString{});
     monitorRequest.host = QStringLiteral("receiver.invalid"); monitorRequest.port = 8073;
     monitoringBackend->connectRadio(monitorRequest);
     emit monitoringBackend->client->stateChanged(KiwiSdrClient::State::Connected, {});

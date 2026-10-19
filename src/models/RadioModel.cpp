@@ -11773,6 +11773,10 @@ void RadioModel::publishRadioReportedCapacity()
 void RadioModel::applyRadioChanges(const RadioDelta& d)
 {
     bool changed = false;
+    if (d.version && m_version != *d.version) {
+        m_version = *d.version;
+        changed = true;
+    }
     if (d.model) {
         m_model = *d.model;
         // #5594 item 3: the table is the fallback, never an override. A radio

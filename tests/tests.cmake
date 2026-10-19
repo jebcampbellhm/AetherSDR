@@ -4302,6 +4302,11 @@ target_include_directories(kiwi_sdr_waterfall_setup_test PRIVATE src)
 target_link_libraries(kiwi_sdr_waterfall_setup_test PRIVATE aethercore Qt6::Core)
 add_test(NAME kiwi_sdr_waterfall_setup_test COMMAND kiwi_sdr_waterfall_setup_test)
 
+add_executable(web888_backend_test tests/web888_backend_test.cpp)
+target_include_directories(web888_backend_test PRIVATE src tests)
+target_link_libraries(web888_backend_test PRIVATE aethercore Qt6::Core Qt6::Test)
+add_test(NAME web888_backend_test COMMAND web888_backend_test)
+
 # Socket-free regression: KiwiSDR zoom_cap (request ceiling) must not replace
 # zoom_max (start fixed-point scale); v1.900 shared waterfalls send both.
 add_executable(kiwi_sdr_waterfall_zoom_cap_test
@@ -7446,6 +7451,17 @@ set_target_properties(connection_panel_size_test PROPERTIES AUTOMOC ON)
 add_test(NAME connection_panel_size_test COMMAND connection_panel_size_test)
 set_tests_properties(connection_panel_size_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+add_executable(display_session_monitor_test
+    tests/display_session_monitor_test.cpp src/gui/DisplaySessionMonitor.cpp)
+target_include_directories(display_session_monitor_test PRIVATE src)
+target_link_libraries(display_session_monitor_test PRIVATE Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(display_session_monitor_test PRIVATE Wtsapi32)
+endif()
+set_target_properties(display_session_monitor_test PROPERTIES AUTOMOC ON)
+add_test(NAME display_session_monitor_test COMMAND display_session_monitor_test)
+set_tests_properties(display_session_monitor_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Leaving minimal mode after a launch in it must not draw the spectrum's first
 # QRhi frame inside the exit's resize cascade (#5915; #4363, #4990). Plain

@@ -6495,7 +6495,7 @@ QJsonObject AutomationServer::doConnect(const QString& action,
     }
 
     if (a == QLatin1String("ip")) {
-        // connect ip <host-or-ip> [flex|hl2|icom]
+        // connect ip <host-or-ip> [flex|hl2|icom|web888]
         // Without a family, discovery decides: an advertised address is probed with that
         // entry's family (#4912); an unadvertised one (e.g. off-subnet) falls back to the
         // connect dialog's radio-type selector. The reply's `familySource` says which

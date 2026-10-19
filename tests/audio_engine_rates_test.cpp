@@ -670,8 +670,56 @@ void transitionsAndRejection()
           "replacement producer is accepted after prior lease revocation");
 }
 
+void jitterPlayoutReserve()
+{
+    for (int deviceRate : {24000, 48000}) {
+        Fixture fixture(deviceRate);
+        fixture.engine.setRxBufferCapMs(100);
+        fixture.engine.setRxJitterTargetMs(360);
+        PcmProducer producer;
+        check(producer.start(PcmPurpose::Speaker, -1, {24000, PcmLayout::Stereo}),
+              "jitter producer starts at the receiver rate");
+        feed(fixture.engine, producer, tone(24000, 2400, 0));
+        fixture.tick();
+        check(fixture.output.data().isEmpty(), "playout waits for the transport reserve");
+        feed(fixture.engine, producer, tone(24000, 6240, 2400));
+        check(AudioEngineRatesTestAccess::rawBytes(fixture.engine) == 8640 * kFrameBytes,
+              "normal 100 ms cap cannot discard the declared jitter reserve");
+        fixture.tick();
+        const qsizetype bytesPerTick = deviceRate / 100 * kFrameBytes;
+        check(fixture.output.size() == bytesPerTick,
+              "reserve opens at producer duration regardless of device rate");
+        // A 250 ms delivery interruption exceeds the ordinary queue cap.
+        // Retained real audio must cover it without emitting silence.
+        for (int tick = 0; tick < 25; ++tick) {
+            const qsizetype before = fixture.output.size();
+            fixture.tick();
+            check(fixture.output.size() - before == bytesPerTick,
+                  "transport reserve covers every tick of the delivery interruption");
+        }
+        check(amplitude(fixture.output.data(), deviceRate, 0, 1000) > 0.25,
+              "jitter protection plays retained signal rather than invented silence");
+        feed(fixture.engine, producer, tone(24000, 6000, 8640));
+        fixture.tick();
+        check(AudioEngineRatesTestAccess::rawBytes(fixture.engine) > 2400 * kFrameBytes,
+              "catch-up delivery retains a reserve beyond the low-latency cap");
+        for (int tick = 0; tick < 50; ++tick)
+            fixture.tick();
+        const qsizetype drained = fixture.output.size();
+        feed(fixture.engine, producer, tone(24000, 4800, 14640));
+        fixture.tick();
+        check(fixture.output.size() == drained,
+              "an exhausted stream refills its reserve before restarting");
+        fixture.engine.setRxJitterTargetMs(0);
+        fixture.tick();
+        check(fixture.output.size() > drained,
+              "removing the transport policy restores ordinary immediate playout");
+    }
+}
+
 void queueBudgetsAndDeviceTransitions()
 {
+    jitterPlayoutReserve();
     for (int producerRate : {24000, 48000}) {
         Fixture fixture(44100);
         fixture.engine.setRxBufferCapMs(100);

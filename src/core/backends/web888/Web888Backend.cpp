@@ -3,6 +3,8 @@
 #include "Web888IqProcessor.h"
 
 #include "core/KiwiSdrClient.h"
+#include "core/NetworkReceiverCredentials.h"
+#include <QTimer>
 
 #include <QUrl>
 #include <QScopeGuard>
@@ -50,6 +52,7 @@ RadioCapabilities Web888Backend::capabilities() const
     caps.sliceFrequencyControl = SliceFrequencyControl{Authority::Engine, 0, 0};
     caps.receiveModeControl = ReceiveModeControl{Authority::Engine, kModes};
     caps.receiveAudioControl = ReceiveAudioControl{Authority::Engine};
+    caps.receiveAudioBuffering = ReceiveAudioBuffering{360};
     return caps;
 }
 
@@ -171,8 +174,25 @@ void Web888Backend::connectRadio(const RadioConnectRequest& request)
         url.setPort(request.port == 0 ? 8073 : request.port);
         m_endpoint = url.toString();
     }
-    m_password = request.params.value(QStringLiteral("web888.password")).toString();
-    openReceiver(0);
+    if (request.params.contains(QStringLiteral("web888.password"))) {
+        m_password = request.params.value(QStringLiteral("web888.password")).toString();
+        openReceiver(0);
+        return;
+    }
+    m_loadingCredentials = true;
+    const auto generation = m_generation;
+    NetworkReceiverCredentials::load(m_endpoint, this,
+        [this, generation](const QString& password, const QString& error) {
+            if (generation != m_generation || !m_loadingCredentials) { return; }
+            m_loadingCredentials = false;
+            if (!error.isEmpty()) {
+                emit connectionError(tr("Cannot load the Web-888 password: %1").arg(error));
+                return;
+            }
+            m_password = password;
+            m_saveCredentials = true;
+            openReceiver(0);
+        });
 }
 
 void Web888Backend::openReceiver(int id)
@@ -204,6 +224,15 @@ void Web888Backend::openReceiver(int id)
             r->connected = true;
             if (id == 0) {
                 m_connected = true;
+                if (m_saveCredentials) {
+                    NetworkReceiverCredentials::saveAccepted(m_endpoint, m_password, this,
+                        [this, id, generation](const QString& error) {
+                            if (current(id, generation) && !error.isEmpty()) {
+                                emit configurationWarning(error);
+                            }
+                        });
+                }
+                if (!current(id, generation)) { return; }
                 emit connected();
             }
             if (current(id, generation)) {
@@ -252,12 +281,21 @@ void Web888Backend::openReceiver(int id)
                                           [](float bin) { return std::isfinite(bin); })) {
             return;
         }
-        // Bind this frame's geometry before delivery, including late rows
-        // from the previous zoom. Never label it with the requested geometry.
-        emit panCenterBandwidthChanged(panId, (low + high) / 2.0, high - low);
+        const double viewLow = (r->panCenterHz - r->panBandwidthHz / 2) / 1e6;
+        const double viewWidth = r->panBandwidthHz / 1e6;
+        QVector<float> view(bins.size(), -200.0f);
+        for (qsizetype i = 0; i < view.size(); ++i) {
+            const double frequency = viewLow + (i + 0.5) * viewWidth / view.size();
+            const double position = (frequency - low) / (high - low) * bins.size() - 0.5;
+            if (position < 0 || position > bins.size() - 1) { continue; }
+            const auto left = static_cast<qsizetype>(position);
+            const auto right = std::min(left + 1, bins.size() - 1);
+            view[i] = bins[left] + (bins[right] - bins[left]) * (position - left);
+        }
+        emit panCenterBandwidthChanged(panId, r->panCenterHz / 1e6, viewWidth);
         if (current(id, generation)) {
-            emit spectrumFrameReady(panIndex(id), QByteArray(reinterpret_cast<const char*>(bins.constData()),
-                                                  bins.size() * sizeof(float)));
+            emit spectrumFrameReady(panIndex(id), QByteArray(reinterpret_cast<const char*>(view.constData()),
+                                                  view.size() * sizeof(float)));
         }
     });
     connect(client, &KiwiSdrClient::meterReadingReady, this,
@@ -291,6 +329,16 @@ void Web888Backend::openReceiver(int id)
     if (!current(id, generation)) {
         return;
     }
+    QTimer::singleShot(30000, this, [this, id, generation] {
+        if (!current(id, generation) || receiver(id)->connected) { return; }
+        if (id == 0) {
+            emit connectionError(tr("Web-888 connection timed out."));
+            if (current(id, generation)) { stop(true); }
+        } else {
+            closeReceiver(id, true);
+            emit sliceLifecycleFailed(QStringLiteral("create"), id, tr("Connection timed out."));
+        }
+    });
     client->connectToEndpoint(m_endpoint, m_password);
 }
 
@@ -371,7 +419,9 @@ void Web888Backend::closeReceiver(int id, bool notify)
 
 void Web888Backend::stop(bool notify)
 {
-    if (!receiver(0)->client || m_stopping) { return; }
+    if ((!receiver(0)->client && !m_loadingCredentials) || m_stopping) { return; }
+    m_loadingCredentials = false;
+    m_saveCredentials = false;
     m_stopping = true;
     ++m_generation;
     retirePcmStreams();

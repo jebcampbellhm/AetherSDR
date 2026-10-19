@@ -966,6 +966,7 @@ void AudioEngine::setReceivePresentationDelays(
 
 void AudioEngine::resetReceivePresentationAudioBuffers()
 {
+    m_rxJitterPrebuffering.store(m_rxJitterTargetMs.load() > 0);
     std::lock_guard<std::recursive_mutex> dspLock(m_dspMutex);
 
     m_rxBuffer.clear();
@@ -2054,6 +2055,7 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
     const bool externalKiwiAudio = anyExternalKiwiAudioEnabled();
     const bool anyKiwiAudio = kiwiAudio || externalKiwiAudio;
     const int configuredBufMs = m_rxBufferCapMs.load();
+    const int jitterTargetMs = m_rxJitterTargetMs.load(std::memory_order_relaxed);
     const int flexPresentationDelayMs =
         m_flexReceivePresentationDelayMs.load(std::memory_order_relaxed);
     const int kiwiPresentationDelayMs =
@@ -2074,7 +2076,7 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
     const int presentationBufMs =
         std::max(flexPresentationDelayMs, kiwiPresentationBufferMs);
     const int effectiveBufMs =
-        std::max({configuredBufMs,
+        std::max({configuredBufMs, jitterTargetMs > 0 ? jitterTargetMs + 100 : 0,
                   anyKiwiAudio ? kKiwiSdrBufferCapMs : configuredBufMs,
                   presentationBufMs > 0 ? presentationBufMs + 100 : 0});
     const qsizetype sourceMaxBufBytes =
@@ -2116,7 +2118,7 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
                     source->prebuffering = true;
                 }
             }
-        } else {
+        } else if (!m_rxJitterPrebuffering.load(std::memory_order_relaxed)) {
             m_rxBufferUnderrunCount.fetch_add(1);
         }
         if (flexPresentationDelayMs > 0) {
@@ -2157,8 +2159,25 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
         m_rxPresentationPrebuffering.store(true,
                                            std::memory_order_relaxed);
     }
-    const bool flexPresentationPrebuffering =
-        m_rxPresentationPrebuffering.load(std::memory_order_relaxed);
+    // This is a startup/refill watermark, not a permanent holdback. Once
+    // playout starts, retained samples can cover a pause in network delivery.
+    if (jitterTargetMs != m_lastRxJitterTargetMs) {
+        m_lastRxJitterTargetMs = jitterTargetMs;
+        m_rxJitterPrebuffering.store(jitterTargetMs > 0, std::memory_order_relaxed);
+    }
+    if (jitterTargetMs <= 0) {
+        m_rxJitterPrebuffering.store(false, std::memory_order_relaxed);
+    } else {
+        const qsizetype queuedBytes = m_rxBuffer.size() + queuedAudioBytes(m_rxPackets)
+            + rawEquivalentAudioBytes(m_rxOutputBuffer.size(), sampleRate,
+                m_rxProducerRate.load());
+        if (queuedBytes == 0)
+            m_rxJitterPrebuffering.store(true, std::memory_order_relaxed);
+        else if (queuedBytes >= audioBytesForMsAtRate(m_rxProducerRate.load(), jitterTargetMs))
+            m_rxJitterPrebuffering.store(false, std::memory_order_relaxed);
+    }
+    const bool mainPrebuffering = m_rxPresentationPrebuffering.load(std::memory_order_relaxed)
+        || m_rxJitterPrebuffering.load(std::memory_order_relaxed);
 
     // Zombie sink watchdog: if we have data waiting but the sink reports
     // zero bytes free for ~2 seconds, the WASAPI handle is likely stale
@@ -2223,7 +2242,7 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
             return rawBytes
                    + rawEquivalentAudioBytes(outputBytes, sampleRate, m_rxProducerRate.load());
         };
-        while (!flexPresentationPrebuffering
+        while (!mainPrebuffering
                && !m_rxPackets.empty()
                && (m_rxOutputBuffer.size() / frameBytes) < freeFrames
                && (flexPrebufferBytes <= 0
@@ -2356,7 +2375,7 @@ void AudioEngine::drainRxAudio(qsizetype freeBytes)
             : wantedMainOutputFrames;
     const qsizetype wantedMainNativeBytes = wantedMainNativeFrames * frameBytes;
     const qsizetype availableMainBytes =
-        (!nr2PacketMode && !flexPresentationPrebuffering)
+        (!nr2PacketMode && !mainPrebuffering)
             ? std::max<qsizetype>(0, m_rxBuffer.size() - flexPrebufferBytes)
             : 0;
     const qsizetype mainBytes =
@@ -2861,6 +2880,8 @@ QJsonArray AudioEngine::audioEndpointDiagnostics() const
     rx["buffer_peak_bytes"] = static_cast<double>(m_rxBufferPeakBytes.load());
     rx["buffer_peak_ms"] = m_rxBufferPeakMs.load();
     rx["underrun_count"] = static_cast<double>(m_rxBufferUnderrunCount.load());
+    rx["jitter_target_ms"] = m_rxJitterTargetMs.load();
+    rx["jitter_prebuffering"] = m_rxJitterPrebuffering.load();
     QJsonObject presentation;
     presentation["flex_delay_ms"] =
         m_flexReceivePresentationDelayMs.load(std::memory_order_relaxed);
@@ -4117,6 +4138,7 @@ bool AudioEngine::startRxStream()
     m_rxBufferMs.store(0.0);
     m_rxBufferPeakMs.store(0.0);
     m_rxBufferUnderrunCount.store(0);
+    m_rxJitterPrebuffering.store(m_rxJitterTargetMs.load() > 0);
     m_rxBufferSampleRate.store(DEFAULT_SAMPLE_RATE);
     m_rxZombieTickCount = 0;
     m_rxStaleTickCount = 0;
@@ -4421,6 +4443,7 @@ void AudioEngine::applyPendingRxSinkRate()
 
 void AudioEngine::stopRxStream()
 {
+    m_rxJitterPrebuffering.store(m_rxJitterTargetMs.load() > 0);
     stopSidetoneStream();
     stopQuindarLocalSink();
     resetRxChainStateForSourceSwitch();
@@ -4873,6 +4896,7 @@ bool AudioEngine::mainPcmSourceOwnsDisplay() const
 
 void AudioEngine::resetMainPcmState(int producerRate, bool rebuildDsp)
 {
+    m_rxJitterPrebuffering.store(m_rxJitterTargetMs.load() > 0);
     std::lock_guard<std::recursive_mutex> lock(m_dspMutex);
     m_rxBuffer.clear();
     m_rxPackets.clear();
@@ -5575,6 +5599,8 @@ void AudioEngine::processRxAudioData(const QByteArray& pcm, bool emitTncTap,
         ? m_flexReceivePresentationDelayMs.load() : m_kiwiReceivePresentationDelayMs.load();
     const qsizetype cap = audioBytesForMsAtRate(producerRate,
         std::max({m_rxBufferCapMs.load(), presentationDelay + 100,
+            targetBuffer == RxAudioBuffer::Main && m_rxJitterTargetMs.load() > 0
+                ? m_rxJitterTargetMs.load() + 100 : 0,
             (targetBuffer == RxAudioBuffer::KiwiSdr || kiwiSdrAudioActive()
              || anyExternalKiwiAudioEnabled()) ? kKiwiSdrBufferCapMs : 0}));
     if (targetBuffer == RxAudioBuffer::Main
@@ -7673,6 +7699,7 @@ void AudioEngine::setNr2Enabled(bool on)
     std::unique_lock<std::recursive_mutex> lock(m_dspMutex);
     ++m_dspConfigurationGeneration;
     m_rxBuffer.clear();
+    m_rxJitterPrebuffering.store(m_rxJitterTargetMs.load() > 0);
     m_rxPackets.clear();
     m_rxOutputBuffer.clear();
     m_kiwiSdrRxBuffer.clear();
