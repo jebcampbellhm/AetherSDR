@@ -32,8 +32,19 @@ press Enter in the password field.
 *The standalone Web-888 connection form. Enter the address and port separately.*
 
 This opens a standalone, receive-only Web-888 session. You can open two
-independent panadapters, each with its own waterfall and up to two shared SSB
-listeners (four listeners using two hardware RX slots). No Demo session or second radio is required. Accepted
+independent panadapters, each with its own waterfall. Adding a slice requests
+another hardware RX slot with independent tuning, mode, filter and AGC; it does
+not share a fixed 24 kHz capture. Extra slices use sound-only connections and
+appear on the chosen waterfall. AetherSDR checks receiver occupancy before each
+connection; the server makes the final admission decision. A full receiver leaves
+existing slices running. Closing an added slice releases its RX slot.
+
+Use the receiver's **12 kHz** configuration for ordinary listening. This is a
+receiver-wide admin setting: adding a slice does not change it. The client also
+accepts an existing 24 kHz configuration. Digital monitoring must use the actual
+configured rate. Its budget reserves the two waterfall listeners plus every
+additional pending or connected listening slice. Only the selected slice feeds
+the speakers. No Demo session or second radio is required. Accepted
 passwords are saved in the operating system keychain when the build supports
 it; passwords never go in the settings database. Leave the password blank to
 reuse the saved password or connect to a passwordless receiver. Recent

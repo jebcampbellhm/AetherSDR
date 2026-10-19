@@ -541,3 +541,32 @@ qualification is claimed. Next timing work needs a qualified per-buffer clock or
 a separately measured host-clock mapping with explicit uncertainty; repeated SND
 headers cannot arm decoder routes. GPS PPS frequency correction is distinct from
 sample-time timestamping and was left untouched.
+
+
+## Independent listening allocation - 2026-10-19
+
+Rebuilt the Windows desktop and live probe after replacing shared interactive
+IQ listeners with independent sound-only receiver leases. Five targeted tests
+passed: web888_backend_test, web888_shared_ssb_test (retains digital splitter
+checks and now tests independent hardware listener lifecycle),
+web888_capture_pool_test, kiwi_sdr_session_test and
+web888_connection_panel_test. The GUI test needed QT_PLUGIN_PATH pointing to
+the pinned Qt installation for its offscreen plugin; the initial invocation
+stalled and was stopped, then the correctly configured invocation passed.
+Engine-boundary, command-plane and capability-record strict checks passed
+with existing baseline warnings; git diff --check passed.
+
+The initial 30-second independent-listener live probe was interrupted by a
+receiver restart, confirmed by the operator, and is not a pass. The repeat
+completed with failed=0: primary_frames=665600, secondary_frames=564224,
+waterfall_rows=671, waterfall_span_hz=350000. It added a separate listener at
+21.2 MHz, retuned that listener to 28.2 MHz, removed it four seconds before
+completion, verified primary audio continued and retired child audio stopped,
+then disconnected the backend. No RF quality or timed-decoder claim is made.
+The receiver status afterward reported users=2; zero total occupancy was not
+established and may include other receiver jobs/sessions.
+
+The operator selected stock 12 kHz going forward and is changing that setting
+on the receiver. No persistent receiver setting was changed by this increment.
+Live probe results above establish transport/lifecycle, not a measured input
+sample-rate qualification. Socket-free admission was exercised at 12 kHz.

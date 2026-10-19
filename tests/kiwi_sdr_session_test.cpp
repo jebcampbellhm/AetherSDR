@@ -5,11 +5,36 @@
 #include <QCoreApplication>
 #include <QDebug>
 #include <QNetworkRequest>
+#include <QNetworkReply>
+#include <cstring>
 #include <QSet>
 #include <QUrl>
 
 #ifdef HAVE_WEBSOCKETS
 namespace AetherSDR {
+
+class StatusReply final : public QNetworkReply {
+public:
+    StatusReply(const QByteArray& payload) : m_payload(payload) {
+        setUrl(QUrl("http://receiver.example:8073/status"));
+        setRequest(QNetworkRequest(url()));
+        setAttribute(QNetworkRequest::HttpStatusCodeAttribute, 200);
+        open(QIODevice::ReadOnly);
+    }
+    void abort() override {}
+    qint64 bytesAvailable() const override { return m_payload.size() - m_offset; }
+protected:
+    qint64 readData(char* out, qint64 size) override {
+        const auto count = std::min(size, qint64(m_payload.size() - m_offset));
+        if (!count) { return -1; }
+        std::memcpy(out, m_payload.constData() + m_offset, size_t(count));
+        m_offset += count;
+        return count;
+    }
+private:
+    QByteArray m_payload;
+    qint64 m_offset{};
+};
 
 // Drive the actual startup/URL/cleanup path, substituting only socket opening
 // and HTTP preflight. No listener, firmware model or external endpoint.
@@ -28,6 +53,10 @@ public:
         handleTextMessage(StreamKind::Sound, QStringLiteral("MSG ") + token);
     }
 
+    void status(const QByteArray& payload) {
+        m_statusReply = new StatusReply(payload);
+        handleStatusPreflightFinished(m_statusReply);
+    }
     bool requestedMonitor() const { return m_monitorQueueRequested || m_monitorMode; }
 
     QStringList soundCommands;
@@ -118,6 +147,22 @@ int main(int argc, char** argv)
             qCritical() << "native admission accepted a monitor session" << token;
             return 1;
         }
+    }
+    KiwiSdrSessionTest full(KiwiSdrClient::Admission::IndependentReceiver);
+    full.setReceiverFamily(Family::Web888);
+    full.connectToEndpoint("receiver.example:8073");
+    full.status("status=active\nusers=13\nusers_max=13\npreempt=0\next_api=13\n");
+    if (full.state() != KiwiSdrClient::State::Busy || full.soundOpens || full.waterfallOpens) {
+        qCritical() << "full status opened an independent receiver";
+        return 1;
+    }
+    KiwiSdrSessionTest available(KiwiSdrClient::Admission::IndependentReceiver);
+    available.setReceiverFamily(Family::Web888);
+    available.connectToEndpoint("receiver.example:8073");
+    available.status("status=active\nusers=12\nusers_max=13\npreempt=0\next_api=13\n");
+    if (available.soundOpens != 1 || available.waterfallOpens != 1) {
+        qCritical() << "available status did not proceed to server admission";
+        return 1;
     }
     KiwiSdrSessionTest cancelled;
     cancelled.cancelOnSoundOpen = true;

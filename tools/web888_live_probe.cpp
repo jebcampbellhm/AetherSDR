@@ -187,7 +187,7 @@ static int runBackendProbe(QCoreApplication& app, const QString& endpoint,
     return app.exec();
 }
 
-static int runSharedSsbProbe(QCoreApplication& app, const QString& endpoint,
+static int runIndependentListenerProbe(QCoreApplication& app, const QString& endpoint,
                              const QString& password, int seconds)
 {
     Web888Backend backend;
@@ -197,9 +197,20 @@ static int runSharedSsbProbe(QCoreApplication& app, const QString& endpoint,
     bool shared = false, failed = false, stopping = false, restored = false;
     quint64 primaryBeforeRestore = 0, childAtRestore = 0;
     QObject::connect(&backend, &IRadioBackend::connectionError, &app,
-        [&](const QString&) { failed = true; });
+        [&](const QString& reason) {
+            failed = true;
+            QString safe = reason;
+            if (!password.isEmpty()) { safe.replace(password, QStringLiteral("[redacted]")); }
+            std::fprintf(stderr, "listener_connection_error=%s\n", qPrintable(safe));
+        });
     QObject::connect(&backend, &IRadioBackend::sliceLifecycleFailed, &app,
-        [&](const QString&, int, const QString&) { if (!stopping) { failed = true; } });
+        [&](const QString& operation, int id, const QString& reason) {
+            if (!stopping) { failed = true; }
+            QString safe = reason;
+            if (!password.isEmpty()) { safe.replace(password, QStringLiteral("[redacted]")); }
+            std::fprintf(stderr, "listener_error id=%d operation=%s reason=%s\n", id,
+                         qPrintable(operation), qPrintable(safe));
+        });
     QObject::connect(&backend, &IRadioBackend::sliceAudioFrameReady, &app,
         [&](int id, const PcmFrame& frame) { if (frame.current()) { samples[id] += frame.frameCount(); } });
     QObject::connect(&backend, &IRadioBackend::spectrumFrameReady, &app,
@@ -212,9 +223,9 @@ static int runSharedSsbProbe(QCoreApplication& app, const QString& endpoint,
             backend.setSliceMode(0, QStringLiteral("USB"));
             backend.setPanCenter("0", 14175000, IRadioBackend::PanCenterIntent::Drag);
             backend.setPanBandwidth("0", 350000);
-            // Let the initial hardware retune settle before locking the capture.
+            // Let the initial hardware retune settle before admitting another receiver.
             QTimer::singleShot(1000, &backend, [&] {
-                shared = backend.createSlice("0", 14205000);
+                shared = backend.createSlice("0", 21200000);
                 if (!shared) { failed = true; }
                 backend.setSliceAgc(0, "slow", 0);
                 backend.setSliceAgc(1, "fast", 0);
@@ -224,7 +235,7 @@ static int runSharedSsbProbe(QCoreApplication& app, const QString& endpoint,
     });
     QTimer::singleShot(seconds * 500, &backend, [&] {
         if (!shared) { return; }
-        backend.setSliceFrequency(1, 14207000);
+        backend.setSliceFrequency(1, 28200000);
         backend.setSliceFilter(1, 200, 2400);
         backend.setActiveSlice(1);
     });
@@ -236,7 +247,7 @@ static int runSharedSsbProbe(QCoreApplication& app, const QString& endpoint,
         stopping = true;
         failed |= !shared || samples[0] == 0 || samples[1] == 0 || rows == 0
             || !restored || samples[0] <= primaryBeforeRestore || samples[1] != childAtRestore;
-        std::printf("shared_ssb=%d primary_frames=%llu secondary_frames=%llu waterfall_rows=%llu waterfall_span_hz=%.0f failed=%d\n",
+        std::printf("independent_listeners=%d primary_frames=%llu secondary_frames=%llu waterfall_rows=%llu waterfall_span_hz=%.0f failed=%d\n",
             int(shared), samples[0], samples[1], rows, width, int(failed));
         backend.disconnectRadio();
         QTimer::singleShot(500, &app, [&] { app.exit(failed ? 1 : 0); });
@@ -285,11 +296,11 @@ static int runCombinedProbe(QCoreApplication& app, const QString& endpoint,
         QTimer::singleShot(1000, &backend, [&] {
             backend.setSliceMode(0, "USB"); backend.setSliceFrequency(0, 14200000);
             failed |= !backend.createPanadapter();
-            failed |= !backend.applyDigitalProfile(presets, 24000, 9);
+            failed |= !backend.applyDigitalProfile(presets, 24000, 11);
             QTimer::singleShot(2000, &backend, [&] {
                 backend.setSliceFrequency(1, 7150000);
                 QTimer::singleShot(1000, &backend, [&] {
-                    failed |= !backend.createSlice("0", 14205000);
+                    failed |= !backend.createSlice("0", 21200000);
                     failed |= !backend.createSlice("1", 7155000);
                     audio.clear(); digital.clear(); rows.clear();
                 });
@@ -350,8 +361,8 @@ int main(int argc, char** argv)
     parser.addOption({QStringLiteral("seconds"), QStringLiteral("Duration, 10..3600 seconds"), QStringLiteral("seconds"), QStringLiteral("45")});
     parser.addOption({QStringLiteral("exercise"), QStringLiteral("Retune and reconnect the second listener; requires at least 100 seconds")});
     parser.addOption({QStringLiteral("backend"), QStringLiteral("Exercise dual-pan backend with one shared digital capture; requires at least 70 seconds")});
-    parser.addOption({QStringLiteral("shared-ssb"), QStringLiteral("One RX/WF lease with two software SSB listeners")});
-    parser.addOption({QStringLiteral("combined"), QStringLiteral("Two shared SSB captures plus seven digital captures; use at least 20 seconds")});
+    parser.addOption({QStringLiteral("independent-listeners"), QStringLiteral("One waterfall with two independent RX leases")});
+    parser.addOption({QStringLiteral("combined"), QStringLiteral("Four independent listeners plus seven digital captures; use at least 20 seconds")});
     parser.process(app);
     bool validDuration = false;
     const int seconds = parser.value(QStringLiteral("seconds")).toInt(&validDuration);
@@ -367,8 +378,8 @@ int main(int argc, char** argv)
         if (seconds < 20) { return 2; }
         return runCombinedProbe(app, endpoint, password, seconds);
     }
-    if (parser.isSet(QStringLiteral("shared-ssb"))) {
-        return runSharedSsbProbe(app, endpoint, password, seconds);
+    if (parser.isSet(QStringLiteral("independent-listeners"))) {
+        return runIndependentListenerProbe(app, endpoint, password, seconds);
     }
     if (parser.isSet(QStringLiteral("backend"))) {
         return runBackendProbe(app, endpoint, password, seconds);

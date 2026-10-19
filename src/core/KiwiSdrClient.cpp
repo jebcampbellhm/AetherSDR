@@ -748,6 +748,13 @@ void KiwiSdrClient::handleStatusPreflightFinished(QNetworkReply* reply)
             << "users_max="
             << (hasUsersMax ? QString::number(usersMax) : QStringLiteral("unreported"))
             << "preempt=" << preempt;
+        if (hasUsers && hasUsersMax && usersMax > 0 && users >= usersMax
+            && m_admission == Admission::IndependentReceiver) {
+            setState(State::Busy, tr("No RX slots are available (%1/%2 in use).")
+                     .arg(users).arg(usersMax));
+            cleanupSockets();
+            return;
+        }
         if (statusReportsFull) {
             qCInfo(lcKiwiSdr).noquote()
                 << "KiwiSDR status preflight reports full receiver; "

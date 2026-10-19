@@ -3,7 +3,6 @@
 #include "core/backends/IRadioBackend.h"
 #include "Web888CapturePlan.h"
 #include "Web888DecoderRouter.h"
-#include "Web888SsbAudio.h"
 #include <map>
 #include <memory>
 
@@ -11,9 +10,8 @@ namespace AetherSDR {
 
 class KiwiSdrClient;
 class Web888CapturePool;
-class Web888IqProcessor;
 
-// Two independently owned listening receivers with paired waterfalls.
+// Two waterfall owners and independently admitted sound-only listening leases.
 class Web888Backend : public IRadioBackend {
     Q_OBJECT
 public:
@@ -68,16 +66,12 @@ protected:
     // Production uses the shared wire implementation. Tests replace transport
     // opening and inject observations, without a listening firmware substitute.
     virtual KiwiSdrClient* createClient();
+    virtual KiwiSdrClient* createSoundClient();
     virtual Web888CapturePool* createCapturePool();
 
 private:
     struct Receiver {
-        int owner{-1}; // -1 owns a hardware lease; otherwise a shared software listener
-        bool sharedIq{false};
-        bool addingListener{false};
-        double captureHz{0};
-        quint64 dspSession{0};
-        Web888SsbAudio audio;
+        int owner{-1}; // -1 owns a waterfall; otherwise a sound-only lease on that pan
         KiwiSdrClient* client{nullptr};
         quint64 generation{0};
         bool connected{false};
@@ -102,14 +96,11 @@ private:
     void rejectSliceControl(int id, const QString& operation, const QString& reason);
     void applyTune(int id);
     int panIndex(int id) const;
-    bool fitsCapture(const Receiver& r, double hz, int low, int high) const;
-    void configureListener(int id);
     void deliverAudio(int id, quint64 generation, const QByteArray& pcm);
     void stop(bool notify);
     bool current(int id, quint64 generation) const;
     std::map<int, std::shared_ptr<Receiver>> m_receivers;
     std::map<int, std::shared_ptr<Receiver>> m_listeners;
-    Web888IqProcessor* m_listenerProcessor{nullptr};
     Web888CapturePool* m_capturePool{nullptr};
     Web888DecoderRouter m_decoderRouter;
     QString m_reportedVersion;
@@ -119,6 +110,9 @@ private:
     QString m_password; // session-only; cleared at disconnect
     quint64 m_generation{0};
     quint64 m_nextLease{0};
+    int listeningReservation() const;
+    bool canAddReceiver() const;
+    int m_receiverBudget{13};
     int m_nextId{1};
     int m_activeSlice{0};
     bool m_loadingCredentials{false};

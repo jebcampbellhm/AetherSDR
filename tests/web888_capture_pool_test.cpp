@@ -88,6 +88,10 @@ protected:
         listener = new OfflineListener(this);
         return listener;
     }
+    KiwiSdrClient* createSoundClient() override {
+        listener = new OfflineListener(this);
+        return listener;
+    }
     Web888CapturePool* createCapturePool() override
     {
         pool = new Pool;
@@ -263,6 +267,8 @@ int main(int argc, char** argv)
     emit monitoring.listener->stateChanged(KiwiSdrClient::State::Connected, {});
     monitoring.setSliceFrequency(1, 21074000);
     CHECK(monitoring.digitalCaptureCount() == 1 && digitalFrame.current());
+    CHECK(!monitoring.createSlice("0", 7200000)); // digital + two listeners fill budget
+
     CHECK(!monitoring.applyDigitalProfile({b}, 24000, 3)); // replacement overlap needs room
     CHECK(digitalFrame.current() && digital->running());
     CHECK(monitoring.removePanadapter(QStringLiteral("1")));

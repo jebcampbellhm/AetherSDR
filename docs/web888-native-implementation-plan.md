@@ -1187,3 +1187,24 @@ modes and Windows session painting support. All 47 selected regressions passed,
 plus credential-safety and native Windows session/form checks. No receiver
 settings changed or new live qualification claimed. See
 [integration evidence and limits](web888-integration-20261019.md).
+
+
+### Independent listening leases - 2026-10-19
+
+Operator direction supersedes shared interactive SSB: every additional desktop
+slice owns a sound-only hardware RX lease with independent tuning, mode, filter
+and AGC. Two waterfall owners remain. Removing a pan releases its attached
+listeners. Publication waits for server admission; failed extra opens leave
+existing reception running. Every connection performs a fresh /status preflight;
+full independent admission is refused without camping or preempting autoruns.
+Server admission remains authoritative if occupancy changes after the query.
+
+Digital planning reserves both waterfall slots plus all extra listeners;
+interactive admission also counts active and pending digital captures. Pending
+listener opens count immediately. The requested operating target is 12 kHz,
+a receiver-wide admin setting. The backend supports both 12 and 24 kHz.
+The operator will change the receiver setting to 12 kHz; do not change it
+automatically. Stock 12 kHz is the operating baseline going forward.
+
+The digital splitter remains available; the interactive sharing path is removed.
+Timed decoding remains gated on qualified sample-to-UTC mapping.

@@ -18,7 +18,7 @@ using namespace AetherSDR;
 namespace AetherSDR {
 class KiwiSdrSessionTest : public KiwiSdrClient {
 public:
-    explicit KiwiSdrSessionTest(QObject* parent) : KiwiSdrClient(Streams::SoundAndWaterfall,
+    explicit KiwiSdrSessionTest(QObject* parent, Streams streams = Streams::SoundAndWaterfall) : KiwiSdrClient(streams,
         Admission::IndependentReceiver, parent) {}
     void rate(int value) { handleTextMessage(StreamKind::Sound, QStringLiteral("MSG sample_rate=%1").arg(value)); }
     QString mode() const { return kiwiMode(); }
@@ -34,8 +34,10 @@ class Backend : public Web888Backend {
 public:
     KiwiSdrSessionTest* wire{};
     int clients{};
+    int soundClients{};
 protected:
     KiwiSdrClient* createClient() override { ++clients; wire = new KiwiSdrSessionTest(this); return wire; }
+    KiwiSdrClient* createSoundClient() override { ++clients; ++soundClients; wire = new KiwiSdrSessionTest(this, KiwiSdrClient::Streams::SoundOnly); return wire; }
 };
 bool waitFor(const std::function<bool()>& done)
 {
@@ -108,114 +110,55 @@ int main(int argc, char** argv)
     backend.connectRadio(request);
     emit backend.wire->stateChanged(KiwiSdrClient::State::Connected, {});
     backend.setSliceFrequency(0, 14200000); backend.setSliceMode(0, QStringLiteral("USB"));
-    CHECK(!backend.createSlice("0", 14204000)); // no negotiated rate
-    backend.wire->rate(12000);
-    CHECK(!backend.createSlice("0", 14204000));
-    backend.wire->rate(24000);
-    CHECK(!backend.createSlice("0", 14300000));
-    CHECK(backend.createSlice("0", 14204000));
-    CHECK(backend.clients == 1 && backend.wire->mode() == "iq");
-    CHECK(!backend.wire->receiverControls().agcEnabled);
-    CHECK(states[1].panId == "0" && states[1].frequency == 14.204);
-    CHECK(!backend.createSlice("0", 14205000)); // bounded to two per capture
-    backend.setSliceMode(1, "LSB");
-    backend.setSliceFrequency(1, 14208000);
-    backend.setSliceFilter(1, -2400, -200);
-    backend.setSliceAgc(1, "fast", 0);
-    CHECK(states[0].agcMode == "med" && states[1].agcMode == "fast");
-    CHECK(!backend.wire->receiverControls().agcEnabled && backend.wire->center() == 14200000);
-    SliceModel desktop(1);
-    desktop.applyChanges(states[1]);
-    QObject::connect(&backend, &IRadioBackend::sliceChanged, &desktop,
-        [&](int id, const SliceDelta& d) { if (id == 1) { desktop.applyChanges(d); } });
-    QObject::connect(&desktop, &SliceModel::receiveTuneRequested, &backend,
-        [&](const SliceTuneRequest& r) { backend.setSliceFrequency(1, r.frequencyHz); });
-    QObject::connect(&desktop, &SliceModel::receiveFilterRequested, &backend,
-        [&](const SliceFilterRequest& r) { backend.setSliceFilter(1, r.lowHz, r.highHz); });
-    QObject::connect(&desktop, &SliceModel::modeChangeRequested, &backend,
-        [&](const QString& mode) { backend.setSliceMode(1, mode); });
-    QObject::connect(&desktop, &SliceModel::controlRequested, &backend,
-        [&](const SliceControlRequest& r) { backend.requestSliceControl(1, r); });
-    desktop.setActive(true);
-    CHECK(states[1].active == true && states[0].active == false);
-    desktop.setMode("AM");
-    CHECK(desktop.mode() == "LSB");
-    desktop.setFrequency(14.300);
-    CHECK(desktop.frequency() == 14.208);
-    desktop.setFilterWidth(-6000, 6000);
-    CHECK(desktop.filterLow() == -2400 && desktop.filterHigh() == -200);
-    backend.setSliceFrequency(1, 14300000);
-    CHECK(states[1].frequency == 14.208);
+    auto* primary = backend.wire;
+    primary->rate(12000);
+    CHECK(backend.createSlice("0", 14300000));
+    auto* child = backend.wire;
+    CHECK(backend.clients == 2 && backend.soundClients == 1);
+    CHECK(!states.contains(1)); // No phantom slice before server admission.
+    emit child->stateChanged(KiwiSdrClient::State::Connected, {});
+    CHECK(states[1].panId == "0" && states[1].frequency == 14.3);
+    CHECK(primary->mode() == "usb" && primary->receiverControls().agcEnabled);
+    backend.setSliceFrequency(1, 21200000);
     backend.setSliceMode(1, "AM");
-    CHECK(states[1].mode == "LSB");
-    backend.setSliceFilter(1, -6000, 6000);
-    CHECK(states[1].filterLow == -2400);
-    int submitted = 0;
-    for (int n = 0; n < 12; ++n) {
-        block.sequence = ++submitted;
-        emit backend.wire->filteredIqReady(block);
-        QElapsedTimer timer; timer.start();
-        while (timer.elapsed() < 20) { QCoreApplication::processEvents(); QThread::msleep(1); }
-    }
-    CHECK(waitFor([&] { return audioCounts[0] > 0 && audioCounts[1] > 0; }));
-    const int oldCount = audioCounts[1];
+    backend.setSliceAgc(1, "fast", 0);
+    CHECK(states[1].frequency == 21.2 && states[1].mode == "AM");
+    CHECK(primary->center() == 14200000 && child->center() == 21200000);
+    CHECK(states[0].agcMode == "med" && states[1].agcMode == "fast");
+    QVector<float> samples(128, 0.1f);
+    QByteArray pcm(reinterpret_cast<const char*>(samples.data()), samples.size() * sizeof(float));
+    emit primary->decodedAudioReady(pcm);
+    emit child->decodedAudioReady(pcm);
+    CHECK(audioCounts[0] == 1 && audioCounts[1] == 1);
     backend.setActiveSlice(1);
     CHECK(backend.removeSlice(1));
-    CHECK(backend.wire->mode() == "usb" && backend.wire->receiverControls().agcEnabled);
+    emit child->decodedAudioReady(pcm); // retired transport cannot deliver
+    CHECK(audioCounts[1] == 1 && states[0].active == true);
     CHECK(!backend.removeSlice(0));
-    CHECK(backend.createSlice("0", 14203000));
-    CHECK(states.contains(2) && backend.clients == 1);
-    auto* primaryWire = backend.wire;
+    CHECK(backend.createSlice("0", 7100000));
+    auto* refused = backend.wire;
+    emit refused->stateChanged(KiwiSdrClient::State::Busy, "Full");
+    CHECK(backend.isConnected() && errors == 1 && !states.contains(2));
     CHECK(backend.createPanadapter());
+    auto* secondPan = backend.wire;
+    emit secondPan->stateChanged(KiwiSdrClient::State::Connected, {});
+    secondPan->rate(12000);
+    CHECK(backend.createSlice("1", 28000000));
     emit backend.wire->stateChanged(KiwiSdrClient::State::Connected, {});
-    backend.wire->rate(24000);
-    CHECK(backend.createSlice("1", 14078000));
-    CHECK(backend.clients == 2 && states[4].panId == "1");
+    CHECK(states[4].panId == "1");
     CHECK(backend.removePanadapter("1"));
-    CHECK(backend.isConnected() && !backend.removeSlice(4));
-    backend.wire = primaryWire;
-    for (int n = 0; n < 5; ++n) { block.sequence = ++submitted; emit backend.wire->filteredIqReady(block); }
+    CHECK(!backend.removeSlice(4) && backend.isConnected());
+    // All pending leases count, even before the server replies.
+    for (int i = 0; i < 11; ++i) { CHECK(backend.createSlice("0", 7100000 + i * 1000)); }
+    CHECK(!backend.createSlice("0", 7200000));
+    CHECK(backend.createPanadapter()); // preserve the reserved waterfall slot
+    CHECK(!backend.createSlice("0", 7200000));
     backend.disconnectRadio();
-    const auto countsAtDisconnect = audioCounts;
+    const auto counts = audioCounts;
+    emit primary->decodedAudioReady(pcm);
     QCoreApplication::processEvents();
-    CHECK(audioCounts == countsAtDisconnect);
-    CHECK(audioCounts[1] == oldCount);
-    CHECK(!backend.createSlice("0", 14203000));
-    CHECK(errors >= 5);
-    // Observer callbacks cannot recursively admit a second child or publish
-    // creation/removal after the callback disconnects the session.
-    Backend cancelled;
-    cancelled.connectRadio(request);
-    emit cancelled.wire->stateChanged(KiwiSdrClient::State::Connected, {});
-    cancelled.wire->rate(24000);
-    cancelled.setSliceMode(0, "USB");
-    bool recursiveAccepted = false;
-    auto cancelCreation = QObject::connect(&cancelled, &IRadioBackend::sliceChanged, &app,
-        [&](int id, const SliceDelta& d) {
-            if (id == 0 && d.modeList && d.modeList->size() == 2) {
-                recursiveAccepted = cancelled.createSlice("0", 7103000);
-                cancelled.disconnectRadio();
-            }
-        });
-    CHECK(!cancelled.createSlice("0", 7102000));
-    CHECK(!recursiveAccepted && !cancelled.isConnected());
-    QObject::disconnect(cancelCreation);
-    cancelled.connectRadio(request);
-    emit cancelled.wire->stateChanged(KiwiSdrClient::State::Connected, {});
-    cancelled.wire->rate(24000);
-    CHECK(cancelled.createSlice("0", 7102000));
-    bool disconnected = false;
-    int lateRemovals = 0;
-    QObject::connect(&cancelled, &IRadioBackend::disconnected, &app, [&] { disconnected = true; });
-    QObject::connect(&cancelled, &IRadioBackend::sliceRemoved, &app,
-        [&](int) { if (disconnected) { ++lateRemovals; } });
-    QObject::connect(&cancelled, &IRadioBackend::sliceChanged, &app,
-        [&](int id, const SliceDelta& d) {
-            if (id == 0 && d.modeList && d.modeList->size() == 6) { cancelled.disconnectRadio(); }
-        });
-    CHECK(cancelled.removeSlice(1));
-    CHECK(disconnected && lateRemovals == 0);
+    CHECK(audioCounts == counts && !backend.isConnected());
 #endif
-    qInfo() << "Shared SSB isolation, independent AGC, admission, tuning and cleanup passed";
+    qInfo() << "Splitter DSP and independent hardware listener admission, tuning and cleanup passed";
     return 0;
 }

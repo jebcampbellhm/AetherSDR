@@ -1,6 +1,5 @@
 #include "Web888Backend.h"
 #include "Web888CapturePool.h"
-#include "Web888IqProcessor.h"
 
 #include "core/KiwiSdrClient.h"
 #include "core/NetworkReceiverCredentials.h"
@@ -8,7 +7,6 @@
 #include <QPointer>
 
 #include <QUrl>
-#include <QScopeGuard>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -37,7 +35,7 @@ RadioCapabilities Web888Backend::capabilities() const
     caps.model = QStringLiteral("Web-888 (experimental)");
     caps.canTransmit = false;
     caps.extensionNamespaces.append(QStringLiteral("digital-monitor"));
-    caps.maxSlices = 4;
+    caps.maxSlices = 13;
     caps.canCreateSlices = true;
     caps.maxPanadapters = 2;
     caps.hasFmRepeaterOffset = false;
@@ -62,6 +60,23 @@ KiwiSdrClient* Web888Backend::createClient()
 {
     return new KiwiSdrClient(KiwiSdrClient::Streams::SoundAndWaterfall,
                             KiwiSdrClient::Admission::IndependentReceiver, this);
+}
+
+KiwiSdrClient* Web888Backend::createSoundClient()
+{
+    return new KiwiSdrClient(KiwiSdrClient::Streams::SoundOnly,
+                            KiwiSdrClient::Admission::IndependentReceiver, this);
+}
+
+int Web888Backend::listeningReservation() const
+{
+    return 2 + static_cast<int>(m_listeners.size());
+}
+
+bool Web888Backend::canAddReceiver() const
+{
+    return listeningReservation()
+        + digitalCaptureCount() + pendingDigitalCaptureCount() < m_receiverBudget;
 }
 
 Web888CapturePool* Web888Backend::createCapturePool()
@@ -98,9 +113,14 @@ bool Web888Backend::applyDigitalProfile(const QVector<Web888DigitalPreset>& pres
             }
         });
     }
-    // Reserve both supported listeners even while only the primary is open.
+    // Keep room for both waterfall owners plus all sound-only listeners.
     // Profile replacement also counts active + pending captures in the pool.
-    return m_capturePool->applyProfile(m_endpoint, presets, rate, budget, 2, m_password);
+    const int previousBudget = m_receiverBudget;
+    m_receiverBudget = budget;
+    const bool accepted = m_capturePool->applyProfile(m_endpoint, presets, rate, budget,
+                                                     listeningReservation(), m_password);
+    if (!accepted) { m_receiverBudget = previousBudget; }
+    return accepted;
 }
 
 void Web888Backend::stopDigitalProfile()
@@ -169,6 +189,7 @@ void Web888Backend::connectRadio(const RadioConnectRequest& request)
     }
     ++m_generation;
     m_reportedVersion.clear();
+    m_receiverBudget = 13;
     m_saveCredentials = false;
     m_endpoint = request.params.value(QStringLiteral("web888.endpoint")).toString();
     if (m_endpoint.isEmpty()) {
@@ -212,7 +233,7 @@ void Web888Backend::openReceiver(int id)
     const auto r = receiver(id);
     const quint64 generation = r->generation = ++m_nextLease;
     r->initialRange = false;
-    r->client = createClient();
+    r->client = r->owner < 0 ? createClient() : createSoundClient();
     auto* client = r->client;
     const QString panId = QString::number(panIndex(id));
     client->setReceiverFamily(KiwiSdrProtocol::KiwiSdrReceiverFamily::Web888);
@@ -280,23 +301,7 @@ void Web888Backend::openReceiver(int id)
     });
     connect(client, &KiwiSdrClient::decodedAudioReady, this,
             [this, id, generation, r, panId](const QByteArray& pcm) {
-        if (!r->sharedIq) { deliverAudio(id, generation, pcm); }
-    });
-    connect(client, &KiwiSdrClient::filteredIqReady, this,
-            [this, id, generation, r](const KiwiIqBlock& block) {
-        if (!current(id, generation) || !r->sharedIq || !m_listenerProcessor) { return; }
-        if (block.sampleRateHz < 23900 || block.sampleRateHz > 24100
-            || std::abs(block.centerHz - r->captureHz) > 1) {
-            emit sliceLifecycleFailed(QStringLiteral("receive"), id,
-                QStringLiteral("Shared SSB requires a 24 kHz IQ capture at the locked center"));
-            return;
-        }
-        if (r->dspSession) { m_listenerProcessor->submit(r->dspSession, block); }
-        for (const auto& [childId, child] : m_listeners) {
-            if (child->owner == id && child->dspSession) {
-                m_listenerProcessor->submit(child->dspSession, block);
-            }
-        }
+        deliverAudio(id, generation, pcm);
     });
     connect(client, &KiwiSdrClient::waterfallRowReady, this,
             [this, id, generation, r, panId](const QString&, const QVector<float>& bins,
@@ -335,13 +340,13 @@ void Web888Backend::openReceiver(int id)
     });
     connect(client, &KiwiSdrClient::waterfallAvailabilityChanged, this,
             [this, id, generation](bool available, const QString& detail) {
-        if (current(id, generation) && receiver(id)->connected && !available && !detail.isEmpty()) {
+        if (current(id, generation) && receiver(id)->owner < 0 && receiver(id)->connected && !available && !detail.isEmpty()) {
             emit configurationWarning(detail);
         }
     });
     connect(client, &KiwiSdrClient::meterReadingReady, this,
             [this, id, generation, r, panId](const KiwiSdrProtocol::MeterReading& reading) {
-        if (!current(id, generation) || !r->connected || r->sharedIq || !reading.valid
+        if (!current(id, generation) || !r->connected || !reading.valid
             || !reading.hasDbm || !std::isfinite(reading.dbm)) {
             return;
         }
@@ -423,34 +428,47 @@ void Web888Backend::closeReceiver(int id, bool notify)
 {
     const auto r = receiver(id);
     if (!r || !r->client) { return; }
-    QVector<int> retiredChildren;
-    for (auto it = m_listeners.begin(); it != m_listeners.end();) {
-        if (it->second->owner != id) { ++it; continue; }
-        if (m_listenerProcessor) { m_listenerProcessor->close(it->second->dspSession); }
-        it->second->dspSession = 0;
-        it->second->connected = false;
-        retiredChildren.append(it->first);
-        it = m_listeners.erase(it);
+    const int index = panIndex(id);
+    if (r->owner >= 0) {
+        auto* client = r->client;
+        r->client = nullptr;
+        const bool hadSlice = r->connected;
+        r->connected = false;
+        m_listeners.erase(id);
+        const bool active = m_activeSlice == id;
+        if (active) { m_activeSlice = r->owner; }
+        QObject::disconnect(client, nullptr, this, nullptr);
+        client->disconnectFromEndpoint();
+        client->deleteLater();
+        if (notify && hadSlice) { emit sliceRemoved(id); }
+        if (active && !m_stopping) { publishSlice(m_activeSlice); }
+        return;
     }
-    if (m_listenerProcessor && r->dspSession) { m_listenerProcessor->close(r->dspSession); }
-    r->dspSession = 0;
-    r->sharedIq = false;
+    QVector<int> children;
+    QVector<int> publishedChildren;
+    for (const auto& [childId, child] : m_listeners) {
+        if (child->owner == id) {
+            children.append(childId);
+            if (child->connected) { publishedChildren.append(childId); }
+        }
+    }
     auto* client = r->client;
     r->client = nullptr;
     const bool hadSlice = r->connected;
-    const bool wasActive = m_activeSlice == id || retiredChildren.contains(m_activeSlice);
-    if (wasActive) { m_activeSlice = 0; }
+    const bool wasActive = m_activeSlice == id || children.contains(m_activeSlice);
     r->connected = false;
     r->meterDefined = false;
     if (id != 0) { m_receivers.erase(id); }
+    // Retire every child before observers can open replacements on this pan.
+    if (wasActive) { m_activeSlice = 0; }
+    for (int childId : children) { closeReceiver(childId, false); }
     QObject::disconnect(client, nullptr, this, nullptr);
     client->disconnectFromEndpoint();
     client->deleteLater();
     if (notify && hadSlice) {
         const auto generation = m_generation;
-        // Retire the reusable display slot before observers can replace its slice.
-        emit panRemoved(QString::number(panIndex(id)));
-        for (int childId : retiredChildren) {
+        emit panRemoved(QString::number(index));
+        for (int childId : publishedChildren) {
             if (generation != m_generation) { break; }
             emit sliceRemoved(childId);
         }
@@ -482,7 +500,9 @@ void Web888Backend::stop(bool notify)
 
 bool Web888Backend::createPanadapter()
 {
-    if (!m_connected || m_stopping || m_receivers.size() >= 2
+    if (!m_connected || m_stopping || m_receivers.size() + m_listeners.size()
+        + digitalCaptureCount() + pendingDigitalCaptureCount() >= size_t(m_receiverBudget)
+        || m_receivers.size() >= 2
         || m_nextId == std::numeric_limits<int>::max()) { return false; }
     const int id = m_nextId++;
     auto r = std::make_shared<Receiver>();
@@ -542,127 +562,40 @@ int Web888Backend::panIndex(int id) const
     return displayIndex(r && r->owner >= 0 ? r->owner : id);
 }
 
-bool Web888Backend::fitsCapture(const Receiver& r, double hz, int low, int high) const
-{
-    const auto parent = r.owner < 0 ? &r : receiver(r.owner).get();
-    if (!parent || !parent->client) { return false; }
-    const double half = parent->client->filteredIqSampleRate() / 2 - 1000;
-    return std::isfinite(hz) && hz > 0 && half > 0
-        && hz + low >= parent->captureHz - half
-        && hz + high <= parent->captureHz + half;
-}
-
-void Web888Backend::configureListener(int id)
-{
-    const auto r = receiver(id);
-    if (!r || !m_listenerProcessor) { return; }
-    if (r->dspSession) { m_listenerProcessor->close(r->dspSession); }
-    r->audio.reset();
-    r->audio.setMode(r->agcMode);
-    QString error;
-    r->dspSession = m_listenerProcessor->open({{id, r->frequencyHz,
-        double(r->lowHz), double(r->highHz), r->mode == QStringLiteral("LSB")}}, &error);
-    if (!r->dspSession) { emit sliceLifecycleFailed(QStringLiteral("configure"), id, error); }
-}
-
 bool Web888Backend::createSlice(const QString& panId, double hz)
 {
     const int owner = sliceForPan(panId);
     const auto parent = receiver(owner);
-    if (!m_connected || m_stopping || !parent || !parent->connected || parent->addingListener
-        || (parent->mode != QStringLiteral("USB") && parent->mode != QStringLiteral("LSB"))
+    if (!m_connected || m_stopping || !parent || !parent->connected
+        || !std::isfinite(hz) || hz <= 0 || hz > 64000000
         || m_nextId == std::numeric_limits<int>::max()) { return false; }
-    for (const auto& [id, listener] : m_listeners) {
-        if (listener->owner == owner) { return false; }
-    }
-    // Admission uses the negotiated firmware rate, never the requested rate.
-    const double rate = parent->client->filteredIqSampleRate();
-    if (rate < 23900 || rate > 24100) {
+    const auto& metadata = parent->client->telemetry().metadata;
+    if (metadata.hasCoverageBandwidth && hz > metadata.coverageBandwidthMhz * 1e6) {
         emit sliceLifecycleFailed(QStringLiteral("create"), -1,
-            QStringLiteral("Shared SSB listening requires the receiver's 24 kHz setting"));
+            QStringLiteral("Frequency exceeds receiver coverage"));
         return false;
     }
-    if (!parent->sharedIq) { parent->captureHz = parent->frequencyHz; }
-    if (!fitsCapture(*parent, hz, parent->lowHz, parent->highHz)
-        || parent->highHz - parent->lowHz < 100 || parent->lowHz < -5000 || parent->highHz > 5000
-        || (parent->mode == QStringLiteral("LSB") ? parent->highHz > 0 : parent->lowHz < 0)) {
+    if (!canAddReceiver()) {
         emit sliceLifecycleFailed(QStringLiteral("create"), -1,
-            QStringLiteral("SSB passbands must fit inside the shared 24 kHz capture"));
+            QStringLiteral("No RX slot remains in the local receiver budget"));
         return false;
-    }
-    parent->addingListener = true;
-    const auto releaseAdmission = qScopeGuard([parent] { parent->addingListener = false; });
-    const auto parentGeneration = parent->generation;
-    if (!m_listenerProcessor) {
-        m_listenerProcessor = new Web888IqProcessor(this);
-        connect(m_listenerProcessor, &Web888IqProcessor::processed, this,
-            [this](quint64 session, double, const QVector<Web888DecoderAudio>& outputs, const QString& error) {
-            int id = -1;
-            for (const auto& [key, r] : m_receivers) { if (r->dspSession == session) { id = key; } }
-            for (const auto& [key, r] : m_listeners) { if (r->dspSession == session) { id = key; } }
-            const auto r = receiver(id);
-            if (!r || !r->connected || m_stopping) { return; }
-            if (!error.isEmpty()) { emit sliceLifecycleFailed(QStringLiteral("receive"), id, error); return; }
-            const auto generation = r->generation;
-            for (const auto& audio : outputs) {
-                if (!current(id, generation) || r->dspSession != session) { return; }
-                if (audio.discontinuity) { r->audio.reset(); }
-                const auto pcm = r->audio.process(audio.mono);
-                deliverAudio(id, generation, pcm);
-            }
-        });
-    }
-    if (!parent->sharedIq) {
-        parent->sharedIq = true;
-        auto controls = parent->client->receiverControls();
-        controls.agcEnabled = false;
-        parent->client->setReceiverControls(controls);
-        parent->client->enableFilteredIq();
-        configureListener(owner);
-        publishSlice(owner);
-        if (!m_connected || !current(owner, parentGeneration) || !parent->connected) { return false; }
     }
     const int id = m_nextId++;
     auto listener = std::make_shared<Receiver>();
     listener->owner = owner;
-    listener->sharedIq = true;
-    listener->connected = true;
-    listener->generation = ++m_nextLease;
     listener->frequencyHz = hz;
     listener->mode = parent->mode;
     listener->lowHz = parent->lowHz;
     listener->highHz = parent->highHz;
-    m_listeners.emplace(id, listener);
-    configureListener(id);
-    publishSlice(id);
+    m_listeners.emplace(id, listener); // Pending opens count against capacity.
+    openReceiver(id); // Fresh /status preflight, followed by server admission.
     return true;
 }
 
 bool Web888Backend::removeSlice(int id)
 {
-    const auto it = m_listeners.find(id);
-    if (it == m_listeners.end()) { return false; }
-    const auto r = it->second;
-    const auto generation = m_generation;
-    if (m_listenerProcessor) { m_listenerProcessor->close(r->dspSession); }
-    r->dspSession = 0;
-    r->connected = false;
-    m_listeners.erase(it);
-    const bool active = m_activeSlice == id;
-    if (active) { m_activeSlice = r->owner; }
-    const auto parent = receiver(r->owner);
-    if (parent && parent->client && parent->connected && !m_stopping) {
-        if (m_listenerProcessor) { m_listenerProcessor->close(parent->dspSession); }
-        parent->dspSession = 0;
-        parent->sharedIq = false;
-        // Restore the primary listener's own tuning before returning to audio.
-        applyTune(r->owner);
-        parent->client->disableFilteredIq();
-        setSliceAgc(r->owner, parent->agcMode, 0);
-    }
-    if (!m_connected || generation != m_generation) { return true; }
-    emit sliceRemoved(id);
-    if (active && !m_stopping) { publishSlice(m_activeSlice); }
+    if (m_stopping || !m_listeners.contains(id)) { return false; }
+    closeReceiver(id, true);
     return true;
 }
 
@@ -673,10 +606,10 @@ void Web888Backend::publishSlice(int id)
     const QString panId = QString::number(panIndex(id));
     SliceDelta delta;
     delta.panId = panId;
-    delta.letter = QString(QChar('A' + (r->owner < 0 ? panIndex(id) : 2 + panIndex(id))));
+    delta.letter = QString(QChar('A' + id % 26));
     delta.frequency = r->frequencyHz / 1e6;
     delta.mode = r->mode;
-    delta.modeList = r->sharedIq ? QStringList{QStringLiteral("USB"), QStringLiteral("LSB")} : kModes;
+    delta.modeList = kModes;
     delta.filterLow = r->lowHz;
     delta.filterHigh = r->highHz;
     delta.active = id == m_activeSlice;
@@ -694,7 +627,6 @@ void Web888Backend::applyTune(int id)
     const auto r = receiver(id);
     if (!r) { return; }
     const QString panId = QString::number(panIndex(id));
-    if (r->sharedIq) { configureListener(id); return; }
     if (r->client) {
         r->client->setTrackedSlice(id, r->frequencyHz / 1e6, r->mode, r->lowHz,
                                  r->highHz, panId, {}, 600);
@@ -706,7 +638,7 @@ void Web888Backend::rejectSliceControl(int id, const QString& operation, const Q
     const auto r = receiver(id);
     if (!r || !r->connected || m_stopping) { return; }
     const auto generation = r->generation;
-    // Desktop controls are optimistic. Restore the actual DSP state on refusal.
+    // Desktop controls are optimistic. Restore the accepted state on refusal.
     publishSlice(id);
     if (current(id, generation)) { emit sliceLifecycleFailed(operation, id, reason); }
 }
@@ -721,13 +653,8 @@ void Web888Backend::setSliceFrequency(int id, double hz)
         rejectSliceControl(id, QStringLiteral("tune"), QStringLiteral("Invalid receive frequency"));
         return;
     }
-    if (r->sharedIq && !fitsCapture(*r, hz, r->lowHz, r->highHz)) {
-        rejectSliceControl(id, QStringLiteral("tune"),
-            QStringLiteral("Listener passband is outside the shared 24 kHz capture"));
-        return;
-    }
-    const auto parent = r->owner < 0 ? r : receiver(r->owner);
-    const auto& metadata = parent->client->telemetry().metadata;
+
+    const auto& metadata = r->client->telemetry().metadata;
     if (metadata.hasCoverageBandwidth && hz > metadata.coverageBandwidthMhz * 1e6) {
         rejectSliceControl(id, QStringLiteral("tune"), QStringLiteral("Frequency exceeds receiver coverage"));
         return;
@@ -750,16 +677,8 @@ void Web888Backend::setSliceMode(int id, const QString& mode)
         rejectSliceControl(id, QStringLiteral("mode"), QStringLiteral("Unsupported receive mode"));
         return;
     }
-    if (r->sharedIq && mode != QStringLiteral("USB") && mode != QStringLiteral("LSB")) {
-        rejectSliceControl(id, QStringLiteral("mode"), QStringLiteral("Shared listeners support USB and LSB"));
-        return;
-    }
-    const int nextLow = mode == QStringLiteral("LSB") ? -2800 : 300;
-    const int nextHigh = mode == QStringLiteral("LSB") ? -300 : 2800;
-    if (r->sharedIq && !fitsCapture(*r, r->frequencyHz, nextLow, nextHigh)) {
-        rejectSliceControl(id, QStringLiteral("mode"), QStringLiteral("Mode passband exceeds the shared capture"));
-        return;
-    }
+
+
     const auto generation = r->generation;
     r->mode = mode;
     if (mode == QStringLiteral("LSB")) {
@@ -791,12 +710,7 @@ void Web888Backend::setSliceFilter(int id, int low, int high)
         rejectSliceControl(id, QStringLiteral("filter"), QStringLiteral("Invalid receive filter"));
         return;
     }
-    if (r->sharedIq && (!fitsCapture(*r, r->frequencyHz, low, high)
-        || high - low < 100 || low < -5000 || high > 5000
-        || (r->mode == QStringLiteral("LSB") ? high > 0 : low < 0))) {
-        rejectSliceControl(id, QStringLiteral("filter"), QStringLiteral("Filter does not fit the shared SSB capture"));
-        return;
-    }
+
     const auto generation = r->generation;
     r->lowHz = low;
     r->highHz = high;
@@ -813,12 +727,7 @@ void Web888Backend::setSliceAgc(int id, const QString& mode, int thresholdDb)
     if (!r || !r->connected || m_stopping || !capabilities().agcModes.contains(mode)) {
         return;
     }
-    if (r->sharedIq) {
-        r->agcMode = mode;
-        r->audio.setMode(mode);
-        publishSlice(id);
-        return;
-    }
+
     auto controls = r->client->receiverControls();
     controls.agcEnabled = mode != QStringLiteral("off");
     controls.agcDecayMs = mode == QStringLiteral("fast") ? KiwiSdrProtocol::kAgcFastDecayMs
@@ -970,7 +879,7 @@ void Web888Backend::invokeExtension(const QString& ns, const QString& verb,
     for (const auto& preset : web888DigitalPresets(true)) {
         if (bands.contains(preset.band) && modes.contains(preset.mode)) { presets.append(preset); }
     }
-    const auto plan = planWeb888Captures(presets, rate, budget, 2);
+    const auto plan = planWeb888Captures(presets, rate, budget, listeningReservation());
     if (verb == QStringLiteral("start")) {
         if (!plan.fitsCapacity) { fail(plan.error); return; }
         m_monitorError.clear();
@@ -981,7 +890,7 @@ void Web888Backend::invokeExtension(const QString& ns, const QString& verb,
     }
     reply({{QStringLiteral("captures"), plan.windows.size()},
            {QStringLiteral("outputs"), presets.size()},
-           {QStringLiteral("reserved"), 2},
+           {QStringLiteral("reserved"), listeningReservation()},
            {QStringLiteral("fits"), plan.fitsCapacity},
            {QStringLiteral("error"), plan.error}});
 }

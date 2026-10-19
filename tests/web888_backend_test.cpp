@@ -124,7 +124,7 @@ int main(int argc, char** argv)
     CHECK(!caps.canTransmit && caps.canCreateSlices && !caps.hasDaxStreams);
     CHECK(!caps.hasCwTune && !caps.hasFmRepeaterOffset && !caps.cwTextSupportsLive);
     CHECK(!caps.hasAgcThreshold && !caps.dbmAxisIsCalibrated());
-    CHECK(caps.maxSlices == 4 && caps.maxPanadapters == 2 && backend.ownsRxAudio());
+    CHECK(caps.maxSlices == 13 && caps.maxPanadapters == 2 && backend.ownsRxAudio());
     CHECK(caps.receiveModeControl && caps.receiveAudioControl);
     RadioConnectRequest request;
     request.params.insert(QStringLiteral("web888.password"), QString{});
