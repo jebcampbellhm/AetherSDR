@@ -1174,3 +1174,16 @@ stream identity, source provenance, uncertainty, finite sample coverage and cloc
 revocation. Synthetic pipeline tests now exercise that contract for FT8/FT4/WSPR.
 Live decoding remains disabled pending independently qualified clock metadata;
 see [timing qualification](web888-timing-qualification.md).
+
+
+### Narrow Zoom and upstream integration — 2026-10-19
+
+Merged the Jeb Ham Narrow Zoom branch and upstream through v26.10.3, preserving
+two waterfalls, four shared SSB listeners and independent digital monitoring.
+Recovery now crops wider FFT data to the requested per-pan viewport; the frame
+geometry statement in earlier checkpoints is superseded by this crop behavior.
+Integrated endpoint credentials, speaker buffering/pan, SAM/FM single-listener
+modes and Windows session painting support. All 47 selected regressions passed,
+plus credential-safety and native Windows session/form checks. No receiver
+settings changed or new live qualification claimed. See
+[integration evidence and limits](web888-integration-20261019.md).

@@ -779,7 +779,7 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_manualRadioTypeCombo->addItem(tr("ANAN-G2"), QString::fromLatin1(kFamilyAnan));
     m_manualRadioTypeCombo->addItem(tr("Icom (network)"), QString::fromLatin1(kFamilyIcom));
 #ifdef HAVE_WEBSOCKETS
-    m_manualRadioTypeCombo->addItem(tr("Web-888 (experimental RX)"), QString::fromLatin1(kFamilyWeb888));
+    m_manualRadioTypeCombo->addItem(tr("Web-888"), QString::fromLatin1(kFamilyWeb888));
 #endif
 #ifdef AETHER_BACKEND_RTL
     m_manualRadioTypeCombo->addItem(tr("RTL-SDR (USB)"), QString::fromLatin1(kFamilyRtl));
@@ -2550,6 +2550,7 @@ void ConnectionPanel::updateManualFamilyHints()
     const bool web888 = family == QLatin1String(kFamilyWeb888);
     if (m_web888PasswordRow) m_web888PasswordRow->setVisible(web888);
     if (m_web888PortRow) m_web888PortRow->setVisible(web888);
+    if (!web888 && m_web888PasswordEdit) { m_web888PasswordEdit->clear(); }
 
     // The credentials and network selectors belong to Icom alone. Hiding the
     // row CONTAINERS rather than the fields keeps their labels from being left

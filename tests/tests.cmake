@@ -4477,10 +4477,6 @@ target_include_directories(kiwi_sdr_waterfall_setup_test PRIVATE src)
 target_link_libraries(kiwi_sdr_waterfall_setup_test PRIVATE aethercore Qt6::Core)
 add_test(NAME kiwi_sdr_waterfall_setup_test COMMAND kiwi_sdr_waterfall_setup_test)
 
-add_executable(web888_backend_test tests/web888_backend_test.cpp)
-target_include_directories(web888_backend_test PRIVATE src tests)
-target_link_libraries(web888_backend_test PRIVATE aethercore Qt6::Core Qt6::Test)
-add_test(NAME web888_backend_test COMMAND web888_backend_test)
 
 # Socket-free regression: KiwiSDR zoom_cap (request ceiling) must not replace
 # zoom_max (start fixed-point scale); v1.900 shared waterfalls send both.

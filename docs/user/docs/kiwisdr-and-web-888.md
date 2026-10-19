@@ -31,8 +31,9 @@ press Enter in the password field.
 
 *The standalone Web-888 connection form. Enter the address and port separately.*
 
-This opens a standalone, receive-only Web-888 session with one receiver and
-one spectrum/waterfall. No Demo session or second radio is required. Accepted
+This opens a standalone, receive-only Web-888 session. You can open two
+independent panadapters, each with its own waterfall and up to two shared SSB
+listeners (four listeners using two hardware RX slots). No Demo session or second radio is required. Accepted
 passwords are saved in the operating system keychain when the build supports
 it; passwords never go in the settings database. Leave the password blank to
 reuse the saved password or connect to a passwordless receiver. Recent
@@ -238,7 +239,7 @@ While sharing, both filter passbands must remain within the IQ capture. The
 capture is centered on the original listener's frequency when the second slice
 is added, with a 1 kHz guard at each edge (about 22 kHz usable at a 24 kHz rate).
 Out-of-window tuning is refused; the capture does not move the other listener.
-Close the added slice to restore normal single-listener tuning and AM/CW modes.
+Close the added slice to restore normal single-listener tuning and AM/SAM/CW/FM modes.
 The original slice owns the hardware lease and is removed by closing its pan.
 Receiver-wide level readings are not updated as per-slice meters while sharing.
 

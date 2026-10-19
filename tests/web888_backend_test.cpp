@@ -10,8 +10,43 @@
 #include <QDebug>
 #include <QThread>
 #include <cstring>
+#include <cmath>
 #include <limits>
 #include <memory>
+
+#include "core/NetworkReceiverCredentials.h"
+#include "core/KiwiSdrCredentialStore.h"
+namespace AetherSDR {
+struct NetworkReceiverCredentialsTestAccess {
+    static void useStore(std::shared_ptr<IKiwiSdrCredentialStore> store)
+    {
+        NetworkReceiverCredentials::credentialStore() = std::move(store);
+    }
+};
+
+class TestCredentialStore final : public IKiwiSdrCredentialStore {
+public:
+    bool isPersistent() const override { return true; }
+    void read(const QString&, QObject*, Callback callback) override { pendingRead = std::move(callback); }
+    void write(const QString&, const QString& value, QObject*, Callback callback) override
+    {
+        ++writes;
+        lastWritten = value;
+        callback({ });
+    }
+    void remove(const QString&, QObject*, Callback callback) override
+    {
+        ++removals;
+        callback({ });
+    }
+    Callback pendingRead;
+    int writes = 0;
+    int removals = 0;
+    QString lastWritten;
+};
+
+
+}
 
 using namespace AetherSDR;
 
@@ -45,6 +80,45 @@ int main(int argc, char** argv)
         return 1;
     }
     QCoreApplication app(argc, argv);
+    int credentialFailures = 0;
+    const auto credentialCheck = [&](bool ok, const char* message) {
+        if (!ok) { qCritical() << message; ++credentialFailures; }
+    };
+    // No unit test reads or mutates the operator's operating-system keychain.
+    auto credentials = std::make_shared<TestCredentialStore>();
+    NetworkReceiverCredentialsTestAccess::useStore(credentials);
+    const QString credentialEndpoint = QStringLiteral("http://192.0.2.21:18073");
+    QString loadedPassword = QStringLiteral("not-delivered");
+    NetworkReceiverCredentials::load(credentialEndpoint, &app,
+        [&loadedPassword](const QString& password, const QString&) { loadedPassword = password; });
+    bool forgotten = false;
+    NetworkReceiverCredentials::forget(credentialEndpoint, &app,
+        [&forgotten](const QString& error) { forgotten = error.isEmpty(); });
+    credentials->pendingRead({ KiwiSdrCredentialResultCode::Success, QStringLiteral("obsolete"), { } });
+    NetworkReceiverCredentials::saveAccepted(credentialEndpoint, QStringLiteral("obsolete"), &app,
+        [](const QString&) { });
+    credentialCheck(forgotten && loadedPassword.isEmpty() && credentials->removals == 1 && credentials->writes == 0,
+        "forget removes the endpoint credential and defeats an older read or authentication reply");
+    NetworkReceiverCredentials::setSessionPassword(credentialEndpoint, QStringLiteral("replacement"));
+    NetworkReceiverCredentials::saveAccepted(credentialEndpoint, QStringLiteral("replacement"), &app,
+        [](const QString&) { });
+    credentialCheck(credentials->writes == 1 && credentials->lastWritten == QStringLiteral("replacement"),
+        "a newly accepted replacement remains eligible for secure storage after forget");
+    NetworkReceiverCredentials::load(credentialEndpoint, &app,
+        [&loadedPassword](const QString& password, const QString&) { loadedPassword = password; });
+    NetworkReceiverCredentials::forget(credentialEndpoint, &app, [](const QString&) { });
+    QCoreApplication::processEvents();
+    credentialCheck(loadedPassword.isEmpty(), "forget also defeats an already queued session-cache read");
+    CHECK(credentialFailures == 0);
+    // A cancelled keychain load must not open a receiver later.
+    OfflineBackend pending;
+    RadioConnectRequest pendingRequest;
+    pendingRequest.host = QStringLiteral("pending.invalid"); pendingRequest.port = 8073;
+    pending.connectRadio(pendingRequest);
+    CHECK(!pending.client);
+    pending.disconnectRadio();
+    credentials->pendingRead({ KiwiSdrCredentialResultCode::Success, {}, {} });
+    CHECK(!pending.client && !pending.isConnected());
     OfflineBackend backend;
     const auto caps = backend.capabilities();
     CHECK(!caps.canTransmit && caps.canCreateSlices && !caps.hasDaxStreams);
@@ -94,7 +168,7 @@ int main(int argc, char** argv)
     QObject::connect(&backend, &IRadioBackend::spectrumFrameReady, &app,
                      [&](int, const QByteArray& bins) {
         ++spectra;
-        geometryBeforeFrame = center == 7.0 && width == 2.0 && bins.size() == 8;
+        geometryBeforeFrame = center == 7.1 && width == 0.01 && bins.size() == 8;
     });
     backend.connectRadio(request);
 #ifndef HAVE_WEBSOCKETS
@@ -109,6 +183,19 @@ int main(int argc, char** argv)
     CHECK(speakerCount == 0 && sliceCount == 0); // pending auth/audio readiness
     emit backend.client->stateChanged(KiwiSdrClient::State::Connected, {});
     CHECK(backend.isConnected() && connects == 1 && slice.frequency == 7.1);
+    CHECK(caps.receiveAudioBuffering && caps.receiveAudioBuffering->jitterTargetMs == 360);
+    CHECK(caps.receiveAudioControl->speakerPan == ReceiveAudioControl::SpeakerPan::Backend);
+    CHECK(ReceiveAudioControl{}.speakerPan == ReceiveAudioControl::SpeakerPan::Host);
+    int versions = 0;
+    QObject::connect(&backend, &IRadioBackend::radioChanged, &app,
+        [&](const RadioDelta& delta) { if (delta.version) { ++versions; } });
+    KiwiSdrReceiverTelemetry versionTelemetry;
+    versionTelemetry.protocol.serverVersion = QStringLiteral("2026.919");
+    emit backend.client->telemetryChanged(versionTelemetry);
+    emit backend.client->telemetryChanged(versionTelemetry);
+    versionTelemetry.protocol.serverVersion = QStringLiteral("<unsafe>");
+    emit backend.client->telemetryChanged(versionTelemetry);
+    CHECK(versions == 1);
     CHECK(caps.extensionNamespaces.contains(QStringLiteral("digital-monitor")));
     QVariantMap monitorReply;
     QString monitorError;
@@ -160,7 +247,7 @@ int main(int argc, char** argv)
     CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Gain, 101})
           == ReceiveDispatch::Unsupported);
     CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Pan, 50})
-          == ReceiveDispatch::Unsupported);
+          == ReceiveDispatch::Dispatched);
     CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Mute, 1,
           SliceAudioRequest::Origin::ExternalReceiveSuppression})
           == ReceiveDispatch::Unsupported);
@@ -204,6 +291,37 @@ int main(int argc, char** argv)
     CHECK(producer->wait(5000));
     const auto oldSlice = sliceFrame;
     const auto oldSpeaker = speakerFrame;
+    backend.setSliceAudioMute(0, false);
+    backend.setSliceAudioPan(0, 0);
+    emit backend.client->decodedAudioReady(pcm);
+    CHECK(speakerFrame.samples()[1] == 0.0f && sliceFrame.legacyStereo24() == pcm);
+    backend.setSliceAudioPan(0, 100);
+    emit backend.client->decodedAudioReady(pcm);
+    CHECK(speakerFrame.samples()[0] == 0.0f && sliceFrame.legacyStereo24() == pcm);
+    backend.setSliceMode(0, QStringLiteral("SAM")); CHECK(slice.mode == QStringLiteral("SAM"));
+    backend.setSliceMode(0, QStringLiteral("FM")); CHECK(slice.mode == QStringLiteral("FM"));
+    backend.setPanCenter(QStringLiteral("0"), 7.1e6, IRadioBackend::PanCenterIntent::Drag);
+    backend.setPanBandwidth(QStringLiteral("0"), 10000);
+    QVector<float> ramp(1000);
+    for (int i = 0; i < ramp.size(); ++i) { ramp[i] = float(i); }
+    int initialRanges = 0;
+    auto rangeConnection = QObject::connect(&backend, &IRadioBackend::panRangeChanged, &app,
+        [&](const QString& id, double low, double high) {
+            if (id == QStringLiteral("0") && low == 175 && high == 285) { ++initialRanges; }
+        });
+    QByteArray cropped;
+    auto cropConnection = QObject::connect(&backend, &IRadioBackend::spectrumFrameReady, &app,
+        [&](int, const QByteArray& bytes) { cropped = bytes; });
+    emit backend.client->waterfallRowReady({}, ramp, 7.0, 7.2, 0);
+    float first = 0, last = 0;
+    std::memcpy(&first, cropped.constData(), sizeof(float));
+    std::memcpy(&last, cropped.constData() + cropped.size() - sizeof(float), sizeof(float));
+    CHECK(std::abs(first - 474.525f) < 0.01f && std::abs(last - 524.475f) < 0.01f);
+    CHECK(center == 7.1 && width == 0.01 && initialRanges == 1);
+    emit backend.client->waterfallRowReady({}, ramp, 7.0, 7.2, 0);
+    CHECK(initialRanges == 1); // initial range is per lease, not every frame
+    QObject::disconnect(rangeConnection);
+    QObject::disconnect(cropConnection);
     backend.disconnectRadio();
     CHECK(!oldSlice.current() && !oldSpeaker.current());
     CHECK(backend.requestSliceAudio(0, {SliceAudioRequest::Field::Gain, 50})
@@ -214,9 +332,9 @@ int main(int argc, char** argv)
     CHECK(backend.client->receiverControls().agcDecayMs == KiwiSdrProtocol::kAgcFastDecayMs);
     emit backend.client->stateChanged(KiwiSdrClient::State::Connected, {});
     QCoreApplication::processEvents();
-    CHECK(sliceCount == 2 && speakerCount == 2); // obsolete queued PCM rejected
+    CHECK(sliceCount == 4 && speakerCount == 4); // obsolete queued PCM rejected
     emit backend.client->decodedAudioReady(pcm);
-    CHECK(sliceCount == 3 && sliceFrame.stream().session != oldSlice.stream().session);
+    CHECK(sliceCount == 5 && sliceFrame.stream().session != oldSlice.stream().session);
     backend.disconnectRadio();
     backend.disconnectRadio();
     CHECK(disconnects == 2);
@@ -314,8 +432,8 @@ int main(int argc, char** argv)
     CHECK(dualSpeakers == 1);
     emit secondary->decodedAudioReady(pcm);
     CHECK(dualSpeakers == 2);
-    emit primary->waterfallRowReady({}, {-80.0f}, 7000000, 7200000, 0);
-    emit secondary->waterfallRowReady({}, {-90.0f}, 21000000, 21200000, 0);
+    emit primary->waterfallRowReady({}, {-80.0f}, 7.0, 7.2, 0);
+    emit secondary->waterfallRowReady({}, {-90.0f}, 21.0, 21.2, 0);
     CHECK(rows[0] == 1 && rows[1] == 1);
     CHECK(!dual.removePanadapter(QStringLiteral("01")));
     CHECK(!dual.removePanadapter(QStringLiteral("0"))); // primary anchors connection
@@ -330,7 +448,7 @@ int main(int argc, char** argv)
     auto* replacement = dual.client;
     emit replacement->stateChanged(KiwiSdrClient::State::Connected, {});
     CHECK(slices[2].panId == QStringLiteral("1")); // slice identity is distinct from display slot
-    emit replacement->waterfallRowReady({}, {-95.0f}, 14000000, 14200000, 0);
+    emit replacement->waterfallRowReady({}, {-95.0f}, 14.0, 14.2, 0);
     CHECK(rows[1] == 2 && rows[2] == 0);
     QCoreApplication::processEvents();
     CHECK(!frames.contains(2) && dualSpeakers == 2);
@@ -339,9 +457,9 @@ int main(int argc, char** argv)
     emit primary->decodedAudioReady(pcm);
     CHECK(dualSpeakers == 3);
     CHECK(dual.createPanadapter());
-    auto* pending = dual.client;
+    auto* pendingClient = dual.client;
     CHECK(dual.removePanadapter(QStringLiteral("1")));
-    emit pending->stateChanged(KiwiSdrClient::State::Connected, {});
+    emit pendingClient->stateChanged(KiwiSdrClient::State::Connected, {});
     CHECK(!slices.contains(3) && dual.isConnected());
     dual.disconnectRadio();
     CHECK(!retainedPrimary.current());
@@ -374,7 +492,7 @@ int main(int argc, char** argv)
     emit modeled->client->waterfallRowReady({}, {-95.0f}, 21.0, 21.2, 0);
     CHECK(model.panadapters().size() == 2 && model.slice(2));
     CHECK(model.slice(2)->panId() == secondModelPan);
-    CHECK(model.panadapter(secondModelPan)->centerMhz() == 21.1);
+    CHECK(model.panadapter(secondModelPan)->centerMhz() == 14.074);
     bool replacementOpened = false;
     QObject::connect(modeled, &IRadioBackend::sliceRemoved, &app, [&](int id) {
         if (id != 2) { return; }

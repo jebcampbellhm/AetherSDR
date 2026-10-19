@@ -839,7 +839,7 @@ int main(int argc, char** argv)
             connectButton->click();
             report("Web-888 connects directly with its own family, endpoint, and capacity",
                    requested.size() == 1 && requested.front().family == QStringLiteral("web888")
-                   && requested.front().port == 18073 && requested.front().maxSlices == 1
+                   && requested.front().port == 18073 && requested.front().maxSlices == 4 && requested.front().maxPanadapters == 2
                    && requested.front().model == QStringLiteral("Web-888"));
             const QString routes = AppSettings::instance().value("RoutedProfilesJson").toString();
             report("Web-888 route retention excludes the password",

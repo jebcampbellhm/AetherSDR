@@ -101,7 +101,9 @@ struct ReceiveCwPitchControl {
     int stepHz = 10;
 };
 struct ReceiveAudioControl {
+    enum class SpeakerPan { Host, Backend };
     SliceFrequencyControl::Authority authority{SliceFrequencyControl::Authority::Unknown};
+    SpeakerPan speakerPan{SpeakerPan::Host};
     // Both gain (0..100) and mute must act on the shared slice's RX audio.
 };
 // Typed pre-monitor sliceAudioFrameReady export; grants no TX, IQ or control verb.

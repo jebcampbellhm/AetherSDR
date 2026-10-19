@@ -1,5 +1,10 @@
 # Standalone Web-888 continuation handoff
 
+> Historical originating-workstation handoff. On 2026-10-19 this branch was
+> merged into `web888-native`, preserving two hardware leases, four shared SSB
+> listeners and digital monitoring. Single-pan and mode-limit descriptions
+> below describe the original branch, not the integrated backend.
+
 ## Scope and starting point
 
 Continue on `fix/web888-narrow-zoom` in the `jebcampbellhm/AetherSDR` fork.

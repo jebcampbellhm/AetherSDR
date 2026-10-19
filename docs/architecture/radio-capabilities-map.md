@@ -35,13 +35,15 @@ traps and why the DAX crash guard is deliberately *not* the DAX capability.
 
 ### Standalone Web-888
 
-`Web888Backend` declares family `web888`, model `Web-888`, one receive slice,
-one panadapter, and no transmit or microphone path. Receive tuning covers
-1 Hz–30.72 MHz; AM, SAM, USB, LSB, CW, and FM use the shared protocol client.
+`Web888Backend` declares family `web888`, four receive slices across two
+physical panadapters, and no transmit or microphone path. AM, SAM, USB, LSB, CW and FM
+use the shared protocol client; shared IQ listeners support USB/LSB with local
+filters and AGC. Receiver metadata constrains tuning coverage.
 Pan center and span controls move the receiver's waterfall window without
 retuning audio. Spectrum levels are receiver-reported absolute bins with no
 claim of factory calibration. Monitor gain/mute/pan are applied once by the
-backend; the 24 kHz slice PCM export remains before monitor controls.
+backend, declared by `ReceiveAudioControl::speakerPan`; the 24 kHz slice PCM
+export remains before monitor controls. Other backends retain host pan handling.
 `receiveAudioBuffering` requests a 360 ms host startup/refill reserve for
 bursty WebSocket delivery. The common audio engine consumes it; no additional
 radio command is granted, and absent declarations preserve existing behavior.

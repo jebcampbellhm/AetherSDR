@@ -49,8 +49,10 @@ public:
     ReceiveDispatch requestSliceAudio(int sliceId, const SliceAudioRequest& request) override;
     void setSliceAudioMute(int sliceId, bool mute) override;
     void setSliceAudioGain(int sliceId, int gainPercent) override;
+    void setSliceAudioPan(int sliceId, int pan) override;
     void setPanCenter(const QString& panId, double hz, PanCenterIntent intent) override;
     void setPanBandwidth(const QString& panId, double hz) override;
+    void setPanFrameRate(const QString& panId, int fps) override;
     void setKeying(bool key, const TxCoordinator::Operation& operation,
                    const TxCoordinator::Completion& completion = {}) override;
     void invokeExtension(const QString& ns, const QString& verb,
@@ -80,12 +82,14 @@ private:
         quint64 generation{0};
         bool connected{false};
         bool meterDefined{false};
+        bool initialRange{false};
         double frequencyHz{7100000.0};
         QString mode{QStringLiteral("LSB")};
         int lowHz{-2800};
         int highHz{-300};
         QString agcMode{QStringLiteral("med")};
         int gain{100};
+        int pan{50};
         bool muted{false};
         double panCenterHz{7100000.0};
         double panBandwidthHz{100000.0};
@@ -108,6 +112,7 @@ private:
     Web888IqProcessor* m_listenerProcessor{nullptr};
     Web888CapturePool* m_capturePool{nullptr};
     Web888DecoderRouter m_decoderRouter;
+    QString m_reportedVersion;
     QString m_monitorError;
     quint64 m_monitorSamples{0};
     QString m_endpoint;

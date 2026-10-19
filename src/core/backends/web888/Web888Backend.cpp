@@ -5,6 +5,7 @@
 #include "core/KiwiSdrClient.h"
 #include "core/NetworkReceiverCredentials.h"
 #include <QTimer>
+#include <QPointer>
 
 #include <QUrl>
 #include <QScopeGuard>
@@ -18,7 +19,8 @@ namespace {
 // Spectrum indices address reusable display slots, not monotonic slice IDs.
 int displayIndex(int sliceId) { return sliceId == 0 ? 0 : 1; }
 const QStringList kModes{QStringLiteral("AM"), QStringLiteral("USB"),
-                         QStringLiteral("LSB"), QStringLiteral("CW")};
+                         QStringLiteral("LSB"), QStringLiteral("CW"),
+                         QStringLiteral("SAM"), QStringLiteral("FM")};
 }
 
 Web888Backend::Web888Backend(QObject* parent) : IRadioBackend(parent)
@@ -51,7 +53,7 @@ RadioCapabilities Web888Backend::capabilities() const
     using Authority = SliceFrequencyControl::Authority;
     caps.sliceFrequencyControl = SliceFrequencyControl{Authority::Engine, 0, 0};
     caps.receiveModeControl = ReceiveModeControl{Authority::Engine, kModes};
-    caps.receiveAudioControl = ReceiveAudioControl{Authority::Engine};
+    caps.receiveAudioControl = ReceiveAudioControl{Authority::Engine, ReceiveAudioControl::SpeakerPan::Backend};
     caps.receiveAudioBuffering = ReceiveAudioBuffering{360};
     return caps;
 }
@@ -166,6 +168,8 @@ void Web888Backend::connectRadio(const RadioConnectRequest& request)
         return;
     }
     ++m_generation;
+    m_reportedVersion.clear();
+    m_saveCredentials = false;
     m_endpoint = request.params.value(QStringLiteral("web888.endpoint")).toString();
     if (m_endpoint.isEmpty()) {
         QUrl url;
@@ -181,14 +185,22 @@ void Web888Backend::connectRadio(const RadioConnectRequest& request)
     }
     m_loadingCredentials = true;
     const auto generation = m_generation;
+    QTimer::singleShot(30000, this, [this, generation] {
+        if (generation != m_generation || !m_loadingCredentials) { return; }
+        const QPointer<Web888Backend> self(this);
+        emit connectionError(tr("Web-888 credential loading timed out."));
+        if (self && generation == m_generation) { stop(true); }
+    });
     NetworkReceiverCredentials::load(m_endpoint, this,
         [this, generation](const QString& password, const QString& error) {
             if (generation != m_generation || !m_loadingCredentials) { return; }
-            m_loadingCredentials = false;
             if (!error.isEmpty()) {
+                const QPointer<Web888Backend> self(this);
                 emit connectionError(tr("Cannot load the Web-888 password: %1").arg(error));
+                if (self && generation == m_generation) { stop(true); }
                 return;
             }
+            m_loadingCredentials = false;
             m_password = password;
             m_saveCredentials = true;
             openReceiver(0);
@@ -199,6 +211,7 @@ void Web888Backend::openReceiver(int id)
 {
     const auto r = receiver(id);
     const quint64 generation = r->generation = ++m_nextLease;
+    r->initialRange = false;
     r->client = createClient();
     auto* client = r->client;
     const QString panId = QString::number(panIndex(id));
@@ -252,6 +265,19 @@ void Web888Backend::openReceiver(int id)
             }
         }
     });
+    connect(client, &KiwiSdrClient::telemetryChanged, this,
+            [this, id, generation](const KiwiSdrReceiverTelemetry& telemetry) {
+        const QString version = telemetry.protocol.serverVersion;
+        if (id != 0 || !current(id, generation) || !m_connected || version.isEmpty()
+            || version.size() > 128 || version == m_reportedVersion) { return; }
+        for (QChar ch : version) {
+            if (!ch.isLetterOrNumber() && ch != QLatin1Char('.') && ch != QLatin1Char('-')
+                && ch != QLatin1Char('_') && ch != QLatin1Char('+')) { return; }
+        }
+        m_reportedVersion = version;
+        RadioDelta delta; delta.version = version;
+        emit radioChanged(delta);
+    });
     connect(client, &KiwiSdrClient::decodedAudioReady, this,
             [this, id, generation, r, panId](const QByteArray& pcm) {
         if (!r->sharedIq) { deliverAudio(id, generation, pcm); }
@@ -281,6 +307,15 @@ void Web888Backend::openReceiver(int id)
                                           [](float bin) { return std::isfinite(bin); })) {
             return;
         }
+        if (!r->initialRange && bins.size() > 32) {
+            auto levels = bins;
+            std::sort(levels.begin(), levels.end());
+            const double floor = levels[levels.size() / 5];
+            r->initialRange = true;
+            const QPointer<Web888Backend> self(this);
+            emit panRangeChanged(panId, floor - 25, floor + 85);
+            if (!self || !current(id, generation)) { return; }
+        }
         const double viewLow = (r->panCenterHz - r->panBandwidthHz / 2) / 1e6;
         const double viewWidth = r->panBandwidthHz / 1e6;
         QVector<float> view(bins.size(), -200.0f);
@@ -296,6 +331,12 @@ void Web888Backend::openReceiver(int id)
         if (current(id, generation)) {
             emit spectrumFrameReady(panIndex(id), QByteArray(reinterpret_cast<const char*>(view.constData()),
                                                   view.size() * sizeof(float)));
+        }
+    });
+    connect(client, &KiwiSdrClient::waterfallAvailabilityChanged, this,
+            [this, id, generation](bool available, const QString& detail) {
+        if (current(id, generation) && receiver(id)->connected && !available && !detail.isEmpty()) {
+            emit configurationWarning(detail);
         }
     });
     connect(client, &KiwiSdrClient::meterReadingReady, this,
@@ -371,7 +412,8 @@ void Web888Backend::deliverAudio(int id, quint64 generation, const QByteArray& p
     for (qsizetype offset = 0; offset < speaker.size(); offset += sizeof(float)) {
         float sample;
         std::memcpy(&sample, speaker.constData() + offset, sizeof(sample));
-        sample *= gain;
+        const bool left = (offset / sizeof(float)) % 2 == 0;
+        sample *= gain * std::min(1.0f, left ? 2 * (1 - r->pan / 100.0f) : 2 * r->pan / 100.0f);
         std::memcpy(speaker.data() + offset, &sample, sizeof(sample));
     }
     publishLegacyAudio(speaker);
@@ -640,6 +682,7 @@ void Web888Backend::publishSlice(int id)
     delta.active = id == m_activeSlice;
     delta.inUse = true;
     delta.txSlice = false;
+    delta.audioPan = r->pan;
     delta.audioGain = r->gain;
     delta.audioMute = r->muted;
     delta.agcMode = r->agcMode;
@@ -804,9 +847,19 @@ ReceiveDispatch Web888Backend::requestSliceAudio(int id, const SliceAudioRequest
         setSliceAudioMute(id, request.value != 0);
         break;
     case SliceAudioRequest::Field::Pan:
-        return ReceiveDispatch::Unsupported;
+        setSliceAudioPan(id, request.value);
+        break;
     }
     return ReceiveDispatch::Dispatched;
+}
+
+void Web888Backend::setSliceAudioPan(int id, int pan)
+{
+    const auto r = receiver(id);
+    if (r && r->connected && !m_stopping && pan >= 0 && pan <= 100) {
+        r->pan = pan;
+        publishSlice(id);
+    }
 }
 
 void Web888Backend::setSliceAudioMute(int id, bool mute)
@@ -845,6 +898,14 @@ void Web888Backend::setPanBandwidth(const QString& id, double hz)
     if (r && r->connected && !m_stopping && std::isfinite(hz) && hz > 0) {
         r->panBandwidthHz = hz;
         r->client->setWaterfallView(panId, r->panCenterHz / 1e6, hz / 1e6);
+    }
+}
+
+void Web888Backend::setPanFrameRate(const QString& id, int fps)
+{
+    const auto r = receiver(sliceForPan(id));
+    if (r && r->connected && !m_stopping && fps > 0) {
+        r->client->setWaterfallRateOverride(fps >= 16 ? 4 : fps >= 8 ? 3 : fps >= 4 ? 2 : 1);
     }
 }
 

@@ -104,7 +104,7 @@ int main(int argc, char** argv)
         [&](int id, const PcmFrame& frame) { if (frame.legacyStereo24().size()) { ++audioCounts[id]; } });
     QObject::connect(&backend, &IRadioBackend::sliceLifecycleFailed, &app,
         [&](const QString&, int, const QString&) { ++errors; });
-    RadioConnectRequest request; request.host = QStringLiteral("receiver.invalid");
+    RadioConnectRequest request; request.params.insert(QStringLiteral("web888.password"), QString{}); request.host = QStringLiteral("receiver.invalid");
     backend.connectRadio(request);
     emit backend.wire->stateChanged(KiwiSdrClient::State::Connected, {});
     backend.setSliceFrequency(0, 14200000); backend.setSliceMode(0, QStringLiteral("USB"));
@@ -211,7 +211,7 @@ int main(int argc, char** argv)
         [&](int) { if (disconnected) { ++lateRemovals; } });
     QObject::connect(&cancelled, &IRadioBackend::sliceChanged, &app,
         [&](int id, const SliceDelta& d) {
-            if (id == 0 && d.modeList && d.modeList->size() == 4) { cancelled.disconnectRadio(); }
+            if (id == 0 && d.modeList && d.modeList->size() == 6) { cancelled.disconnectRadio(); }
         });
     CHECK(cancelled.removeSlice(1));
     CHECK(disconnected && lateRemovals == 0);
