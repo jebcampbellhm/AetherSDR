@@ -1,4 +1,5 @@
 #pragma once
+#include "RadioSetupControl.h"
 
 #include <QFlags>
 #include <QList>
@@ -10,6 +11,7 @@
 #include <optional>
 
 #include "core/backends/SquelchLevelScale.h"
+#include "core/backends/DspParameterReset.h"
 
 namespace AetherSDR {
 
@@ -18,6 +20,13 @@ namespace AetherSDR {
 struct ConnectionRecovery {
     enum class Mode { HostRetry, Manual };
     Mode mode{Mode::HostRetry};
+};
+
+// Radio-owned TUNE RCA output suppression, independently persisted per band.
+struct TuneOutputSuppressionControl {
+    enum class Scope { PerBand };
+    Scope scope = Scope::PerBand;
+    int maximumBandId = 255;
 };
 
 struct TxPowerBand {
@@ -66,6 +75,30 @@ struct ReceiveFilterMode {
 struct ReceiveFilterControl {
     SliceFrequencyControl::Authority authority{SliceFrequencyControl::Authority::Unknown};
     QList<ReceiveFilterMode> modes;
+};
+// Supported host receive signal controls and their qualified mode family.
+// An absent record preserves existing radio-side capability semantics.
+struct ReceiveDspControl {
+    enum class Feature { Agc, Nb, Nr, Anf, ManualNotch, Apf, Rit };
+    QStringList modes;
+    QList<Feature> features;
+    // An entry narrows a declared feature to a subset of the qualified modes.
+    // An absent entry uses all modes; an empty entry disables that feature.
+    QMap<Feature, QStringList> featureModes;
+    bool supports(Feature feature, const QString& mode) const
+    {
+        const auto restriction = featureModes.constFind(feature);
+        return features.contains(feature) && modes.contains(mode)
+            && (restriction == featureModes.cend() || restriction.value().contains(mode));
+    }
+};
+
+// Session-wide receive BFO pitch, dispatched through setCwPitch and confirmed
+// through TransmitDelta::cwPitch. Presence grants no transmit or microphone path.
+struct ReceiveCwPitchControl {
+    int minimumHz = 100;
+    int maximumHz = 6000;
+    int stepHz = 10;
 };
 struct ReceiveAudioControl {
     SliceFrequencyControl::Authority authority{SliceFrequencyControl::Authority::Unknown};
@@ -429,6 +462,8 @@ struct RadioCapabilities {
     std::optional<ReceiveFilterControl> receiveFilterControl;
     std::optional<ReceiveAudioControl> receiveAudioControl;
     std::optional<ReceiveAudioBuffering> receiveAudioBuffering;
+    std::optional<ReceiveCwPitchControl> receiveCwPitchControl;
+    std::optional<ReceiveDspControl> receiveDspControl;
     std::optional<ReceiveAudioExport> receiveAudioExport;
     std::optional<BroadcastFmReceive> broadcastFmReceive;
     std::optional<ReceivePanRangeControl> receivePanCenterControl;
@@ -486,6 +521,7 @@ struct RadioCapabilities {
         bool tunePowerAppliesLive = false;
     };
     std::optional<TransmitDriveControl> transmitDriveControl;
+    std::optional<TuneOutputSuppressionControl> tuneOutputSuppression;
 
     // "Show TX in Waterfall" on a radio that neither stores nor echoes it.
     // Absent: `transmit set show_tx_in_waterfall=` and its status echo own the
@@ -645,6 +681,7 @@ struct RadioCapabilities {
     bool hasFlexControlIntegration = false; // FlexControl/AetherControl verbs are supported
     bool hasAudioCompression = false; // selectable compressed radio-audio transport
     bool hasSharpFilters = false;    // radio implements the sharp-filter settings page
+    std::optional<RadioSetupControl> radioSetupControl;
     // The radio's streaming data plane uses VITA-49. This currently gates the
     // receive-socket buffer and network MTU controls; it describes the transport,
     // not the vendor or only one stream direction.
@@ -656,6 +693,14 @@ struct RadioCapabilities {
     bool hasTuner = false;         // antenna tuner / ATU matching control
     bool hasTunerMemories = false; // radio-side ATU memory recall/database
     bool hasAmplifier = false;     // integrated or controllable PA
+    // Shape of the existing desktop NRS level verb. Absent preserves the
+    // legacy 0..100 request range; this grants no additional daemon method.
+    struct NrsLevelControl {
+        int levelMaximum = 100;
+    };
+    std::optional<NrsLevelControl> nrsLevelControl;
+
+    std::optional<DspParameterResetControl> dspParameterReset;
     bool hasExtendedDsp = false;   // extended firmware DSP filters (NRS/RNN/NRF)
 
     // WDSP LMS/FFT filter family: NRL, ANFL, ANFT. Narrower than hasRadioSideDsp and
@@ -740,6 +785,22 @@ struct RadioCapabilities {
     };
     std::optional<PaTelemetryAudit> paTelemetryAudit;
 
+    // Engaged means this radio's session takes its receive front-end options
+    // (sample rate, ADC, dither, randomization, filter-bank bypass, the
+    // radio-speaker stream) from the settings the "ANAN Front End" setup page
+    // edits, so that page applies to it. std::nullopt (the default) means NO
+    // SUCH PAGE for this radio, which is what every family that has not made
+    // the claim keeps.
+    //
+    // NO FIELDS, ON PURPOSE: the page offers all of its controls or none, so a
+    // per-control field would be a claim nothing reads (#5554). A field arrives
+    // together with the consumer that leaves a control out for some radio.
+    //
+    // A record rather than a bool for the same reason as PaTelemetryAudit
+    // above: RadioCapabilities is at its frozen boolean count (#5262 M2).
+    struct AdcFrontEnd {};
+    std::optional<AdcFrontEnd> adcFrontEnd;
+
     // The radio reports main-fan speed as live telemetry. False means the
     // Radio Vitals applet omits the fan gauge instead of presenting an
     // instrument that can never receive a sample. This is independent of PA
@@ -766,6 +827,10 @@ struct RadioCapabilities {
     // Independent controls require an implemented command or host DSP path.
     // AGC mode selection alone does not imply a writable threshold/off level.
     bool hasAgcThreshold = false;
+    struct AutoAgcThresholdControl {
+        QString requiredLicenseFeature;
+    };
+    std::optional<AutoAgcThresholdControl> autoAgcThresholdControl;
     // Modes the implemented selector can honor. A native OFF time-constant
     // editor is a different contract from selecting a fast/medium/slow bank.
     QStringList agcModes{QStringLiteral("off"), QStringLiteral("slow"),
@@ -850,6 +915,9 @@ struct RadioCapabilities {
     // devices for external decoders (Flex DAX). UI visibility only; the crash guard
     // is the separate panStream() null-check in MainWindow::startDax().
     bool hasDaxStreams = false;
+    // Discrete DAX IQ request rates in Hz. Empty means unsupported or unknown.
+    // Applied by the existing DaxIqModel command path, including stream restore.
+    QList<int> daxIqSampleRates;
 
     // Audio DSP runs inside the radio via command-plane verbs (Flex: NR/NB/ANF/NRL/
     // ANFL/ANFT, APD, wideband NB, 8-band hardware EQ `eq RXsc`/`eq TXsc`). False for

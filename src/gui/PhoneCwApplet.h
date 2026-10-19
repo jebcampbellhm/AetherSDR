@@ -43,6 +43,7 @@ public:
     explicit PhoneCwApplet(QWidget* parent = nullptr);
 
     void setTransmitModel(TransmitModel* model);
+    void setTransmitControlsAvailable(bool available);
 
     // Bind the active slice.  TransmitModel is radio-global TX state; APF is a
     // per-slice receive filter, so the CW panel needs the slice itself to drive
@@ -170,7 +171,7 @@ private:
 
     // ── ALC gauges (mirrored across both Phone and CW panels) ───────────
     // Both gauges read from the same MeterModel::swAlcChanged source so
-    // operators see the post-software-ALC SSB peak (dBFS) in whichever
+    // operators see the post-software-ALC peak (dBFS) in whichever
     // panel is active for the current mode.
     HGauge*      m_alcGaugePhone{nullptr};
     HGauge*      m_alcGaugeCw{nullptr};
@@ -219,6 +220,7 @@ private:
 
     // ── Shared state ─────────────────────────────────────────────────────
 
+    bool m_transmitControlsAvailable{true};
     bool m_updatingFromModel{false};
     bool m_radeActive{false};
 

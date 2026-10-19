@@ -461,6 +461,10 @@ RadioCapabilities AnanBackend::capabilities() const
     c.hasAgcThreshold = true; // Host receiver DSP implements threshold/off gain.
     c.manufacturer = QStringLiteral("Apache Labs");
     c.model = QStringLiteral("ANAN-G2");
+    // The session takes its receive front-end options from AnanSettings
+    // (populateFamilyParams()), so the setup page that edits them applies.
+    c.adcFrontEnd = RadioCapabilities::AdcFrontEnd{};
+
     // ---- PA telemetry ----
     // The DC supply rail, published as RAD:+13.8A from every status packet's
     // count (onSupplyRailCounts()). Claimed on a bench measurement, not on the
@@ -494,6 +498,7 @@ RadioCapabilities AnanBackend::capabilities() const
     // ours, the radio echoes nothing back, and there is no register to read.
     c.receiveAudioControl = ReceiveAudioControl{SliceFrequencyControl::Authority::Engine};
     c.receiveAudioExport = std::nullopt; // native DAX export not qualified for this backend
+    c.dspParameterReset = std::nullopt;
     c.receivePanCenterControl = std::nullopt; // center also retunes the slice
     c.receivePanBandwidthControl = ReceivePanRangeControl{SliceFrequencyControl::Authority::Engine,
                                                          48'000, 1'536'000};

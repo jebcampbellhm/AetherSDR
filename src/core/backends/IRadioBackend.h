@@ -8,6 +8,7 @@
 #include "core/PcmFrame.h"
 
 #include <map>
+#include <functional>
 
 #include <QByteArray>
 #include <QLoggingCategory>
@@ -30,6 +31,9 @@
 #include "core/backends/RadioCapabilities.h"
 #include "core/backends/ReceiveCommand.h"
 #include "core/backends/ModelControlRequest.h"
+#include "core/backends/RadioSetupRequest.h"
+#include "core/backends/ProfileRequest.h"
+#include "core/backends/MemoryRequest.h"
 #include "core/backends/RestoredRadioState.h"
 #include "core/backends/RadioDelta.h"
 #include "core/backends/SliceDelta.h"
@@ -145,8 +149,47 @@ public:
                                                     TunePowerContext = TunePowerContext::Deferred)
     { return ReceiveDispatch::Unsupported; }
     // Radio-owned identity; client-owned nicknames retain their local store.
-    virtual ReceiveDispatch requestRadioNickname(const QString&)
+    using NicknameCompletion = std::function<void(bool accepted)>;
+    virtual ReceiveDispatch requestRadioNickname(const QString&, NicknameCompletion = {})
     { return ReceiveDispatch::Unsupported; }
+    // Whether a Dispatched request carrying an answerTicket will be answered
+    // through transmitControlAnswered(). False by default: a backend that cannot
+    // hear the radio's reply leaves it to RadioModel, which reports it as not
+    // confirmed rather than assume the radio agreed.
+    virtual bool answersTransmitControl() const { return false; }
+    virtual ReceiveDispatch requestRadioSetup(const RadioSetupRequest& request,
+                                              const RadioSetupCompletion& = {},
+                                              const RadioControlFence& current = {})
+    {
+        // The station identity is consumed by the desktop even on families
+        // with no radio-side copy. This is not a fabricated hardware write.
+        return (!current || current()) && request.valid() && (request.field == RadioSetupRequest::Field::Callsign
+            || request.field == RadioSetupRequest::Field::ClientStation)
+            ? ReceiveDispatch::LocalOnly : ReceiveDispatch::Unsupported;
+    }
+    virtual ReceiveDispatch requestTxBand(const TxBandRequest&)
+    { return ReceiveDispatch::Unsupported; }
+    virtual ReceiveDispatch requestProfile(const ProfileRequest&,
+                                           const RadioControlCompletion& = {},
+                                           const RadioControlFence& = {})
+    { return ReceiveDispatch::Unsupported; }
+    virtual ReceiveDispatch requestMemory(const MemoryRequest&,
+                                          const RadioControlCompletion& = {},
+                                          const RadioControlFence& = {})
+    { return ReceiveDispatch::Unsupported; }
+    virtual ReceiveDispatch requestUsbCable(const UsbCableRequest&)
+    { return ReceiveDispatch::Unsupported; }
+    virtual ReceiveDispatch requestTransverter(const TransverterRequest&,
+                                               const RadioSetupCompletion& = {})
+    { return ReceiveDispatch::Unsupported; }
+    // This changes a radio-owned setting and never starts TUNE or keys TX.
+    virtual void requestTuneOutputSuppression(int bandId, bool suppressed, quint64 requestId)
+    {
+        Q_UNUSED(bandId);
+        Q_UNUSED(suppressed);
+        emit tuneOutputSuppressionCommandFinished(requestId, false,
+            QStringLiteral("This radio does not support TUNE output suppression."));
+    }
     explicit IRadioBackend(QObject* parent = nullptr) : QObject(parent)
     {
         connect(this, &IRadioBackend::connected, this, [this] {
@@ -255,6 +298,8 @@ public:
     {
         setSliceFilter(sliceId, request.lowHz, request.highHz);
     }
+    virtual ReceiveDispatch requestSliceAgcThresholdMode(int, AgcThresholdMode)
+    { return ReceiveDispatch::Unsupported; }
     virtual void requestSliceAgc(int sliceId, const SliceAgcRequest& request)
     {
         if (request.field != SliceAgcRequest::Field::OffLevel) {
@@ -265,6 +310,8 @@ public:
     // receiveAudioControl record: its authorization/readback contract is
     // narrower than the existing desktop controls. Unsupported is explicit,
     // never acceptance through an inherited empty implementation hook.
+    virtual ReceiveDispatch requestDspParameterReset(int, DspParameterResetTarget)
+    { return ReceiveDispatch::Unsupported; }
     virtual ReceiveDispatch requestSliceDsp(int, const SliceDspRequest&)
     { return ReceiveDispatch::Unsupported; }
     virtual ReceiveDispatch requestSliceAudio(int, const SliceAudioRequest&)
@@ -940,6 +987,10 @@ public:
 
 signals:
     void independentTxStopped(const AetherSDR::TxStopEvidence& evidence);
+    // The radio's own answer to a dispatched TransmitControlRequest whose
+    // answerTicket was nonzero: applied when it accepted the setting. Emitted
+    // at most once per ticket.
+    void transmitControlAnswered(quint64 ticket, bool applied);
     // ---- connection state UP ----
     void connected();
     void disconnected();
@@ -951,6 +1002,11 @@ signals:
     void configurationWarning(const QString& message);
 
     void capabilitiesChanged();
+
+    void tuneOutputSuppressionObserved(int bandId, bool suppressed);
+    // Acceptance is not confirmation; only the observation changes live state.
+    void tuneOutputSuppressionCommandFinished(quint64 requestId, bool accepted,
+                                              const QString& reason);
 
     // Radio-authoritative state for the momentary transmit-frequency monitor.
     void transmitFrequencyCheckChanged(bool on);

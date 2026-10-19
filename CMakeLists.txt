@@ -7,7 +7,7 @@ if(POLICY CMP0156)
     cmake_policy(SET CMP0156 NEW)
 endif()
 
-project(AetherSDR VERSION 26.10.2 LANGUAGES C CXX)
+project(AetherSDR VERSION 26.10.3 LANGUAGES C CXX)
 
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
@@ -179,7 +179,8 @@ option(REQUIRE_RTL "Fail configuration unless the RTL backend and float FFTW are
 #       signed-16-bit wire (MetisProtocol.cpp, ep2WriteTxIq), so TXA's
 #       advantage THERE is below the wire and unusable.
 # OFF — the in-tree phasing modulator, unchanged. The fallback for a machine or
-#       a report where TXA misbehaves.
+#       a report where TXA misbehaves. SSB and digital only: AM, DSB and FM
+#       stay receive-only in this build.
 #
 #       THIS LINE USED TO SAY "kept building and kept tested" AND THE FLIP
 #       BELOW MAKES THAT FALSE. `grep AETHER_HL2_TX_TXA .github/workflows/*.yml`
@@ -234,7 +235,7 @@ option(REQUIRE_RTL "Fail configuration unless the RTL backend and float FFTW are
 # radio was keyed. No antenna port was observed." -- now exists, and it is named
 # rather than asserted.
 option(AETHER_HL2_TX_TXA
-       "Hermes-Lite 2 SSB transmit modulator: ON (default) uses WDSP's TXA chain, OFF the in-tree phasing modulator"
+       "Hermes-Lite 2 transmit modulator: ON (default) uses WDSP's TXA chain, OFF the in-tree phasing modulator (SSB only)"
        ON)
 # Lets AETHER_FIRMWARE_CATALOG and AETHER_FIRMWARE_TRUST_KEYS replace the
 # firmware catalog and add firmware-signing keys, for testing a publisher's own
@@ -898,6 +899,8 @@ set(CORE_SOURCES
     src/core/backends/MemoryWireCodec.cpp    # memory kv-set decode, shared by Flex + local bank
     src/core/backends/flex/FlexBackend.cpp   # aetherd RFC step 2.2 (§5.5)
     src/core/backends/flex/FlexModelControls.cpp
+    src/core/backends/flex/FlexSetupControls.cpp
+    src/core/backends/flex/FlexStoredControls.cpp
     src/core/backends/flex/FlexPttStopTracker.cpp # operation-bound LAN PTT evidence
     src/core/backends/flex/FlexPttWireSession.cpp
     src/core/backends/flex/RadioConnection.cpp  # SmartSDR TCP command/reply/status wire
@@ -1027,6 +1030,7 @@ set(CORE_SOURCES
     src/core/Ctr2FirmwareUpdater.cpp
     src/core/Ctr2MaxRegistration.cpp
     src/core/CappedDownload.cpp
+    src/core/Ctr2DeviceLock.cpp
     src/core/Ctr2MaxStockCatalog.cpp
     src/core/Ctr2MaxStockFirmware.cpp
     src/core/EspFirmwareCatalog.cpp
@@ -1093,7 +1097,23 @@ set(CORE_SOURCES
     src/core/AcomProtocol.cpp
     src/core/AcomConnection.cpp
     src/core/SpeProtocol.cpp
+    src/core/SpeLegacyProtocol.cpp
     src/core/SpeConnection.cpp
+    src/models/Kxpa100RadioAssociation.cpp
+    src/models/Kxpa100RadioAssociation.h
+    src/models/Kat500TxController.cpp
+    src/models/Kat500TxController.h
+    src/models/Kxpa100Model.cpp
+    src/models/Kxpa100Model_Maintenance.cpp
+    src/models/Kat500Model.cpp
+    src/core/Kxpa100Protocol.cpp
+    src/core/Kxpa100Maintenance.cpp
+    src/core/Kat500Protocol.cpp
+    src/core/Kat500Maintenance.cpp
+    src/core/Kpa500Protocol.cpp
+    src/core/Kpa500Maintenance.cpp
+    src/core/Kpa500FaultHistory.cpp
+    src/core/Kpa500Connection.cpp
     src/core/VkampProtocol.cpp
     src/core/VkampConnection.cpp
     src/core/Kpa1500Protocol.cpp
@@ -1114,6 +1134,12 @@ set(CORE_SOURCES
     src/core/DvkWavConverter.cpp
     src/core/DvkWavTransfer.cpp
     src/core/weather/OperaRadarImage.cpp
+    src/core/VoiceKeyerWavDecoder.cpp
+    src/core/VoiceKeyerSettings.cpp
+    src/core/LocalVoiceKeyerStore.cpp
+    src/core/LocalWavPlayer.cpp
+    src/core/GeneratedAudioTransmitter.cpp
+    src/core/VoiceKeyerTxRoute.cpp
     src/core/ZipArchive.cpp
     src/core/ProfileTransfer.cpp
     src/core/QsoRecorder.cpp
@@ -1121,6 +1147,7 @@ set(CORE_SOURCES
     src/core/QsoWavFormat.cpp
     src/core/QsoWavPlayback.cpp
     src/core/FirmwareStager.cpp
+    src/core/MsiFirmwareMetadata.cpp
     src/core/UpdateChecker.cpp
     src/core/NetworkDiagnostics.cpp
     src/core/WindowsFirewall.cpp
@@ -1222,6 +1249,8 @@ set(MODEL_SOURCES
     src/models/Rn2SettingsModel.cpp
     src/models/DigitalMonitoringModel.cpp
     src/models/RadioModel.cpp
+    src/models/RadioModel_Setup.cpp
+    src/models/RadioModel_StoredControls.cpp
     src/models/RadioModel_TxCoordinator.cpp
     src/models/TxController.cpp
     src/models/DeclaredBands.cpp
@@ -1242,6 +1271,9 @@ set(MODEL_SOURCES
     src/models/SpotModel.cpp
     src/models/CwxModel.cpp
     src/models/DvkModel.cpp
+    src/models/VoiceKeyer.cpp
+    src/models/LocalVoiceKeyer.cpp
+    src/models/VoiceKeyerController.cpp
     src/models/NavtexModel.cpp
     src/models/FlexWaveformModel.cpp
     src/models/DStarModel.cpp
@@ -1377,6 +1409,12 @@ set(GUI_SOURCES
     src/gui/AmpApplet.cpp
     src/gui/AcomApplet.cpp
     src/gui/SpeApplet.cpp
+    src/gui/Kxpa100Applet.cpp
+    src/gui/Kat500Applet.cpp
+    src/gui/Kxpa100AdvancedWidget.cpp
+    src/gui/Kat500AdvancedWidget.cpp
+    src/gui/Kpa500Applet.cpp
+    src/gui/Kpa500AdvancedWidget.cpp
     src/gui/SpeLcdWidget.cpp
     src/gui/VkampApplet.cpp
     src/gui/Kpa1500Applet.cpp
@@ -3006,7 +3044,8 @@ if(HIDAPI_FOUND)
         src/core/HidDeviceParser.cpp
         src/core/HidDeviceParser.h
         src/core/Ctr2HidapiPort.cpp
-        src/core/Ctr2HidapiPort.h)
+        src/core/Ctr2HidapiPort.h
+        src/core/ShuttleRateIntegrator.h)
     target_sources(AetherSDR PRIVATE
         src/gui/RC28MappingDialog.cpp
         src/gui/RC28MappingDialog.h)
@@ -3182,27 +3221,36 @@ endif()
 
 target_sources(aethercore PRIVATE src/models/CwRxModel.cpp src/models/CwRxModel.h)
 
-option(ENABLE_DEEPFIST_EXPERIMENT "Build the local DeepFist CW prototype" OFF)
-set(DEEPFIST_MODEL_BASE_URL "" CACHE STRING "Published, versioned HTTPS DeepFist asset directory (empty before publication)")
-if(ENABLE_DEEPFIST_EXPERIMENT)
-    if(NOT ORT_FOUND)
-        message(FATAL_ERROR "The DeepFist prototype requires the packaged ONNX Runtime")
-    endif()
-    target_compile_definitions(aethercore PUBLIC HAVE_DEEPFIST)
-    target_compile_definitions(aethercore PRIVATE DEEPFIST_MODEL_BASE_URL="${DEEPFIST_MODEL_BASE_URL}")
-    target_sources(aethercore PRIVATE
-        src/models/DeepFistCwModel.cpp src/models/DeepFistCwModel.h
-        src/core/deepfist/DeepFistStream.cpp
-        src/core/deepfist/DeepFistModelAssets.cpp src/core/deepfist/DeepFistModelAssets.h
-        third_party/deepfist/DeepFistConditioner.cpp
-        third_party/deepfist/DeepFistSpectrogram.cpp
-        third_party/deepfist/DeepFistCtc.cpp
-        third_party/deepfist/DeepFistModel.cpp)
-    target_include_directories(aethercore PRIVATE "${CMAKE_SOURCE_DIR}/third_party/deepfist")
+# Neural CW receive decoders (RFC #4817): built wherever ONNX Runtime is found
+# (Apple Silicon, Linux, Windows; the pinned runtime has no Intel-macOS build).
+# Their models are never shipped: each downloads on first use from its upstream
+# release at a pinned size and SHA-256.
+# Empty selects the published release; a value replaces it. Not a cache default,
+# so build directories configured before the release keep downloading.
+set(DEEPFIST_MODEL_BASE_URL "" CACHE STRING "DeepFist asset directory override (empty = the published release)")
+set(_deepfist_model_url "https://github.com/n9bc/DeepFist/releases/download/exp27_bt-champion/")
+if(DEEPFIST_MODEL_BASE_URL)
+    set(_deepfist_model_url "${DEEPFIST_MODEL_BASE_URL}")
 endif()
+target_compile_definitions(aethercore PRIVATE DEEPFIST_MODEL_BASE_URL="${_deepfist_model_url}")
 
 if(ORT_FOUND)
     target_compile_definitions(aethercore PUBLIC HAVE_ONNX)
+    # Every CW receive backend beyond ggmorse needs ONNX Runtime, so this one
+    # gate decides whether the CW panel offers a decoder selector (RFC #4817).
+    target_compile_definitions(aethercore PUBLIC HAVE_DEEPFIST HAVE_DEEPCW HAVE_CW_RX_BACKENDS)
+    target_sources(aethercore PRIVATE
+        src/models/DeepFistCwModel.cpp src/models/DeepFistCwModel.h
+        src/core/deepfist/DeepFistStream.cpp
+        third_party/deepfist/DeepFistConditioner.cpp
+        third_party/deepfist/DeepFistSpectrogram.cpp
+        third_party/deepfist/DeepFistCtc.cpp
+        third_party/deepfist/DeepFistModel.cpp
+        src/core/DeepCwEngine.cpp src/core/DeepCwEngine.h
+        src/core/DeepCwCommitter.cpp src/core/DeepCwCommitter.h
+        src/models/DeepCwRxBackend.cpp src/models/DeepCwRxBackend.h
+        src/core/CwModelAssets.cpp src/core/CwModelAssets.h)
+    target_include_directories(aethercore PRIVATE "${CMAKE_SOURCE_DIR}/third_party/deepfist")
     # PUBLIC include dir: core/SignalClassifier.h includes onnxruntime under
     # HAVE_ONNX (PUBLIC) and is pulled in by gui/MainWindow.h. Same transitive
     # leak as FFTW3 above. Library link stays PRIVATE (transitive via the lib).
@@ -3549,6 +3597,16 @@ endforeach()
 # it keep resolving against the repository root. The header of that file explains
 # why that matters and why it should not be "tidied up" into a subdirectory.
 enable_testing()
+# DeepCW offline replay harness (RFC #4817 regression take): not built by default.
+if(ORT_FOUND)
+    add_executable(deepcw_replay EXCLUDE_FROM_ALL
+        tools/deepcw_replay.cpp src/core/DeepCwEngine.cpp src/core/DeepCwCommitter.cpp
+        src/core/Resampler.cpp)
+    target_compile_definitions(deepcw_replay PRIVATE HAVE_ONNX)
+    target_include_directories(deepcw_replay PRIVATE src
+        ${CMAKE_SOURCE_DIR}/third_party/r8brain ${ORT_INCLUDE_DIRS})
+    target_link_libraries(deepcw_replay PRIVATE Qt6::Widgets ${ORT_LIBRARIES})
+endif()
 include(tests/tests.cmake)
 
 
