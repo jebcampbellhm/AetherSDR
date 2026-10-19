@@ -1044,6 +1044,8 @@ set(CORE_SOURCES
     src/core/KiwiSdrRedirectPolicy.cpp
     src/core/KiwiSdrCredentialStore.cpp
     src/core/KiwiSdrClient.cpp
+    src/core/NetworkReceiverCredentials.cpp
+    src/core/backends/web888/Web888Backend.cpp
     src/core/KiwiSdrManager.cpp
     src/core/ReceivePresentationSync.cpp
     src/core/KiwiPublicDirectory.cpp
@@ -1376,6 +1378,7 @@ set(GUI_SOURCES
     src/gui/HealthApplet.cpp
     src/gui/PersistentDialog.cpp
     src/gui/CanonWindow.cpp
+    src/gui/DisplaySessionMonitor.cpp
     src/gui/CanonSurface.cpp
     src/gui/PanadapterHeader.cpp
     src/gui/FramelessMessageBox.cpp
@@ -2476,7 +2479,8 @@ endif()
 if(WIN32)
     set_target_properties(AetherSDR PROPERTIES WIN32_EXECUTABLE TRUE)
     # MainWindow::applyWindowsFrameColor (DwmSetWindowAttribute).
-    target_link_libraries(AetherSDR PRIVATE dwmapi)
+    # DisplaySessionMonitor uses same-session lock/unlock notifications.
+    target_link_libraries(AetherSDR PRIVATE dwmapi Wtsapi32)
 endif()
 
 # macOS app bundle

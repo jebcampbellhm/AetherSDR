@@ -56,6 +56,27 @@ int main()
 {
     using namespace AetherSDR::KiwiSdrProtocol;
 
+    struct EndpointCase {
+        const char* scheme;
+        const char* host;
+        quint16 port;
+        const char* expected;
+    };
+    const EndpointCase endpoints[] = {
+        { "ws", "192.0.2.21", 8073, "ws://192.0.2.21:8073" },
+        { "ws", "2001:db8::21", 8073, "ws://[2001:db8::21]:8073" },
+        { "wss", "2001:db8::21", 7443, "wss://[2001:db8::21]:7443" },
+        { "http", "192.0.2.21", 8073, "http://192.0.2.21:8073" },
+        { "https", "2001:db8::21", 443, "https://[2001:db8::21]:443" },
+    };
+    for (const auto& endpoint : endpoints) {
+        if (formatEndpointBaseUrl(QString::fromLatin1(endpoint.scheme),
+                QString::fromLatin1(endpoint.host), endpoint.port)
+            != QString::fromLatin1(endpoint.expected)) {
+            return fail("socket URLs and Origin must retain explicit ports and bracket IPv6 hosts");
+        }
+    }
+
     if (formatAuthCommand(QString())
         != QStringLiteral("SET auth t=kiwi p=#")) {
         return fail("empty Kiwi password should use the public sentinel");

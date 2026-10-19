@@ -6495,7 +6495,7 @@ QJsonObject AutomationServer::doConnect(const QString& action,
     }
 
     if (a == QLatin1String("ip")) {
-        // connect ip <host-or-ip> [flex|hl2|icom]
+        // connect ip <host-or-ip> [flex|hl2|icom|web888]
         // Without a family, discovery decides: an advertised address is probed with that
         // entry's family (#4912); an unadvertised one (e.g. off-subnet) falls back to the
         // connect dialog's radio-type selector. The reply's `familySource` says which
@@ -6511,14 +6511,14 @@ QJsonObject AutomationServer::doConnect(const QString& action,
         if (ipTokens.size() > 1) {
             family = ipTokens.at(1).toLower();
             if (family != QLatin1String("flex") && family != QLatin1String("hl2")
-                && family != QLatin1String("icom")) {
+                && family != QLatin1String("icom") && family != QLatin1String("web888")) {
                 return err(QStringLiteral(
-                               "connect ip radio type must be flex, hl2 or icom, got '%1'")
+                               "connect ip radio type must be flex, hl2, icom or web888, got '%1'")
                                .arg(ipTokens.at(1)));
             }
         }
         if (ipTokens.size() > 2) {
-            return err(QStringLiteral("connect ip takes at most <host-or-ip> [flex|hl2|icom]"));
+            return err(QStringLiteral("connect ip takes at most <host-or-ip> [flex|hl2|icom|web888]"));
         }
 
         // Match on the textual address the list itself publishes, so a caller

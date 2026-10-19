@@ -33,6 +33,7 @@ The rest of this documentation describes FlexRadio operation unless a page says 
 | Networked Icom (IC-705, IC-7300MK2, IC-9700 …) | **Early**; the **IC-7300MK2 is supported** | Connect by IP | [Networked Icom](./networked-icom.md) |
 | ANAN-G2 | **Experimental, receive-only** | LAN discovery, or Connect by IP | [ANAN-G2](./anan-g2.md) |
 | RTL-SDR USB dongles | **Experimental, receive-only** | USB discovery (builds with the RTL-SDR backend) | [RTL-SDR](./rtl-sdr.md) |
+| Web-888 (standalone) | **Experimental, receive-only**; one receiver and one panadapter | Connect by IP → Web-888 | [KiwiSDR and Web-888](./kiwisdr-and-web-888.md) |
 | KiwiSDR and Web-888 | Public receivers used as receive-only antennas for a slice | Radio Setup → Antennas | [KiwiSDR and Web-888](./kiwisdr-and-web-888.md) |
 | Demo | Built-in simulator, cannot transmit | The Connect to Radio list | [Demo Mode](./demo-mode.md) |
 
@@ -45,7 +46,7 @@ While a Hermes-Lite 2, an ANAN-G2 or an Icom other than the IC-7300MK2 is connec
 How you reach each family from the **Connect to Radio** window (**File → Connect to Radio...**):
 
 - **On This Network** lists FlexRadio, Hermes-Lite 2 and ANAN-G2 radios on your LAN, RTL-SDR dongles on USB, and the demo.
-- **Connect by IP** has a **Radio type:** list (FlexRadio, Hermes-Lite 2, ANAN-G2, Icom (network), RTL-SDR (USB)). A networked Icom is always reached this way. See [Manual Connection](./manual-connection.md).
+- **Connect by IP** has a **Radio type:** list (FlexRadio, Hermes-Lite 2, ANAN-G2, Icom (network), Web-888, RTL-SDR (USB)). A networked Icom or standalone Web-888 is reached this way. See [Manual Connection](./manual-connection.md).
 - **KiwiSDR and Web-888** receivers are configured under **Tools → Configure KiwiSDR...** and chosen as a slice's RX antenna.
 
 ## Reference

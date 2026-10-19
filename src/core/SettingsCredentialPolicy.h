@@ -19,6 +19,9 @@ struct FlatCredential {
     const char* keychainKey;  // key within the "AetherSDR" keychain service
 };
 inline constexpr FlatCredential kFlatCredentials[] = {
+    // Reserved import/config spelling only. Standalone receiver credentials
+    // are endpoint-bound; an unbound imported value is never sent to a radio.
+    {"Web888Password",        "web888_password_unbound"},
     {"AutomationBridgeToken", "automation_bridge_token"},
     {"MqttPass",              "mqtt_password"},
     {"AsrRemoteApiKey",       "asr_remote_api_key"},
@@ -33,6 +36,10 @@ inline constexpr FlatCredential kFlatCredentials[] = {
     {"antenna_genius_auth_code", "antenna_genius_auth_code"},
     {"AG_AuthCode",           "antenna_genius_auth_code"},
 };
+
+// Endpoint hashes follow this prefix in the same OS-keychain service. These
+// keys are never AppSettings rows or fields of retained connection routes.
+inline constexpr const char* kWeb888PasswordKeyPrefix = "web888_password_";
 
 // Credential-bearing FIELDS inside feature-owned JSON document values.
 struct DocFieldCredential {

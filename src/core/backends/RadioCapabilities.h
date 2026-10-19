@@ -65,6 +65,13 @@ struct ReceiveAudioControl {
     // Both gain (0..100) and mute must act on the shared slice's RX audio.
 };
 // Typed pre-monitor sliceAudioFrameReady export; grants no TX, IQ or control verb.
+// Host playout policy for a burst-delivered receive stream. This grants no
+// radio action: the desktop audio engine consumes the target before playback.
+// Absent preserves the existing low-latency path.
+struct ReceiveAudioBuffering {
+    int jitterTargetMs = 0;
+};
+
 struct ReceiveAudioExport {
     QVector<int> sampleRatesHz;
     int maximumReceivers = 0;
@@ -409,6 +416,7 @@ struct RadioCapabilities {
     std::optional<ReceiveModeControl> receiveModeControl;
     std::optional<ReceiveFilterControl> receiveFilterControl;
     std::optional<ReceiveAudioControl> receiveAudioControl;
+    std::optional<ReceiveAudioBuffering> receiveAudioBuffering;
     std::optional<ReceiveAudioExport> receiveAudioExport;
     std::optional<BroadcastFmReceive> broadcastFmReceive;
     std::optional<ReceivePanRangeControl> receivePanCenterControl;

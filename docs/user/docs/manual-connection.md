@@ -12,6 +12,7 @@ Use **Connect by IP** for:
 - A radio behind a VPN, including a FLEX-8000/Aurora on your tailnet (see [Tailscale Remote Access](./tailscale-remote-access.md))
 - Remote access via a public IP with port forwarding (without SmartLink)
 - A networked Icom, which is always reached this way (see [Networked Icom](./networked-icom.md))
+- A standalone Web-888, including one on your local LAN (see [KiwiSDR and Web-888](./kiwisdr-and-web-888.md))
 
 ## Setup
 
@@ -20,18 +21,35 @@ Use **Connect by IP** for:
 *The Connect by IP card, with a documentation address typed in.*
 
 1. Open the **Connect to Radio** window: **File → Connect to Radio...**, or the **+** button beside the title bar's radio tabs → **Connect manually…**.
-2. Choose the **Connect by IP** card ("Best for VPN or routed station access when you already know the radio IP").
+2. Choose the **Connect by IP** card.
 
 The **Radio IP address** group starts with two rows:
 
 | Row | What to enter |
 |-----|---------------|
-| **Radio type:** | The radio family to look for: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)** or **RTL-SDR (USB)**. Only this family is probed. |
+| **Radio type:** | The radio family to connect: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)**, **Web-888** or **RTL-SDR (USB)**. Only this family is contacted. |
 | **Radio IP:** | The IP address or host name, for example `10.0.0.25`. |
 
 **RTL-SDR (USB)** appears only in builds that include the RTL-SDR backend. Choosing **Icom (network)** or **ANAN-G2** adds that family's own rows; see [Networked Icom](./networked-icom.md) and [ANAN-G2](./anan-g2.md). For every family's status, see [Supported Radios](./supported-radios.md).
 
 ## Using Connect by IP
+
+### Connecting to a Web-888
+
+Choose **Web-888**, enter its IP address and HTTP port (usually **8073**),
+then enter its user password if needed. Leave the password blank to use the
+saved password or connect without one. Click **Connect by IP**, or press Enter
+in the password field. The receiver opens directly with one receive slice
+and one spectrum/waterfall; no Demo session is needed. Passwords are saved
+only in the operating system keychain after an accepted connection.
+
+Leave **Source path** on **Auto**: Web-888 follows the system's network route.
+**Use low bandwidth mode** is unavailable for this receiver transport.
+Use a numeric IPv4 or IPv6 address in this form; enter the port separately.
+The receive tuning range is **1 Hz–30.72 MHz**.
+Speaker playback starts with about **360 ms** of buffered audio to smooth
+bursty network delivery. This adds a short delay when starting or recovering
+an exhausted stream. Audio resumes when the reserve refills.
 
 ### Connecting to a FlexRadio
 
@@ -78,7 +96,20 @@ See [SmartLink Setup](./smartlink-setup.md).
 
 ## Troubleshooting
 
-### The probe fails
+### A Web-888 connection fails
+
+Check the receiver's IP address and HTTP port, then check its user password.
+An admin password is not needed. If a saved password is outdated, type the
+current user password into the form and reconnect. Keep **Source path** on
+**Auto**. The FlexRadio ports and MTU advice below do not apply to this
+WebSocket receive stream.
+
+To remove a saved password, enter the receiver's address and port, then click
+**Forget** beside the password field. This clears that endpoint's saved and
+session password without disconnecting an active receiver. Leave the field
+blank on your next connection if the receiver no longer requires a password.
+
+### The FlexRadio probe fails
 
 AetherSDR could not reach the radio on TCP 4992. The panel shows the reason.
 
@@ -86,14 +117,14 @@ AetherSDR could not reach the radio on TCP 4992. The panel shows the reason.
 2. Click **Network Diagnostics** beside the button to check the path.
 3. For access from outside your network, check that TCP 4992 and UDP 4991 are forwarded to the radio's LAN IP.
 
-### The connection fails over a VPN with several network adapters
+### A FlexRadio connection fails over a VPN with several network adapters
 
 AetherSDR may be using the wrong adapter to reach the radio.
 
 1. Open **Advanced: choose the VPN source path**.
 2. Pick the VPN's adapter in **Source path:** and connect again.
 
-### Audio works over a VPN, but the spectrum and waterfall stay empty
+### FlexRadio audio works over a VPN, but the spectrum and waterfall stay empty
 
 Spectrum and waterfall packets are larger than the tunnel allows, so they are dropped while the smaller audio packets get through.
 

@@ -72,6 +72,7 @@ public:
     // UDP/1024 (HPSDR Protocol 1), so the operator picks the wire protocol and
     // we probe exactly that one. Values match RadioInfo::family.
     static constexpr const char* kFamilyFlex = "flex";
+    static constexpr const char* kFamilyWeb888 = "web888";
     static constexpr const char* kFamilyHl2  = "hl2";
     // ANAN-G2 (openHPSDR Protocol 2, UDP/1024 discovery — same port number
     // as HL2's Protocol 1, different wire format entirely). Probeable
@@ -293,6 +294,10 @@ private:
 
     // Manual (VPN / routed) connection
     QComboBox*   m_manualRadioTypeCombo{nullptr};
+    QWidget*    m_web888PasswordRow{nullptr};
+    QLineEdit*  m_web888PasswordEdit{nullptr};
+    QWidget*    m_web888PortRow{nullptr};
+    QSpinBox*   m_web888PortSpin{nullptr};
     QLabel*      m_manualHintLabel{nullptr};
     QComboBox*   m_manualIpCombo{nullptr};
     // Icom credentials. The row CONTAINERS are held so the pair can be hidden

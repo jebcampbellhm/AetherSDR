@@ -515,6 +515,12 @@
   "split": "",
   "confidence": "high"
  },
+ "core/NetworkReceiverCredentials.h": {
+  "tag": "ui-support",
+  "note": "Endpoint-bound process-session and OS-keychain credential handoff for standalone network receive connections. Contains no wire commands or radio-state fields; connection UI submits a secret and the backend loads it asynchronously.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/NetworkPathResolver.h": {
   "tag": "ui-support",
   "note": "Local NIC/IPv4 enumeration + interface-pick helper for connection setup; host networking plumbing, not radio state",

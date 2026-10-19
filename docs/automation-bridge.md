@@ -2757,7 +2757,7 @@ so `connect show` is safe when the dialog is already open. `connect local first`
 captures the first currently discovered local radio's serial before scheduling
 the request, so the response and deferred connect target stay consistent.
 `connect local serial <serial>` selects by discovery serial. `connect ip
-<host-or-ip> [flex|hl2|icom]` uses the manual **Connect by IP** probe path; if the
+<host-or-ip> [flex|hl2|icom|web888]` uses the manual **Connect by IP** probe path; if the
 probe finds a radio, the panel emits its normal `connectRequested` signal and
 `MainWindow` performs the standard Multi-Flex/client-slot checks before
 `RadioModel` connects.
@@ -2765,7 +2765,9 @@ probe finds a radio, the panel emits its normal `connectRequested` signal and
 The optional radio type selects which wire protocol to probe, matching the
 dialog's **Radio type** dropdown: `flex` opens the TCP/4992 command plane, `hl2`
 sends a directed HPSDR Protocol 1 discovery datagram to UDP/1024, and `icom`
-uses the CI-V backend. They are disjoint — a Hermes-Lite 2 never answers the
+uses the CI-V backend. `web888` opens a standalone receive-only Web-888 session
+using the port selected in the connection dialog (8073 by default) and its
+endpoint-bound saved user password. They are disjoint — a Hermes-Lite 2 never answers the
 Flex probe and vice versa — so an address is only reached with the right type.
 A directed HL2 probe is the only way to reach a Hermes-Lite 2 that discovery
 broadcasts cannot see (VPN, routed subnet), and it is bounded at ~600 ms.

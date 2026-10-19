@@ -15,6 +15,7 @@
 #include "core/backends/flex/CommandParser.h"
 #include "core/backends/flex/FlexBackend.h"   // aetherd RFC 2.2 radio-facing seam
 #include "core/backends/sim/SimBackend.h"     // RFC #4288 demo-mode backend (Route A)
+#include "core/backends/web888/Web888Backend.h"
 #include "core/backends/hl2/Hl2Backend.h"      // aetherd Gap A — HL2 backend (family "hl2")
 #include "models/ConnectStatePolicy.h"
 #include "core/backends/anan/AnanBackend.h"    // aetherd ANAN P2 Phase 1b (family "anan")
@@ -782,6 +783,8 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
 
 std::unique_ptr<IRadioBackend> RadioModel::makeBackend(const QString& family)
 {
+    if (family.compare(QLatin1String("web888"), Qt::CaseInsensitive) == 0)
+        return std::make_unique<Web888Backend>();
     if (family.compare(QLatin1String("hl2"), Qt::CaseInsensitive) == 0)
         return std::make_unique<hl2::Hl2Backend>();
     // ANAN-G2 (openHPSDR Protocol 2). Like HL2 this is a pure seam backend —
@@ -11794,6 +11797,10 @@ void RadioModel::publishRadioReportedCapacity()
 void RadioModel::applyRadioChanges(const RadioDelta& d)
 {
     bool changed = false;
+    if (d.version && m_version != *d.version) {
+        m_version = *d.version;
+        changed = true;
+    }
     if (d.model) {
         m_model = *d.model;
         // #5594 item 3: the table is the fallback, never an override. A radio
