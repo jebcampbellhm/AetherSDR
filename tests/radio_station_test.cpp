@@ -23,6 +23,10 @@ int main(int argc, char** argv)
     check(&station.session(web)->radioModel() != &station.session(nrsp)->radioModel(),
         "receivers have distinct model ownership");
     check(station.audioSessionId() == -1, "new station is silent");
+    check(!station.session(web)->radioModel().stationTransmitAllowed()
+          && !station.session(nrsp)->radioModel().stationTransmitAllowed()
+          && !station.session(icom)->radioModel().stationTransmitAllowed(),
+          "additional sessions start receive-only regardless of their label");
     station.selectSession(web);
     check(station.audioSessionId() == -1, "focus does not enable audio");
     check(!station.selectSession(900) && station.selectedSessionId() == web,
@@ -37,6 +41,8 @@ int main(int argc, char** argv)
         }, Qt::QueuedConnection);
     station.selectAudioSession(web);
     const auto firstRevision = station.audioRevision();
+    check(!station.session(web)->radioModel().stationTransmitAllowed(),
+          "focus and audio selection never grant transmit permission");
     emit station.session(web)->radioModel().rxDemodAudioReady(*frame);
     station.selectAudioSession(nrsp);
     station.selectAudioSession(web);

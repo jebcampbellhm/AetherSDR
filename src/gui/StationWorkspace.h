@@ -6,6 +6,7 @@
 class QVBoxLayout;
 class QLabel;
 class QComboBox;
+class QCheckBox;
 namespace AetherSDR {
 class ConnectionPanel;
 class StationReceiverPanel;
@@ -15,15 +16,19 @@ struct RadioInfo;
 class StationWorkspace final : public CanonCanvas {
     Q_OBJECT
 public:
-    explicit StationWorkspace(QWidget* parent = nullptr);
+    explicit StationWorkspace(RadioModel* primary, QWidget* parent = nullptr);
     ~StationWorkspace() override;
 signals:
+    void primaryTransmitPermissionChanged(bool allowed);
     void monitorSelectionChanged(int source);
     void monitorFrameReady(int source, const AetherSDR::PcmFrame& frame);
 private:
     void showConnect();
     void addReceiver(const RadioInfo& info, const QVariantMap& options);
     void selectMonitor(int source);
+    void refreshTransmitPermission();
+    QPointer<RadioModel> m_primary;
+    QCheckBox* m_transmitPrimary;
     RadioStation m_station;
     QMap<int, StationReceiverPanel*> m_panels;
     QPointer<ConnectionPanel> m_connection;

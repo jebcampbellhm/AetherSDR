@@ -2856,12 +2856,67 @@ void tciPromotionRechecksPermissionAfterReply()
 #endif
 } // namespace
 
+static void stationReceiveOnlyAdmission()
+{
+    for (const auto activity : {TxController::Activity::Mox, TxController::Activity::Tune,
+                               TxController::Activity::Atu, TxController::Activity::CwKey,
+                               TxController::Activity::CwPtt, TxController::Activity::Cwx}) {
+        Fixture f;
+        check(f.radio.setStationTransmitAllowed(false), "assign receive-only station role");
+        const auto input = f.radio.localTxController()->capture(activity);
+        check(!input.start() && f.commands.isEmpty(),
+              "receive-only station refuses all controller activities before transport");
+        f.radio.setTransmit(true);
+        f.radio.transmitModel().startTune();
+        f.radio.transmitModel().startTwoToneTune();
+        f.radio.transmitModel().atuStart();
+        f.radio.transmitModel().setMox(true);
+        f.radio.transmitModel().requestPttOn(TransmitModel::PttSource::Mox);
+        f.radio.sendCwPtt(true);
+        f.radio.sendCwKey(true);
+        f.radio.sendCwPaddle(true, false);
+        f.radio.sendCwKeyEdge(true);
+        f.radio.cwxModel().send("CQ");
+        f.radio.cwxModel().sendChar("E");
+        f.radio.cwxModel().sendMacro(1);
+        check(f.commands.isEmpty(), "legacy model routes also respect station receive-only role");
+    }
+    Fixture f;
+    const auto controller = f.radio.localTxController();
+    const auto held = controller->capture(TxController::Activity::Mox);
+    check(held.start(), "injected designated radio accepts explicit input");
+    const auto media = held.media();
+    f.commands.clear();
+    check(f.radio.setStationTransmitAllowed(false) && !media.permitsDispatch(TxCoordinator::monotonicMs())
+          && f.commands.contains("mox:off") && !f.commands.contains("mox:on"),
+          "revoking station designation fences media and requests stop only");
+    f.commands.clear();
+    f.radio.setStationTransmitAllowed(true);
+    check(!held.start() && f.commands.isEmpty(), "old held input cannot restart after designation returns");
+    Fixture queued;
+    queued.radio.queueCwKeyEdge(true, "test", 0, 0, std::chrono::steady_clock::now());
+    queued.radio.setStationTransmitAllowed(false);
+    queued.radio.queueCwKeyEdge(true, "test", 0, 0, std::chrono::steady_clock::now());
+    queued.radio.setStationTransmitAllowed(true);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+    check(queued.commands.isEmpty(), "queued CW before and during receive-only cannot key after re-designation");
+    queued.radio.queueCwKeyEdge(true, "test", 0, 0, std::chrono::steady_clock::now());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::MetaCall);
+    check(queued.commands.contains("cw:on"), "fresh queued CW still reaches the injected writer after designation");
+    queued.radio.sendCwKeyEdge(false);
+    GrantedFixture granted;
+    granted.radio.setStationTransmitAllowed(false);
+    check(!granted.grants.acquire(granted.a, granted.ga.grant, 1, TxCoordinator::Activity::Mox).accepted(),
+          "independent trusted grants cannot bypass receive-only station role");
+}
+
 int main(int argc, char** argv)
 {
     TestSettingsProfile settings(QStringLiteral("tx-operation-integration"));
     if (!settings.isValid()) { return 1; }
     QCoreApplication app(argc, argv);
     interlockSourceReconciliation();
+    stationReceiveOnlyAdmission();
     primaryRoutes();
     perIntentCompletion();
     overlappingCwContributions();

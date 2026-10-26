@@ -228,6 +228,11 @@ void RadioModel::abortProducerPtt(const TxCoordinator::Request& request,
 
 bool RadioModel::beginTxActivity(TxActivity activity, const TxCoordinator::Request* request)
 {
+    if (!stationTransmitAllowed()) {
+        emitInterlockNotification(tr("This station session is receive-only. Select the designated transmit radio first."),
+                                  QStringLiteral("tx-station-receive-only"));
+        return false;
+    }
     if (m_txInputsStopping) {
         return false;
     }
@@ -1042,6 +1047,17 @@ void RadioModel::emergencyTransmitStop()
     }
     m_txCoordinator.emergencyStop();
     cancelLocalTransmit();
+}
+
+bool RadioModel::setStationTransmitAllowed(bool allowed)
+{
+    if (QThread::currentThread() != thread()) { return false; }
+    if (stationTransmitAllowed() == allowed) { return true; }
+    // Hardware/scheduled CW callbacks carry this epoch in addition to the
+    // coordinator's request fence. Neither may survive a station role change.
+    m_cwInputSession.fetch_add(1, std::memory_order_release);
+    m_cwInputNotBefore = std::chrono::steady_clock::now();
+    return m_txCoordinator.setTransmitAllowed(allowed);
 }
 
 void RadioModel::resetTxOperations()

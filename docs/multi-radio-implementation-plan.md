@@ -56,6 +56,69 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 18:48 UTC station transmit permission increment:
+
+- Additional RadioStation sessions are explicitly receive-only in the engine,
+  regardless of their backend or label. Focus and selected audio never grant
+  transmit permission. For this station, use Icom as the primary connection and
+  Web-888/nRSP-ST as the two additional receivers. Arbitrary relocation of the
+  full TX controls to an additional panel is not implemented.
+- Opening Additional receivers now clears primary software TX permission.
+  **Allow transmit on primary radio** explicitly designates a connected,
+  transmit-capable primary. It does not key. Disconnect, capability loss and
+  workspace destruction revoke it; reconnect requires a new selection. Hiding
+  the dock preserves the selection. Normal standalone behavior before opening
+  the station workspace is unchanged. User docs describe this workflow.
+- TxCoordinator fences all actor admissions and terminal media dispatch with
+  station permission. Role changes discard pending inputs and give microphone
+  contexts a new epoch, so disable/re-enable cannot revive old media. Revocation
+  closes admission before invoking stop callbacks, retains stop-only cleanup,
+  rejects reentrant reopening and preserves existing stop-confirmation recovery.
+  A checkbox is never a stopped-radio acknowledgment; active revocation may
+  require qualified stop evidence or reconnect before new keying is admitted.
+- RadioModel also fences scheduled CW across role changes. The checkbox's
+  notification refreshes the main microphone context without enabling PC Audio,
+  starting capture, changing devices or writing radio settings. Physical PTT,
+  other radio clients and RF protection remain outside this software permission.
+- Ten selected tests passed: tx_coordinator_test, tx_operation_integration_test,
+  tx_grant_manager_test, tx_audio_context_test, radio_station_test,
+  monitor_audio_router_test, spectrum_confirmed_geometry_test,
+  spectrum_pan_pixels_retina_test, station_display_isolation_test and the new
+  station_transmit_permission_test. The latter uses real offscreen widgets and
+  a socket-free recorder: explicit designation, no keying on selection, mic
+  authorization renewal, capability loss, disconnect/reconnect and destruction.
+  RTL-specific rows remain skipped because this build lacks RTL-SDR support.
+- Two separate mutations failed as intended: removing actor permission allowed
+  an unauthorized admission; removing the media epoch check revived old mic
+  context after re-designation. Both guards were restored before the final build.
+  A final queued-CW regression also passed in the three focused engine tests:
+  pre-disable and disabled-period callbacks are dropped after re-enable, while
+  fresh CW reaches only the injected recorder. No real transmitter was used.
+- The rebuilt receive-only live probe passed with both SDRs: Web-888 361472
+  normalized audio frames / 301 spectrum frames; nRSP-ST 232960 / 100. Selected
+  monitor frames 120832 / 119808. Switching/removal revoked old queued audio,
+  Off leaked none, and Web-888 delivered 119808 frames after nRSP-ST removal.
+  Both leases released. No AudioEngine/device or persistent receiver changes.
+- Experimental desktop rebuild, minimal-PATH startup self-test (0 / 26.10.4),
+  docs build, boundary (0 blockers / 101 baseline warnings), capability,
+  command-plane, registration, manifest and whitespace checks passed. Daily
+  executable remains unchanged at 2026-10-26 10:48:50 local. No normal rendered
+  desktop, audible playback or Icom Ethernet/TX qualification is claimed.
+- Evidence in build-web888-evidence: station-tx-final-build.log,
+  station-tx-final-tests.log, station-tx-tests.log, station-tx-mutation-actor.log,
+  station-tx-mutation-media-epoch.log, station-tx-live.json,
+  station-tx-startup-marker.txt, station-tx-docs.log and station-tx-boundary.log.
+  Earlier intermediate build attempts are superseded. All commands ended and
+  production guards are restored.
+
+NEXT: observed-primary-TX receive interruption/recovery, tested by offline
+normalized status injection; do not key hardware to test it. Preserve selected
+speaker routing and independently fence/reset digital decoder buffers. Then
+review additional-receiver audio when the primary is offline, teardown/reconnect
+and remaining per-radio controls. Icom remains unavailable; keep PC audio off.
+
+### Earlier display isolation checkpoint
+
 2026-10-26 18:23 UTC display isolation increment:
 
 - Additional receiver spectra now use an explicit session-only display policy.

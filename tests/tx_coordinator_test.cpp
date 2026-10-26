@@ -635,6 +635,60 @@ void capturedProducerRequests()
 }
 } // namespace
 
+static void stationAdmissionPermission()
+{
+    TxCoordinator idle([](const auto&, auto) {});
+    const auto idleActor = idle.registerActor({true, 0});
+    idle.setTransmitAllowed(false);
+    const auto idleAdmission = idle.acquire(idleActor, 1);
+    check(!idleAdmission.accepted() && idleAdmission.refusal == TxCoordinator::Refusal::Denied,
+          "idle receive-only session cannot acquire transmit without a recovery barrier");
+    int stops = 0;
+    bool closedBeforeStop = false;
+    bool nestedEnableRejected = false;
+    TxCoordinator* current = nullptr;
+    TxCoordinator coordinator([&](const auto&, auto reason) {
+        ++stops;
+        closedBeforeStop = !current->transmitAllowed()
+            && reason == TxCoordinator::StopReason::AdmissionDisabled;
+        nestedEnableRejected = !current->setTransmitAllowed(true);
+    });
+    current = &coordinator;
+    const auto actor = coordinator.registerActor({true, 0});
+    const auto producer = coordinator.registerProducer(actor);
+    const auto microphone = coordinator.registerProducer(actor, true);
+    const auto queued = producer.request();
+    const auto liveMic = coordinator.mediaContext(microphone);
+    const auto operation = coordinator.acquire(actor, 1).operation;
+    check(operation.permitsDispatch(1) && liveMic.permitsDispatch(1),
+          "standalone default admits operation and continuous microphone");
+    check(coordinator.setTransmitAllowed(false) && stops == 1
+          && closedBeforeStop && nestedEnableRejected,
+          "station closes admission before stop callbacks and refuses nested reopening");
+    check(!operation.beginDispatch(1) && operation.beginDispatch(1, false)
+          && !liveMic.beginDispatch(1) && !queued.valid(),
+          "station revokes keying, microphone and queued inputs while retaining cleanup");
+    check(coordinator.acquire(actor, 1).refusal == TxCoordinator::Refusal::Denied,
+          "station permission blocks every actor admission");
+    const auto disabledInput = producer.request();
+    const auto disabledMic = coordinator.mediaContext(microphone);
+    check(coordinator.setTransmitAllowed(false) && stops == 1,
+          "repeated receive-only assignment does not repeat cleanup");
+    check(coordinator.setTransmitAllowed(true) && !disabledInput.valid()
+          && !operation.permitsDispatch(1) && !liveMic.permitsDispatch(1)
+          && !disabledMic.permitsDispatch(1),
+          "re-designating never revives prior keying or continuous audio");
+    check(coordinator.acquire(actor, 1).refusal == TxCoordinator::Refusal::Recovering,
+          "designation does not bypass unconfirmed transmit-stop recovery");
+    check(coordinator.acknowledgeStopped(operation)
+          && coordinator.acquire(actor, 2).accepted()
+          && coordinator.mediaContext(microphone).permitsDispatch(2),
+          "fresh input is eligible only after independent stop confirmation");
+    coordinator.setTransmitAllowed(false);
+    coordinator.reset();
+    check(!coordinator.transmitAllowed(), "reconnect does not restore station transmit permission");
+}
+
 int main(int argc, char** argv)
 {
     QCoreApplication app(argc, argv);
@@ -652,5 +706,6 @@ int main(int argc, char** argv)
     intentBoundaries();
     producerMediaContexts();
     capturedProducerRequests();
+    stationAdmissionPermission();
     return failures ? 1 : 0;
 }

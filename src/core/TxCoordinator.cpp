@@ -231,6 +231,7 @@ bool TxCoordinator::Actor::permitsDispatch(qint64 now) const
     }
     const std::shared_ptr<Identity> identity = m_state->coordinator.lock();
     return identity && identity->alive.load(std::memory_order_acquire)
+        && identity->transmitAllowed.load(std::memory_order_acquire)
         && (!m_state->policy.independent
             || m_state->session == identity->session.load(std::memory_order_acquire));
 }
@@ -359,6 +360,8 @@ bool TxCoordinator::Context::permitsDispatch(qint64 now) const
     }
     const std::shared_ptr<Identity> identity = m_producer.m_state->coordinator.lock();
     return identity && identity->session.load(std::memory_order_acquire) == m_session
+        && identity->transmitAllowed.load(std::memory_order_acquire)
+        && identity->admissionEpoch.load(std::memory_order_acquire) == m_admissionEpoch
         && (m_continuous ? !identity->independentOperation.load(std::memory_order_acquire)
                          : m_operation.permitsDispatch(now));
 }
@@ -391,6 +394,7 @@ TxCoordinator::Dispatch TxCoordinator::Context::beginDispatch(qint64 now) const
 bool TxCoordinator::Context::sameContext(const Context& other) const
 {
     return m_producer.sameProducer(other.m_producer) && m_session == other.m_session
+        && m_admissionEpoch == other.m_admissionEpoch
         && m_continuous == other.m_continuous
         && (m_continuous || m_operation.sameAuthority(other.m_operation));
 }
@@ -682,6 +686,7 @@ TxCoordinator::Context TxCoordinator::mediaContext(const Producer& producer, con
     Context context;
     context.m_producer = producer;
     context.m_session = m_identity->session.load(std::memory_order_acquire);
+    context.m_admissionEpoch = m_identity->admissionEpoch.load(std::memory_order_acquire);
     context.m_continuous = producer.m_state->continuousMicrophone;
     if (!context.m_continuous) {
         context.m_operation = operation;
@@ -1091,6 +1096,32 @@ void TxCoordinator::emergencyStop()
     if (onThread()) {
         stop(StopReason::Emergency);
     }
+}
+
+bool TxCoordinator::transmitAllowed() const
+{
+    return m_identity->transmitAllowed.load(std::memory_order_acquire);
+}
+
+bool TxCoordinator::setTransmitAllowed(bool allowed)
+{
+    if (!onThread() || m_changingAdmission) { return false; }
+    if (transmitAllowed() == allowed) { return true; }
+    m_changingAdmission = true;
+    const auto changing = qScopeGuard([this] { m_changingAdmission = false; });
+    // Close first, including continuous microphone writers without a keyed
+    // operation. Cleanup retains its stop-only authority.
+    m_identity->transmitAllowed.store(false, std::memory_order_release);
+    const quint64 epoch = m_identity->admissionEpoch.load(std::memory_order_acquire);
+    if (epoch == std::numeric_limits<quint64>::max()) {
+        stop(StopReason::AdmissionDisabled);
+        return false; // Exhaustion stays receive-only.
+    }
+    m_identity->admissionEpoch.store(epoch + 1, std::memory_order_release);
+    discardCapturedRequests();
+    if (!allowed) { stop(StopReason::AdmissionDisabled); }
+    m_identity->transmitAllowed.store(allowed, std::memory_order_release);
+    return true;
 }
 
 bool TxCoordinator::hasOwnership() const

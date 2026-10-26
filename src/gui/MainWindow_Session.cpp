@@ -3448,7 +3448,17 @@ void MainWindow::showStationWorkspace()
         dock->setObjectName(QStringLiteral("additionalReceiversDock"));
         dock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::RightDockWidgetArea);
         dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
-        auto* workspace = new StationWorkspace(dock);
+        auto* workspace = new StationWorkspace(&m_radioModel, dock);
+        connect(workspace, &StationWorkspace::primaryTransmitPermissionChanged, this, [this](bool allowed) {
+            if (!m_audio) { return; }
+            const TxCoordinator::Context microphone = allowed && m_radioModel.isConnected()
+                ? m_radioModel.captureTxMedia(m_microphoneTxProducer) : TxCoordinator::Context{};
+            // Refresh authority only: no capture start, PC Audio toggle,
+            // device change or radio-setting write accompanies designation.
+            QMetaObject::invokeMethod(m_audio, [audio = m_audio, microphone] {
+                audio->setMicrophoneContext(microphone);
+            });
+        });
         wireMonitorAudio();
         connect(workspace, &StationWorkspace::monitorSelectionChanged,
                 m_monitorRouter, &MonitorAudioRouter::selectSource);

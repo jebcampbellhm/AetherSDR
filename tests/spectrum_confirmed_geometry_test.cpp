@@ -7,6 +7,7 @@
 #include "gui/MainWindowHelpers.h"
 #include "gui/DisplaySettings.h"
 #include "gui/StationReceiverPanel.h"
+#include "gui/StationWorkspace.h"
 #include "core/AppSettings.h"
 #include "core/SpectrumDecodeScale.h"
 #include "models/RadioSession.h"
@@ -24,6 +25,8 @@
 #include <QPainter>
 #include <QMap>
 #include <QVariant>
+#include <QCheckBox>
+#include <QComboBox>
 
 #include <QApplication>
 #include <QMouseEvent>
@@ -313,11 +316,89 @@ static int runStationDisplayIsolation()
     return failures ? 1 : 0;
 }
 
+static int runStationTransmitPermission()
+{
+    // State/terminal recorder only: no protocol parser, peer, socket or device.
+    class Backend final : public IRadioBackend {
+    public:
+        bool connected{true};
+        bool canTransmit{true};
+        int keyCalls{0};
+        RadioCapabilities capabilities() const override {
+            RadioCapabilities caps; caps.canTransmit = canTransmit; return caps;
+        }
+        bool isConnected() const override { return connected; }
+        void connectRadio(const RadioConnectRequest&) override {}
+        void disconnectRadio() override { connected = false; }
+        void setSliceFrequency(int, double) override {}
+        void setSliceMode(int, const QString&) override {}
+        void setSliceFilter(int, int, int) override {}
+        void setSliceAgc(int, const QString&, int) override {}
+        void setPanCenter(const QString&, double, PanCenterIntent) override {}
+        void setKeying(bool, const TxCoordinator::Operation&, const TxCoordinator::Completion&) override { ++keyCalls; }
+        void invokeExtension(const QString&, const QString&, quint64, const QVariant&) override {}
+    };
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", text); failures += !ok;
+    };
+    RadioModel primary;
+    auto owned = std::make_unique<Backend>();
+    auto* backend = owned.get();
+    primary.setBackendForTest(std::move(owned), QStringLiteral("test"));
+    const auto microphoneProducer = primary.registerTxProducer(&primary, true);
+    auto microphone = primary.captureTxMedia(microphoneProducer);
+    const auto oldMicrophone = microphone;
+    {
+        StationWorkspace workspace(&primary);
+        QObject::connect(&workspace, &StationWorkspace::primaryTransmitPermissionChanged,
+                         &primary, [&](bool allowed) {
+            microphone = allowed ? primary.captureTxMedia(microphoneProducer) : TxCoordinator::Context{};
+        });
+        auto* permit = workspace.findChild<QCheckBox*>(QStringLiteral("stationTransmitPrimary"));
+        auto* monitor = workspace.findChild<QComboBox*>(QStringLiteral("stationMonitorSource"));
+        check(permit && permit->isEnabled() && !permit->isChecked() && !primary.stationTransmitAllowed(),
+              "opening station controls requires explicit primary transmit designation");
+        if (!permit || !monitor) { return 1; }
+        permit->click();
+        check(primary.stationTransmitAllowed() && backend->keyCalls == 0,
+              "primary designation grants eligibility without keying");
+        check(microphone.permitsDispatch(TxCoordinator::monotonicMs())
+              && !oldMicrophone.permitsDispatch(TxCoordinator::monotonicMs()),
+              "designation refreshes microphone authorization without reviving queued old audio");
+        monitor->setCurrentIndex(monitor->findData(-1));
+        emit monitor->activated(monitor->currentIndex());
+        check(primary.stationTransmitAllowed(), "listening selection cannot move transmit designation");
+        backend->canTransmit = false;
+        emit primary.capabilitiesChanged(true, backend->capabilities());
+        check(!primary.stationTransmitAllowed() && !permit->isEnabled() && !permit->isChecked(),
+              "receive-only capability revokes and disables designation");
+        backend->canTransmit = true;
+        emit primary.capabilitiesChanged(true, backend->capabilities());
+        check(permit->isEnabled() && !permit->isChecked(), "capability return cannot auto-designate");
+        permit->click();
+        backend->connected = false;
+        emit primary.connectionStateChanged(false);
+        check(!primary.stationTransmitAllowed() && !permit->isChecked() && !permit->isEnabled(),
+              "disconnect clears station transmit permission");
+        backend->connected = true;
+        emit primary.connectionStateChanged(true);
+        check(permit->isEnabled() && !primary.stationTransmitAllowed(), "reconnect requires fresh designation");
+        permit->click();
+    }
+    check(!primary.stationTransmitAllowed() && backend->keyCalls == 0,
+          "destroying station controls revokes permission without idle transport writes");
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv)
 {
     TestSettingsProfile profile("spectrum-confirmed-geometry");
     if (!profile.isValid()) { return 2; }
     QApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--station-transmit-permission"))) {
+        return runStationTransmitPermission();
+    }
     if (app.arguments().contains(QStringLiteral("--station-display-isolation"))) {
         return runStationDisplayIsolation();
     }

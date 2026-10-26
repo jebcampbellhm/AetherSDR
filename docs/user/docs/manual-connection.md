@@ -164,8 +164,20 @@ it on. Decoder/recording feeds keep their own radio source. The speaker DSP
 controls remain shared, and the preview still needs its primary connection for
 the existing PC Audio device lifecycle.
 
-Additional panels provide no transmit controls. The main radio retains its existing
-controls; selecting an additional receiver does not assign it transmit authority.
+For the Icom/Web-888/nRSP-ST station, connect the **Icom as the primary radio**,
+then add the two SDRs here. Opening Additional receivers initially disables
+software transmit. Check **Allow transmit on primary radio** to designate the
+connected primary radio; checking it does not transmit. Its normal transmit
+controls and interlocks still apply. Disconnecting clears this permission;
+reconnecting requires a fresh selection. Hiding the dock does not change it.
+
+Additional sessions are receive-only at the transmit engine, including keyboard,
+CAT and queued input paths. Selecting a receiver or changing **Listen to:**
+does not move the transmit designation. Unchecking permission stops local TX
+and invalidates queued keying/audio. This does not disable the radio's physical
+PTT, front-panel controls or other clients. If the stop is not confirmed,
+the existing recovery interlock remains closed; reconnect before transmitting
+again rather than treating the permission checkbox as a stop acknowledgment.
 Icom Ethernet operation in a three-radio station has not yet been hardware
 validated. This preview does not provide RF protection or coordinated TX muting.
 

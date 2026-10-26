@@ -7,11 +7,13 @@
 #include <QHBoxLayout>
 #include <QScrollArea>
 #include <QComboBox>
+#include <QCheckBox>
 #include <QSignalBlocker>
 #include <utility>
 
 namespace AetherSDR {
-StationWorkspace::StationWorkspace(QWidget* parent) : CanonCanvas(parent)
+StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
+    : CanonCanvas(parent), m_primary(primary)
 {
     setObjectName(QStringLiteral("stationWorkspace"));
     setCloseButtonVisible(false);
@@ -33,8 +35,27 @@ StationWorkspace::StationWorkspace(QWidget* parent) : CanonCanvas(parent)
     connect(m_monitor, &QComboBox::activated, this, [this] {
         selectMonitor(m_monitor->currentData().toInt());
     });
-    m_hint = new QLabel(tr("Independent tuning. Listen to selects one radio; PC Audio remains a separate switch. Transmit stays with the primary radio."), bodyWidget());
+    m_hint = new QLabel(tr("Use your transmit radio as primary and add receivers here. Additional receivers cannot transmit. Listen to changes audio only."), bodyWidget());
     m_hint->setWordWrap(true); header->addWidget(m_hint, 1); layout->addLayout(header);
+    m_transmitPrimary = new QCheckBox(tr("Allow transmit on primary radio"), bodyWidget());
+    m_transmitPrimary->setObjectName(QStringLiteral("stationTransmitPrimary"));
+    m_transmitPrimary->setAccessibleDescription(tr("Explicitly designate the primary radio for transmit. This does not key it. Permission clears on disconnect."));
+    layout->addWidget(m_transmitPrimary);
+    if (m_primary) {
+        m_primary->setStationTransmitAllowed(false);
+        connect(m_primary, &RadioModel::connectionStateChanged, this, [this](bool connected) {
+            if (!connected && m_primary) { m_primary->setStationTransmitAllowed(false); }
+            refreshTransmitPermission();
+        });
+        connect(m_primary, &RadioModel::capabilitiesChanged, this, [this] { refreshTransmitPermission(); });
+    }
+    connect(m_transmitPrimary, &QCheckBox::toggled, this, [this](bool allowed) {
+        if (m_primary) { m_primary->setStationTransmitAllowed(allowed && m_primary->isConnected()
+            && m_primary->backendCapabilities().canTransmit); }
+        refreshTransmitPermission();
+        emit primaryTransmitPermissionChanged(m_primary && m_primary->stationTransmitAllowed());
+    });
+    refreshTransmitPermission();
     auto* scroll = new QScrollArea(bodyWidget()); scroll->setWidgetResizable(true);
     auto* content = new QWidget(scroll); m_receivers = new QVBoxLayout(content);
     m_receivers->addStretch(); scroll->setWidget(content); layout->addWidget(scroll, 1);
@@ -51,8 +72,21 @@ StationWorkspace::StationWorkspace(QWidget* parent) : CanonCanvas(parent)
             if (m_station.acceptsAudio(id, revision, frame)) { emit monitorFrameReady(id + 1, frame); }
         });
 }
+void StationWorkspace::refreshTransmitPermission()
+{
+    const bool available = m_primary && m_primary->isConnected()
+        && m_primary->backendCapabilities().canTransmit;
+    if (!available && m_primary) { m_primary->setStationTransmitAllowed(false); }
+    const QSignalBlocker blocker(m_transmitPrimary);
+    m_transmitPrimary->setChecked(available && m_primary->stationTransmitAllowed());
+    m_transmitPrimary->setEnabled(available);
+    m_transmitPrimary->setToolTip(available
+        ? tr("Only the primary radio may transmit. Selecting a receiver for listening does not change this designation.")
+        : tr("Connect a transmit-capable primary radio before enabling transmit. Additional radios remain receive-only."));
+}
 StationWorkspace::~StationWorkspace()
 {
+    if (m_primary) { m_primary->setStationTransmitAllowed(false); }
     if (m_connection) { delete m_connection.data(); }
     for (auto* panel : std::as_const(m_panels)) { panel->detach(); }
     for (int id : m_station.sessionIds()) { m_station.removeSession(id); }

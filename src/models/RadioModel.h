@@ -930,6 +930,10 @@ public:
     bool transmitRecovering() const { return m_txCoordinator.recovering(); }
     bool transmitOwnershipPending() const { return m_txCoordinator.hasOwnership(); }
     void emergencyTransmitStop();
+    // Station role, independent of focus/audio. RX-only survives reconnect;
+    // changing the role never keys the radio or grants capability it lacks.
+    bool setStationTransmitAllowed(bool allowed);
+    bool stationTransmitAllowed() const { return m_txCoordinator.transmitAllowed(); }
     // Trusted composition only. A producer is a lifetime, not an actor grant.
     TxCoordinator::Producer registerTxProducer(QObject* lifetime, bool continuousMicrophone = false);
     // Plain engine protocol objects invalidate this handle in their destructor.

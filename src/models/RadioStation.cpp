@@ -11,6 +11,9 @@ int RadioStation::addSession(const QString& label)
     if (m_nextId == std::numeric_limits<int>::max()) { return -1; }
     const int id = m_nextId++;
     auto value = std::make_unique<RadioSession>();
+    // Additional sessions are receivers. Focus and speaker selection cannot
+    // confer TX authority, even if a transmit-capable backend is connected.
+    value->radioModel().setStationTransmitAllowed(false);
     value->setSessionId(id);
     value->setLabel(label);
     connect(&value->radioModel(), &RadioModel::rxDemodAudioReady, this,
