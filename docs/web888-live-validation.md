@@ -571,10 +571,14 @@ on the receiver. No persistent receiver setting was changed by this increment.
 Live probe results above establish transport/lifecycle, not a measured input
 sample-rate qualification. Socket-free admission was exercised at 12 kHz.
 
-## Credential regression pending validation - 2026-10-26
+## Credential regression validation - 2026-10-26
 
 Explicit backend passwords now enter the same save-after-admission path as the
 desktop form. A socket-free regression checks that successful admission writes
-the credential and a rejected replacement does not. Validation results will be
-recorded with the combined daily build.
+the credential and a rejected replacement does not. The combined Windows daily
+build passed web888_backend_test, web888_shared_ssb_test,
+web888_capture_pool_test, kiwi_sdr_session_test and web888_connection_panel_test.
+The connection-panel size/routing test passed after correcting its merged
+signal subscription. These are socket-free tests with a fake credential store;
+no live receiver authentication or real OS-keychain round trip was performed.
 
