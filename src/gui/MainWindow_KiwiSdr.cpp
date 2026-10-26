@@ -1421,6 +1421,10 @@ void MainWindow::syncKiwiSdrPanadapterUiState(const QString& panId)
     if (!spectrum) {
         return;
     }
+    // A Kiwi-displaying pane keeps live -/+ even when the radio's span is fixed.
+    if (!m_kiwiSpanSyncDeferred) {
+        syncPanSpanControlPlacement();
+    }
 
     SpectrumOverlayMenu* menu = spectrum->overlayMenu();
     auto syncFlexDisplaySettings = [spectrum, menu]() {
@@ -1569,12 +1573,15 @@ void MainWindow::syncKiwiSdrPanadapterUiStates()
     if (!m_panStack) {
         return;
     }
+    m_kiwiSpanSyncDeferred = true;
     for (PanadapterApplet* applet : m_panStack->allApplets()) {
         if (!applet) {
             continue;
         }
         syncKiwiSdrPanadapterUiState(applet->panId());
     }
+    m_kiwiSpanSyncDeferred = false;
+    syncPanSpanControlPlacement();
 }
 
 void MainWindow::scheduleKiwiSdrUiSync(int flags)

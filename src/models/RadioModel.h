@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/TxGrantManager.h"
+#include "core/SpotRequestQueue.h"
 #include "core/SpectrumDecodeScale.h"
 #include "core/backends/IndependentTxControl.h"
 
@@ -27,6 +28,7 @@
 #include "core/DigitalVoiceWaveformTelemetry.h"
 #include <QThread>
 #include <chrono>
+#include <array>
 #include <optional>
 #include "SliceModel.h"
 #include "MeterModel.h"
@@ -256,6 +258,7 @@ public:
     ReceiveDispatch requestRadioNickname(const QString& nickname,
                                          IRadioBackend::NicknameCompletion completion = {});
     QString region()       const { return m_region; }
+    std::optional<int> iaruRegion() const { return m_iaruRegion; }
     int     rttyMarkDefault() const { return m_rttyMarkDefault; }
     QString radioOptions() const { return m_radioOptions; }
     RadioInfo lastRadioInfo() const { return m_lastInfo; }
@@ -274,6 +277,8 @@ public:
     bool licenseFeatureEnabled(const QString& name) const;
     QString licenseFeatureReason(const QString& name) const;
     QString autoAgcThresholdUnavailableReason(const SliceModel* slice) const;
+    // Empty when the radio can take a noise floor range for its panadapters.
+    QString panNoiseFloorRangeUnavailableReason() const;
 
     QString ip()          const { return m_ip; }
     QString netmask()     const { return m_netmask; }
@@ -630,13 +635,9 @@ public:
     // other family that takes typed intents through the IRadioBackend seam) —
     // there, Flex wire text has nowhere to go and is dropped at the sink.
     bool hasCommandPlane() const { return m_wanConn != nullptr || m_connection != nullptr; }
-    // A non-Flex backend that declares RadioCapabilities::lineoutControl, which
-    // takes setLineoutGain()/setLineoutMute() typed instead of as wire text.
-    bool lineoutThroughSeam() const;
-
     // The slice's tuning step, applied on the client when the radio has no
     // command plane to carry `slice set <n> step=`. Returns false, doing
-    // nothing, when a command plane exists: the caller sends its wire text and
+    // nothing, when a command plane exists: the typed backend request sets it and
     // the radio's status echo sets the step.
     bool applyClientOwnedSliceStep(int sliceId, int hz);
 
@@ -697,6 +698,32 @@ public:
     // so a connect must never replay this client-persisted flag onto it.
     void notePcAudioEnabled(bool on);
     bool ensureDaxTxStream(DaxTxRequestReason reason);
+    // The radio's `transmit dax` flag is ONE bit for the whole radio, shared
+    // with every client: it picks DAX TX or the microphone as the source of
+    // the next transmission. Every in-process producer that needs it on holds
+    // it here rather than saving and restoring it itself, so two producers
+    // whose holds overlap cannot hand it back out of order (#6538, #6579).
+    // Same shape as PanadapterStream's DAX RX holder table (#3305):
+    //   first hold    -> remember the flag, then set dax=1
+    //   later holds   -> set dax=1 again only if something turned it off
+    //   last release  -> once the radio is in RX, put back what the first
+    //                    hold found, but only while the flag is still the 1
+    //                    a hold set; if the operator or another client turned
+    //                    it off meanwhile, theirs is the newer choice.
+    // No grace window: a mic or footswitch key-up straight after an FT8 over
+    // has to modulate. Callers keep their own "does this radio have a
+    // `transmit dax` at all" guard; the table does not second-guess it.
+    enum class DaxTxFlagHolder : quint8 {
+        Tci,
+        Rade,
+        VoiceKeyer,
+        Ax25,
+        Wspr,
+        RxPlayback,
+    };
+    void acquireTransmitDax(DaxTxFlagHolder who);
+    void releaseTransmitDax(DaxTxFlagHolder who);
+    bool transmitDaxHeldBy(DaxTxFlagHolder who) const;
     bool prepareWsprTransmit(const TxCoordinator::Request& input);
     void releaseWsprTransmit(const TxCoordinator::Request& input);
     // "The WSPR beacon's transmit-audio route is ready." On a Flex that is
@@ -987,8 +1014,26 @@ public:
     bool addSliceOnPan(const QString& panId, double freqMhz);
     // Ordinary RX close. Confirmation is sliceRemoved, never this return value.
     bool removeSlice(int sliceId);
-    void createPanadapter();   // Create a new independent panadapter
-    void removePanadapter(const QString& panId);
+    quint64 createSlice(const SliceCreateRequest& request, QObject* replyContext = nullptr,
+                        const SliceCreationCompletion& completion = {}, bool transient = false);
+    void cancelSliceCreation(quint64 ticket);
+    bool removeCreatedSlice(const CreatedSliceReceipt& receipt);
+    SliceModel* resolveCreatedSlice(const CreatedSliceReceipt& receipt) const;
+    ReceiveDispatch requestTxSlice(SliceModel* source, bool enabled = true,
+                                   QObject* replyContext = nullptr,
+                                   const RadioControlCompletion& completion = {},
+                                   std::optional<RadioControlSession> expectedSession = {});
+    ReceiveDispatch requestFullDuplex(bool enabled, QObject* replyContext = nullptr,
+                                      const RadioControlCompletion& completion = {});
+    ReceiveDispatch requestSliceInventoryRefresh(std::optional<RadioControlSession> expectedSession = {});
+    using PanCreationCompletion = std::function<void(const RadioControlReply&, PanadapterModel*)>;
+    ReceiveDispatch requestPanCreation(QObject* context, const PanCreationCompletion& completion,
+                                       bool initializeDisplay = true);
+    bool createPanadapter();
+    bool removePanadapter(const QString& panId, PanCloseIntent intent = PanCloseIntent::Ordinary);
+    ReceiveDispatch requestPanDisplay(PanadapterModel* pan, const PanDisplayRequest& request,
+        const RadioControlCompletion& completion = {}, bool announce = true);
+    ReceiveDispatch requestPanDimensions(PanadapterModel* pan, int width, int height, int localPoints);
     void setPanBandwidth(double bandwidthMhz);
     void setPanCenter(double centerMhz);
     void setPanDbmRange(float minDbm, float maxDbm);
@@ -1023,8 +1068,12 @@ public:
     ReceiveDispatch requestRadioSetup(const RadioSetupRequest& request,
                                      QObject* replyContext = nullptr,
                                      const RadioSetupCompletion& completion = {});
+    // The completion answers the radio's reply, or refuses at once when the
+    // request is not dispatched; it is dropped once replyContext is destroyed.
     ReceiveDispatch requestTxBand(const TxBandRequest& request,
-                                 std::optional<RadioControlSession> expectedSession = {});
+                                 std::optional<RadioControlSession> expectedSession = {},
+                                 QObject* replyContext = nullptr,
+                                 const RadioSetupCompletion& completion = {});
     ReceiveDispatch requestUsbCable(const UsbCableRequest& request);
     ReceiveDispatch requestTransverter(const TransverterRequest& request,
                                       QObject* replyContext = nullptr,
@@ -1032,6 +1081,18 @@ public:
                                       std::optional<RadioControlSession> expectedSession = {});
     RadioControlSession controlSession() const;
     bool controlSessionCurrent(const RadioControlSession& session) const;
+    ReceiveDispatch requestSpot(const SpotRequest& request, PanadapterModel* pan = nullptr,
+                                std::optional<RadioControlSession> expectedSession = {},
+                                std::optional<quint64> expectedEpoch = {});
+    quint64 spotRequestEpoch() const { return m_spotRequestEpoch; }
+    void queueSpot(const SpotRequest& request);
+    void flushQueuedSpots(int limit);
+    void clearQueuedSpots();
+    ReceiveDispatch requestPanControl(PanadapterModel* pan, const PanControlRequest& request);
+    ReceiveDispatch requestSlicePreset(SliceModel* slice, const SlicePresetRequest& request);
+    std::optional<RadioStationOverride> requestTemporaryStation(const QString& name);
+    bool restoreTemporaryStation(const RadioStationOverride& owner);
+    quint64 stationIdentityRevision() const { return m_stationIntentRevision; }
     ReceiveDispatch requestProfile(const ProfileRequest& request,
                                    QObject* replyContext = nullptr,
                                    const RadioControlCompletion& completion = {},
@@ -1045,10 +1106,6 @@ public:
                       std::optional<RadioControlSession> expectedSession = {});
     ReceiveDispatch recallMemory(int index, int sliceId);
     quint64 memorySlotRevision(int index) const { return m_memorySlotRevisions.value(index); }
-    // Panel width in spectrum points for a backend that shapes its own
-    // spectrum: straight down to that backend. Returns false on Flex, where
-    // the caller sends the xpixels= wire command itself.
-    bool requestLocalPanPixelWidth(const QString& panId, int points);
     // Operator FFT FPS / waterfall rate intent: wire text on Flex; applied to
     // the pan model on self-shaping backends. Returns true if applied or sent.
     // `wfRate` is the 1..100 rate control, not milliseconds despite the Flex
@@ -1094,6 +1151,9 @@ public:
     // wire-text fallback.
     void setPanPreampFor(const QString& panId, int step);
     void setPanAttenuatorFor(const QString& panId, int step);
+    // The radio's own scope mode — `index` addresses
+    // PanadapterModel::scopeModeLabels. Seam-only, like the two above.
+    void setPanScopeModeFor(const QString& panId, int index);
 
     // Display controls — FFT (display pan set)
     void setPanAverage(int frames);
@@ -1132,6 +1192,7 @@ signals:
     void infoChanged();
     void licenseFeaturesChanged();
     void autoAgcThresholdAvailabilityChanged();
+    void panNoiseFloorRangeAvailabilityChanged();
     void connectionStateChanged(bool connected);
     void tuneOutputControlChanged();
     // Per-pan transmit permission changed. Consumers use the pan id to update
@@ -1509,6 +1570,14 @@ private slots:
                                 const SpectrumCoverage& coverage);
 
 private:
+    struct PendingPanCreation;
+    QMap<quint64, std::shared_ptr<PendingPanCreation>> m_pendingPanCreations;
+    quint64 m_nextPanCreation{0};
+    QHash<QString, quint64> m_displayRetirements;
+    quint64 m_displayHistoryEpoch{0};
+    void settlePanCreations();
+    void retireDisplayResource(const QString& id);
+    void requestPanRfGainInfo(PanadapterModel* pan);
     friend struct RadioModelWakeTestAccess;
     void handleRadioStatus(const QMap<QString, QString>& kvs);
     void adoptSoftwareVersion(const QString& version);
@@ -1522,6 +1591,10 @@ private:
     void resetGpsState(bool receiveMessages = true);
     void wireGpsSessionReceivers(bool receiveMessages = true);
     void handleMessageReceived(const ParsedMessage& msg, quint64 gpsSessionGeneration);
+    // Asks for the CW profile list once per session, whenever the backend's CW
+    // capability is (or later becomes) engaged.
+    void refreshCwProfilesIfSupported();
+    void refreshCwProfilesOnCapabilityChange();
     void applyMemoryChanges(const MemoryDelta& delta);
     void reportMemoryImportFailure(const QString& reason);
     void applyProfileChanges(const ProfileDelta& delta);
@@ -1608,6 +1681,7 @@ private:
 
     // Route command to active connection (LAN or WAN)
     using ResponseCallback = RadioConnection::ResponseCallback;
+    void requestRadioInfo();
     quint32 sendCmd(const QString& command, ResponseCallback cb = nullptr);
     quint32 clientHandle() const;
     PanadapterModel* ensureOwnedPanadapter(const QString& panId);
@@ -1834,14 +1908,6 @@ public:
     // wiring and teardown with no socket, no device and no radio. Returns false
     // when the family has no backend in this build (RTL without librtlsdr).
     bool rebuildBackendForTest(const QString& family);
-    // Replace only the ordinary lifecycle command transport, including replies.
-    // Tests can pin Flex/Sim encoding without constructing a wire object/peer.
-    void setSliceLifecycleCommandSinkForTest(
-        std::function<bool(const QString&, ResponseCallback)> sink)
-    {
-        m_sliceLifecycleCommandSinkForTest = std::move(sink);
-    }
-
 private:
     friend class RadioModelSliceLifecycleTestAccess;
     friend class RadioNicknameTestAccess;
@@ -1853,6 +1919,8 @@ private:
     friend class VoiceKeyerTxRouteTestAccess;
     friend class RadioSetupControlTestAccess;
     friend class StoredControlTestAccess;
+    friend class TciServerReviewTest;
+    friend class TransmitDaxHoldTestAccess;
     void expirePendingCallbacks(const QString& reason);
 
     // True only while expirePendingCallbacks() is invoking the drained
@@ -1865,11 +1933,34 @@ private:
     // Bumped at every session end. Captured by deferred work (the multiFLEX
     // peek window) so a timer armed in one session cannot fire into the next.
     quint64 m_sessionGeneration{0};
+    quint64 m_spotRequestEpoch{0};
+    SpotRequestQueue m_spotRequests;
+    bool m_flushingSpotRequests{false};
+    quint64 m_stationIntentRevision{0};
+    quint64 m_stationOverrideOwner{0};
+    std::array<quint64, 5> m_outputIntentRevisions{};
     quint64 m_receiveControlGeneration{0};
     void wireBackendReceiverState();
-    bool dispatchSliceLifecycleCommand(const QString& command, ResponseCallback callback = {});
+    struct PendingSliceCreate;
+    void wireSliceLifecycle();
+    void reconcileSliceCreates();
+    void expireSliceCreation(quint64 ticket);
+    void forgetSliceCreation(quint64 ticket);
+    void noteSliceRetirement(int sliceId);
+    void compactSliceRetirements();
+    std::optional<quint64> retainSliceRetirement(int sliceId);
+    void notifySliceCreate(const std::shared_ptr<PendingSliceCreate>& pending,
+                           const SliceCreationResult& result);
+    bool dispatchSliceRemoval(SliceModel* source, const RadioControlSession& session,
+                              bool preserveLastReceiver = true);
+    QHash<quint64, std::shared_ptr<PendingSliceCreate>> m_pendingSliceCreates;
+    QHash<int, quint64> m_sliceRetirements;
+    QHash<int, QPointer<QObject>> m_pendingSliceRemoves;
+    quint64 m_nextSliceCreateTicket{0};
+    quint64 m_fullDuplexRequestRevision{0};
+    quint64 m_fullDuplexObservationRevision{0};
+    quint64 m_txSliceSelectionRevision{0};
     quint64 m_backendReceiverGeneration = 0;
-    std::function<bool(const QString&, ResponseCallback)> m_sliceLifecycleCommandSinkForTest;
     PanadapterModel* resolveBackendPan(const QString& backendPanId);
     // Remaining selection bindings and initial global lock observation.
     // Both helpers must be called at every SliceModel construction site.
@@ -2034,6 +2125,7 @@ private:
     QString     m_callsign;
     QString     m_nickname;
     QString     m_region;
+    std::optional<int> m_iaruRegion;
     QString     m_radioOptions;
     QString     m_licenseRadioId;
     QString     m_licenseExpirationDate;
@@ -2087,6 +2179,11 @@ private:
     bool        m_cwxDrainArmed{false}; // CWX drain-release latch, immune to interlock flicker (#3949)
     bool        m_txAudioGate{false}; // actual TX audio gate state
     bool        m_radioTransmitting{false}; // raw interlock TX state, any owner
+    // Last interlock state= the radio reported, any owner; empty until one
+    // arrives and on backends that report none. m_radioTransmitting is only
+    // `state == TRANSMITTING`, so it is already false in PTT_REQUESTED and
+    // UNKEY_REQUESTED; restoring the radio's audio source needs this.
+    QString     m_interlockState;
     // Last mox a RadioCapabilities::radioPttObservation backend published; ORed
     // into the command-edge fallback. Always false for every other backend.
     bool        m_backendObservedTransmit{false};
@@ -2192,7 +2289,13 @@ private:
     };
     QMap<int, TxBandInfo> m_txBandSettings;
     QHash<QString, QString> m_panTransmitInhibitReasons;
-    QHash<QString, int> m_panTransmitInhibitedTxSlices;
+    struct InhibitedTxSelection {
+        int id{-1};
+        QPointer<SliceModel> identity;
+        RadioControlSession session{};
+        quint64 retirement{0};
+    };
+    QHash<QString, InhibitedTxSelection> m_panTransmitInhibitedTxSlices;
     struct TuneInhibitState {
         enum class Phase { Applying, Active, Restoring };
         int bandId{-1};
@@ -2367,6 +2470,7 @@ private:
     QString     m_activeGlobalProfile;
     bool        m_profileDatabaseImporting{false};
     bool        m_profileDatabaseExporting{false};
+    bool        m_cwProfilesRequested{false};   // this session asked for "profile cw info"
     RadioStatusOwnership::RemoteAudioRxTracking m_rxAudio;
     struct DaxStreamDebugState {
         QString type;
@@ -2390,14 +2494,21 @@ private:
     bool        m_wsprTxTransition{false};
     bool        m_wsprTxYieldAfterUse{false};
     bool        m_wsprTxReleaseWhenReady{false};
-    bool        m_wsprTxPreviousDax{false};   // `transmit dax` before the beacon armed
-    bool        m_wsprTxRestoreDax{false};    // beacon changed it and owes a restore
     // The beacon armed against a seam-audio backend, so it borrowed no Flex DAX
     // stream and no `transmit dax`. Latched by prepareWsprTransmit() and the
     // only thing releaseWsprTransmit() has to undo on that path.
     bool        m_wsprTxSeamAudioArmed{false};
     quint32     m_daxTxClientHandle{0};  // Tracked for diagnostics only — not consulted in routing.
     bool        m_daxTxCreatePending{false};
+    // acquireTransmitDax() table: a bit per DaxTxFlagHolder, the flag the
+    // first hold found, and a restore owed once the radio reaches RX.
+    quint8      m_transmitDaxHolders{0};
+    bool        m_transmitDaxBaseline{false};
+    bool        m_transmitDaxRestorePending{false};
+    void        resetTransmitDaxSessionState();
+    void        finishTransmitDaxRelease();
+    bool        transmitDaxEffective() const;
+    bool        radioReceivingForTransmitDax() const;
     QSet<quint32> m_deadDaxRxSeen;
     QSet<quint32> m_externalDaxTxSeen;
     QSet<quint32> m_externalDaxRxSeen;
