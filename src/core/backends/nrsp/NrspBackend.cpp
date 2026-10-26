@@ -1,6 +1,8 @@
 #include "NrspBackend.h"
 #include "NrspWorker.h"
 #include "core/AppActivity.h"
+#include "core/NrspCredentials.h"
+#include <QTimer>
 
 #include <QLoggingCategory>
 #include <QMetaObject>
@@ -93,6 +95,32 @@ void NrspBackend::connectRadio(const RadioConnectRequest& request)
     m_reportedReceivePermission = false;
     m_connecting = true;
     const quint64 generation = ++m_generation;
+    const QString username = request.params.value(QStringLiteral("nrsp.username")).toString();
+    m_credentialEndpoint = NrspCredentials::endpoint(request.host.trimmed(),
+        request.port == 0 ? 50000 : request.port, username);
+    m_password = request.params.value(QStringLiteral("nrsp.password")).toString();
+    if (username.isEmpty() || !m_password.isEmpty()) {
+        if (!username.isEmpty()) { NrspCredentials::setSessionPassword(m_credentialEndpoint, m_password); }
+        else { m_credentialEndpoint.clear(); }
+        startReceiver(request, generation);
+        return;
+    }
+    QTimer::singleShot(30000, this, [this, generation] {
+        if (accepts(generation) && m_connecting && !m_thread) {
+            fail(tr("nRSP-ST credential loading timed out."));
+        }
+    });
+    NrspCredentials::load(m_credentialEndpoint, this,
+        [this, request, generation](const QString& password, const QString& error) {
+            if (!accepts(generation) || !m_connecting) { return; }
+            if (!error.isEmpty()) { fail(tr("Cannot load nRSP-ST password: %1").arg(error)); return; }
+            m_password = password;
+            startReceiver(request, generation);
+        });
+}
+
+void NrspBackend::startReceiver(const RadioConnectRequest& request, quint64 generation)
+{
     m_thread = new QThread(this);
     m_thread->setObjectName(QStringLiteral("nRSP receive"));
     const std::shared_ptr<std::atomic<qsizetype>> deliveryBytes = std::make_shared<std::atomic<qsizetype>>(0);
@@ -106,7 +134,7 @@ void NrspBackend::connectRadio(const RadioConnectRequest& request)
     connect(m_thread, &QThread::started, worker,
         [worker, generation, host, port, localAddress,
          username = request.params.value(QStringLiteral("nrsp.username")).toString(),
-         password = request.params.value(QStringLiteral("nrsp.password")).toString()]() mutable {
+         password = m_password]() mutable {
             worker->start(generation, host, port, localAddress, std::move(username), std::move(password));
         }, Qt::SingleShotConnection);
     startStreamThread(m_thread);
@@ -118,6 +146,13 @@ void NrspBackend::attachWorker(const std::shared_ptr<std::atomic<qsizetype>>& de
     connect(m_worker, &nrsp::NrspWorker::ready, this,
         [this](quint64 token, const QVariantMap& source) {
             if (!accepts(token)) { return; }
+            if (!m_credentialEndpoint.isEmpty() && !m_password.isEmpty()) {
+                NrspCredentials::saveAccepted(m_credentialEndpoint, m_password, this,
+                    [this, token](const QString& error) {
+                        if (accepts(token) && !error.isEmpty()) { emit configurationWarning(error); }
+                    });
+            }
+            m_password.clear();
             m_connecting = false;
             m_connected = true;
             m_source = source;
@@ -169,6 +204,8 @@ void NrspBackend::attachWorker(const std::shared_ptr<std::atomic<qsizetype>>& de
 
 void NrspBackend::disconnectRadio()
 {
+    m_password.clear();
+    m_credentialEndpoint.clear();
     const bool active = m_connected || m_connecting;
     m_connected = false;
     m_connecting = false;

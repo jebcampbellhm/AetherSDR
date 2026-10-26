@@ -46,6 +46,9 @@ public:
 
 private:
     friend class NrspBackendTestAccess;
+    void startReceiver(const RadioConnectRequest& request, quint64 generation);
+    QString m_credentialEndpoint;
+    QString m_password;
     void attachWorker(const std::shared_ptr<std::atomic<qsizetype>>& deliveryBytes);
     void post(std::function<void(nrsp::NrspWorker&)> action);
     bool accepts(quint64 generation) const;

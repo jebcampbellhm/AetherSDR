@@ -42,8 +42,12 @@ ownership to an eligible session.
    **Password:** configured in NRSPAdministrator.
 5. Click **Connect by IP**, then select the receive mode and passband.
 
-The password is used for this connection only, cleared from the field when
-submitted, and never saved. Enter it again for a new authenticated connection.
+The password is cleared from the field when submitted. After a successful
+connection it is saved in the operating-system keychain, scoped to the receiver
+address, port and streaming username. Enter the same username and leave the
+password blank to reuse it. **Forget** removes the saved password for that
+receiver and username. A rejected replacement does not overwrite the saved
+password. Without keychain support, credentials remain session-only.
 
 The connection adopts the radio's current source frequency, sample rate,
 and antenna. It does not restore a saved source configuration over the radio.

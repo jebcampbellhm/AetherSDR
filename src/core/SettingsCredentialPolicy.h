@@ -34,6 +34,8 @@ inline constexpr FlatCredential kFlatCredentials[] = {
     {"AG_AuthCode",           "antenna_genius_auth_code"},
 };
 
+inline constexpr const char* kNrspPasswordKeyPrefix = "nrsp_password_";
+
 // Credential-bearing FIELDS inside feature-owned JSON document values.
 struct DocFieldCredential {
     const char* docKey;       // the settings key holding the document

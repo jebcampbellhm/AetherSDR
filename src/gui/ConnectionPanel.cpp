@@ -1,3 +1,4 @@
+#include "core/NrspCredentials.h"
 #include "ConnectionPanel.h"
 #include "core/AppSettings.h"
 #include "core/backends/ConnectionSharingPolicy.h"  // in-use share gate (#4448), shared with MainWindow_Session
@@ -819,12 +820,41 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_manualNrspPassEdit = new QLineEdit(manualGroup);
     m_manualNrspPassEdit->setObjectName(QStringLiteral("connectionManualNrspPassword"));
     m_manualNrspPassEdit->setAccessibleName(tr("nRSP-ST password"));
-    m_manualNrspPassEdit->setAccessibleDescription(tr("Streaming account password. Used for this connection only and never saved."));
+    m_manualNrspPassEdit->setAccessibleDescription(tr("Accepted passwords are saved in the OS keychain for this receiver and username. Leave blank to reuse."));
     m_manualNrspPassEdit->setEchoMode(QLineEdit::Password);
     m_manualNrspPassEdit->setMaxLength(1024);
-    m_manualNrspPassEdit->setPlaceholderText(tr("Password — not saved"));
+    m_manualNrspPassEdit->setPlaceholderText(tr("Blank uses saved password"));
     ThemeManager::instance().applyStyleSheet(m_manualNrspPassEdit, lineEditStyle);
-    m_manualNrspPassRow = addManualRow(tr("Password:"), m_manualNrspPassEdit);
+    auto* nrspPasswordField = new QWidget(manualGroup);
+    auto* nrspPasswordLayout = new QHBoxLayout(nrspPasswordField);
+    nrspPasswordLayout->setContentsMargins(0, 0, 0, 0);
+    auto* forgetNrsp = new QPushButton(tr("Forget"), nrspPasswordField);
+    forgetNrsp->setObjectName(QStringLiteral("connectionNrspForgetPassword"));
+    forgetNrsp->setToolTip(tr("Remove the saved password for this receiver and username."));
+    nrspPasswordLayout->addWidget(m_manualNrspPassEdit, 1);
+    nrspPasswordLayout->addWidget(forgetNrsp);
+    m_manualNrspPassRow = addManualRow(tr("Password:"), nrspPasswordField);
+    connect(forgetNrsp, &QPushButton::clicked, this, [this, forgetNrsp] {
+        const QString host = m_manualIpEdit->text().trimmed();
+        const QString username = m_manualNrspUserEdit->text().trimmed();
+        QHostAddress address(host);
+        if (address.isNull() && !host.isEmpty()) {
+            for (const auto& candidate : QHostInfo::fromName(host).addresses()) {
+                if (candidate.protocol() == QAbstractSocket::IPv4Protocol) { address = candidate; break; }
+            }
+        }
+        if (address.isNull() || username.isEmpty()) {
+            setManualMessage(tr("Enter the receiver address and username first."), true);
+            return;
+        }
+        m_manualNrspPassEdit->clear();
+        forgetNrsp->setEnabled(false);
+        NrspCredentials::forget(NrspCredentials::endpoint(address.toString(), 50000, username), this,
+            [this, forgetNrsp](const QString& error) {
+                forgetNrsp->setEnabled(true);
+                setManualMessage(error.isEmpty() ? tr("Saved nRSP-ST password removed.") : error, !error.isEmpty());
+            });
+    });
 
     // Icom credentials. Hidden for every other family — see
     // updateManualFamilyHints(). An Icom will not answer the RS-BA1 handshake

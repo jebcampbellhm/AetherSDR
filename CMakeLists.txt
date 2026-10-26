@@ -1063,6 +1063,7 @@ set(CORE_SOURCES
     src/core/CatPort.cpp
     src/core/KiwiSdrProtocol.cpp
     src/core/KiwiSdrRedirectPolicy.cpp
+    src/core/NrspCredentials.cpp
     src/core/KiwiSdrCredentialStore.cpp
     src/core/KiwiSdrClient.cpp
     src/core/KiwiSdrManager.cpp

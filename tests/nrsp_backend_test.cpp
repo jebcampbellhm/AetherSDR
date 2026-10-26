@@ -2,6 +2,8 @@
 // worker relays; protocol and DSP behavior have separate capture/signal tests.
 #include "SeamThreadAffinityProbe.h"
 #include "TestSettingsProfile.h"
+#include "core/NrspCredentials.h"
+#include "core/KiwiSdrCredentialStore.h"
 #include "core/backends/nrsp/NrspBackend.h"
 #include "core/backends/nrsp/NrspWorker.h"
 #include "models/RadioModel.h"
@@ -21,6 +23,23 @@
 #include <memory>
 
 namespace AetherSDR {
+struct NrspCredentialsTestAccess {
+    static void useStore(std::shared_ptr<IKiwiSdrCredentialStore> store) {
+        NrspCredentials::credentialStore() = std::move(store);
+    }
+};
+class CredentialStore final : public IKiwiSdrCredentialStore {
+public:
+    bool isPersistent() const override { return true; }
+    void read(const QString& key, QObject*, Callback callback) override { lastKey = key; pending = std::move(callback); }
+    void write(const QString& key, const QString& value, QObject*, Callback callback) override {
+        ++writes; lastKey = key; lastValue = value; callback({});
+    }
+    void remove(const QString&, QObject*, Callback callback) override { ++removals; callback({}); }
+    Callback pending;
+    QString lastKey, lastValue;
+    int writes = 0, removals = 0;
+};
 class NrspBackendTestAccess
 {
 public:
@@ -29,6 +48,10 @@ public:
         quint64 generation;
         std::shared_ptr<std::atomic<qsizetype>> credit;
     };
+    static void credentials(NrspBackend& backend, const QString& endpoint, const QString& password) {
+        backend.m_credentialEndpoint = endpoint;
+        backend.m_password = password;
+    }
     static Acquisition prepare(NrspBackend& backend)
     {
         backend.disconnectRadio();
@@ -316,6 +339,38 @@ int main(int argc, char** argv)
 {
     TestSettingsProfile profile(QStringLiteral("nrsp-backend"));
     QCoreApplication app(argc, argv);
+    auto store = std::make_shared<CredentialStore>();
+    NrspCredentialsTestAccess::useStore(store);
+    const QString endpoint = NrspCredentials::endpoint("192.0.2.1", 50000, "listener");
+    check(endpoint != NrspCredentials::endpoint("192.0.2.1", 50000, "other"), "credential identity separates usernames");
+    check(endpoint != NrspCredentials::endpoint("192.0.2.2", 50000, "listener"), "credential identity separates receivers");
+    QString loaded;
+    NrspCredentials::load(endpoint, &app, [&](const QString& password, const QString&) { loaded = password; });
+    NrspCredentials::forget(endpoint, &app, [](const QString&) {});
+    store->pending({KiwiSdrCredentialResultCode::Success, "obsolete", {}});
+    check(loaded.isEmpty() && store->removals == 1, "forget fences a stale credential read");
+    NrspCredentials::setSessionPassword(endpoint, "accepted-test-secret");
+    NrspBackend credentialBackend;
+    const auto acquisition = NrspBackendTestAccess::prepare(credentialBackend);
+    NrspBackendTestAccess::credentials(credentialBackend, endpoint, "accepted-test-secret");
+    check(store->writes == 0, "no credential persistence before successful reception");
+    ready(acquisition);
+    check(store->writes == 1 && store->lastValue == "accepted-test-secret", "successful admission saves credential");
+    check(store->lastKey.startsWith("nrsp_password_") && !store->lastKey.contains("listener"), "keychain uses a hashed identity");
+    credentialBackend.disconnectRadio();
+    const auto cancelled = NrspBackendTestAccess::prepare(credentialBackend);
+    NrspBackendTestAccess::credentials(credentialBackend, endpoint, "never-accepted");
+    credentialBackend.disconnectRadio();
+    check(store->writes == 1, "cancelled admission cannot overwrite credential");
+    NrspBackend loading;
+    RadioConnectRequest loadRequest;
+    loadRequest.host = "192.0.2.10";
+    loadRequest.params.insert("nrsp.username", "listener");
+    loading.connectRadio(loadRequest);
+    loading.disconnectRadio();
+    store->pending({KiwiSdrCredentialResultCode::Success, "saved-test-secret", {}});
+    check(!loading.isConnected(), "cancelled keychain completion cannot connect");
+
     relayAndRetirement();
     reentrantRetirement();
     antennaRefusal();
