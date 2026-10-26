@@ -54,7 +54,54 @@ to each radio and must be paired with the owning session in the desktop.
    evidence, with live UI/hardware limitations stated. Optional linked tuning
    comes after independent sessions are reliable.
 
+## Experimental build handoff
+
+- Executable: `C:\1_HAM\AetherSDR\build-multi-radio-station\AetherSDR.exe`.
+  The daily executable in `build-daily-web888-nrsp` remains separate and untouched.
+  No normal app is being left running by this work window.
+- Open **File > Additional receivers...** to add an independent receiver.
+  With the Icom still offline, use either SDR as primary and add the other.
+  When the Icom is available, use it as primary and add both SDRs. Select
+  **Listen to** explicitly; PC Audio remains off until the operator enables it.
+  Removing a receiver releases it; hiding the dock keeps its sessions running.
+- Reconnect keeps the existing panel; it accepts the original endpoint and a
+  fresh connection form. Primary controls remain bound to the primary radio.
+  Additional panels offer basic tuning/mode/filter/slice/waterfall controls;
+  full per-receiver DSP/decoder applets and saved display preferences are future work.
+
+| Area | Evidence | Still requires qualification |
+| --- | --- | --- |
+| Simultaneous Web-888/nRSP-ST and reconnect | Silent live model probes in both reconnect directions; other receiver continued; leases released | Normal desktop operation under operator workload |
+| Receiver panels, control ownership, manual recovery | Real-widget offscreen tests and built-in demo sessions; queued-callback and failure injection | Rendered interactive desktop usability/performance |
+| Selected-only audio and receive interruption | PCM lease, memory-output and callback tests; no speaker device | Audible playback and physical Icom TX/RX status timing |
+| Transmit designation | Offline engine gates; additional sessions RX-only; no transmission performed | Exact Icom Ethernet model and hardware support |
+
 ## Latest checkpoint
+
+2026-10-26 21:02 UTC failed-attempt recovery review:
+
+- Extended station_reconnect_test with an injected, socket-free connection
+  terminal that holds attempts pending. It enters the real model error slot
+  without emitting a disconnect, matching the terminal-refusal recovery path.
+  Reconnect is disabled during the attempt and re-enabled by the error. Three
+  attempts verify fresh option forwarding, including an empty third submission
+  that must not replay earlier options. Test values are nonsensitive tags;
+  no credentials are supplied or printed. The second demo receiver and selected
+  listening source remain unchanged through the failures.
+- The targeted test passed. Removing the error handler's control refresh failed
+  the immediate-recovery assertion; restored production code passed again.
+  Evidence: station-recovery-error-build.log, station-recovery-error-test.log
+  and station-recovery-error-mutation-test.log in build-web888-evidence. The
+  test terminal initially needed its required inert setKeying override to compile;
+  no transmission path or device is exercised by it.
+- Only test code and these notes changed from the preceding runtime checkpoint.
+  No additional runtime feature or hardware claim. No mutations remain; all
+  commands finished and no live leases or normal GUI were opened this increment.
+
+NEXT: final executable identity/startup handoff and deadline closure. Do not
+start another feature. Keep PC audio off, stop at 21:30 UTC and pause automation.
+
+### Earlier reconnect controls checkpoint
 
 2026-10-26 20:51 UTC additional-receiver reconnect controls checkpoint:
 

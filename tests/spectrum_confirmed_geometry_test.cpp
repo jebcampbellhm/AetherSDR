@@ -487,6 +487,54 @@ static int runStationReconnect()
     check(second->radioModel().isConnected() && monitor->currentData().toInt() == secondId + 1
           && !first->radioModel().stationTransmitAllowed(),
           "other receiver, listening selection and receive-only permission survive reconnect");
+    first->radioModel().disconnectFromRadio();
+    if (!waitFor([&] { return !first->radioModel().isConnected() && reconnect->isEnabled(); })) { return 1; }
+    // An injected terminal holds a connect attempt pending. It has no parser,
+    // peer, socket or device; failures enter the real model's error slot.
+    class PendingConnect final : public IRadioBackend {
+    public:
+        int attempts = 0;
+        QVariantMap lastOptions;
+        RadioCapabilities capabilities() const override {
+            RadioCapabilities caps;
+            caps.connectionRecovery = ConnectionRecovery{ConnectionRecovery::Mode::Manual};
+            return caps;
+        }
+        bool isConnected() const override { return false; }
+        void connectRadio(const RadioConnectRequest& request) override { ++attempts; lastOptions = request.params; }
+        void disconnectRadio() override {}
+        void setKeying(bool, const TxCoordinator::Operation&, const TxCoordinator::Completion&) override {}
+        void setSliceFrequency(int, double) override {}
+        void setSliceMode(int, const QString&) override {}
+        void setSliceFilter(int, int, int) override {}
+        void setSliceAgc(int, const QString&, int) override {}
+        void setPanCenter(const QString&, double, PanCenterIntent) override {}
+        void invokeExtension(const QString&, const QString&, quint64, const QVariant&) override {}
+    };
+    auto pending = std::make_unique<PendingConnect>();
+    auto* terminal = pending.get();
+    first->radioModel().setBackendForTest(std::move(pending), firstInfo.family);
+    const auto reject = [&] {
+        return QMetaObject::invokeMethod(&first->radioModel(), "onConnectionError", Qt::DirectConnection,
+            Q_ARG(QString, QStringLiteral("Injected offline connection refusal")));
+    };
+    for (int attempt = 1; attempt <= 3; ++attempt) {
+        reconnect->click();
+        form = StationWorkspaceTestAccess::form(workspace);
+        if (!form || !form->isVisible()) { return 1; }
+        const QVariantMap options = attempt < 3
+            ? QVariantMap{{QStringLiteral("test.attemptTag"), attempt}} : QVariantMap{};
+        emit form->connectWithOptionsRequested(firstInfo, options);
+        check(terminal->attempts == attempt && first->radioModel().isConnectAttemptInFlight()
+              && !reconnect->isEnabled(), "pending attempt disables duplicate manual recovery");
+        check(attempt < 3 ? terminal->lastOptions.value(QStringLiteral("test.attemptTag")).toInt() == attempt
+                          : !terminal->lastOptions.contains(QStringLiteral("test.attemptTag")),
+              "each retry receives only its newly submitted options");
+        check(reject() && !first->radioModel().isConnectAttemptInFlight() && reconnect->isEnabled(),
+              "terminal error without disconnect immediately restores Reconnect");
+    }
+    check(second->radioModel().isConnected() && monitor->currentData().toInt() == secondId + 1,
+          "failed retries leave the other receiver and listening selection intact");
     station.removeSession(firstId);
     emit form->connectRequested(firstInfo);
     check(station.sessionIds().size() == 1 && second->radioModel().isConnected(),
