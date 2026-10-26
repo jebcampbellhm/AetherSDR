@@ -2598,7 +2598,7 @@ void ConnectionPanel::updateManualFamilyHints()
         m_manualHintLabel->setText(
             nrsp
                 ? tr("Connect directly to an nRSP-ST on TCP port 50000 for IQ Lite audio and waterfall. "
-                     "Enter a streaming username and password if authentication is required. The password is not saved. "
+                     "Enter a streaming username and password if authentication is required. Leave the password blank to reuse the saved credential for this username. "
                      "Without control, reception and tuning within the current capture remain available.")
                 : icom
                 ? QStringLiteral(
