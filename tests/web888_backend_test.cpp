@@ -119,6 +119,22 @@ int main(int argc, char** argv)
     pending.disconnectRadio();
     credentials->pendingRead({ KiwiSdrCredentialResultCode::Success, {}, {} });
     CHECK(!pending.client && !pending.isConnected());
+    // Explicit backend credentials must be saved only after admission succeeds.
+    OfflineBackend explicitPassword;
+    RadioConnectRequest explicitRequest;
+    explicitRequest.host = QStringLiteral("explicit.invalid");
+    explicitRequest.params.insert(QStringLiteral("web888.password"), QStringLiteral("accepted-test-secret"));
+    const int writesBefore = credentials->writes;
+    explicitPassword.connectRadio(explicitRequest);
+    CHECK(credentials->writes == writesBefore);
+    emit explicitPassword.client->stateChanged(KiwiSdrClient::State::Connected, {});
+    CHECK(credentials->writes == writesBefore + 1);
+    CHECK(credentials->lastWritten == QStringLiteral("accepted-test-secret"));
+    explicitPassword.disconnectRadio();
+    explicitRequest.params.insert(QStringLiteral("web888.password"), QStringLiteral("rejected-test-secret"));
+    explicitPassword.connectRadio(explicitRequest);
+    emit explicitPassword.client->stateChanged(KiwiSdrClient::State::Error, QStringLiteral("Rejected"));
+    CHECK(credentials->writes == writesBefore + 1);
     OfflineBackend backend;
     const auto caps = backend.capabilities();
     CHECK(!caps.canTransmit && caps.canCreateSlices && !caps.hasDaxStreams);

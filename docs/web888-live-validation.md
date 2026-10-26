@@ -570,3 +570,11 @@ The operator selected stock 12 kHz going forward and is changing that setting
 on the receiver. No persistent receiver setting was changed by this increment.
 Live probe results above establish transport/lifecycle, not a measured input
 sample-rate qualification. Socket-free admission was exercised at 12 kHz.
+
+## Credential regression pending validation - 2026-10-26
+
+Explicit backend passwords now enter the same save-after-admission path as the
+desktop form. A socket-free regression checks that successful admission writes
+the credential and a rejected replacement does not. Validation results will be
+recorded with the combined daily build.
+

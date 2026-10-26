@@ -201,6 +201,8 @@ void Web888Backend::connectRadio(const RadioConnectRequest& request)
     }
     if (request.params.contains(QStringLiteral("web888.password"))) {
         m_password = request.params.value(QStringLiteral("web888.password")).toString();
+        NetworkReceiverCredentials::setSessionPassword(m_endpoint, m_password);
+        m_saveCredentials = !m_password.isEmpty();
         openReceiver(0);
         return;
     }
