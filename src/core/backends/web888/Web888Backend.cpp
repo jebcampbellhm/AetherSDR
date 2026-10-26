@@ -25,7 +25,17 @@ Web888Backend::Web888Backend(QObject* parent) : IRadioBackend(parent)
 {
     m_receivers.emplace(0, std::make_shared<Receiver>());
 }
-Web888Backend::~Web888Backend() { stop(false); }
+Web888Backend::~Web888Backend() { m_receiveLifetime->store(false, std::memory_order_release); stop(false); }
+
+void Web888Backend::setReceiveInterrupted(bool interrupted)
+{
+    if (m_receiveInterrupted == interrupted) { return; }
+    m_receiveInterrupted = interrupted;
+    m_receiveLifetime->store(false, std::memory_order_release);
+    m_receiveLifetime = std::make_shared<std::atomic<bool>>(true);
+    m_receiveSeen.clear();
+    m_decoderRouter.disarmAll();
+}
 
 RadioCapabilities Web888Backend::capabilities() const
 {
@@ -104,12 +114,24 @@ bool Web888Backend::applyDigitalProfile(const QVector<Web888DigitalPreset>& pres
         });
         connect(m_capturePool, &Web888CapturePool::decoderAudioReady, this,
                 [this](const Web888DecoderAudio& audio) {
-            if (!m_connected || m_stopping || !audio.current()) { return; }
+            if (!m_connected || m_stopping || m_receiveInterrupted || !audio.current()) { return; }
             const auto generation = m_generation;
+            Web888DecoderAudio received = audio;
+            received.receiveLifetime = m_receiveLifetime;
+            // Keep markers only for live captures. A pending profile must not
+            // disturb the old profile's continuity before admission commits.
+            std::erase_if(m_receiveSeen, [](const auto& item) {
+                const auto lifetime = item.second.lock();
+                return !lifetime || !lifetime->load(std::memory_order_acquire);
+            });
+            auto& seen = m_receiveSeen[audio.sliceId];
+            received.discontinuity = received.discontinuity || seen.lock() != audio.lifetime;
+            seen = audio.lifetime;
             m_monitorSamples += audio.mono.size();
-            emit digitalAudioReady(audio);
-            if (m_connected && !m_stopping && generation == m_generation && audio.current()) {
-                m_decoderRouter.push(audio);
+            emit digitalAudioReady(received);
+            if (m_connected && !m_stopping && !m_receiveInterrupted
+                && generation == m_generation && received.current()) {
+                m_decoderRouter.push(received);
             }
         });
     }
@@ -126,6 +148,7 @@ bool Web888Backend::applyDigitalProfile(const QVector<Web888DigitalPreset>& pres
 void Web888Backend::stopDigitalProfile()
 {
     m_monitorSamples = 0;
+    m_receiveSeen.clear();
     m_monitorError.clear();
     m_decoderRouter.clear();
     if (m_capturePool) { m_capturePool->stop(); }
@@ -140,14 +163,14 @@ bool Web888Backend::configureDigitalDecoders(const QVector<Web888DigitalPreset>&
 
 bool Web888Backend::armDigitalDecoder(const Web888DecoderAudio& first, const Web888DecoderClockAnchor& anchor)
 {
-    if (!m_connected || m_stopping || !m_capturePool || !first.current()
+    if (!m_connected || m_stopping || m_receiveInterrupted || !m_capturePool || !first.current()
         || !m_capturePool->activeIds().contains(first.captureId)) { return false; }
     return m_decoderRouter.arm(first, anchor);
 }
 
 std::optional<Web888DecoderJob> Web888Backend::takeDigitalDecoderJob()
 {
-    if (!m_connected || m_stopping) { return std::nullopt; }
+    if (!m_connected || m_stopping || m_receiveInterrupted) { return std::nullopt; }
     return m_decoderRouter.takeNext();
 }
 

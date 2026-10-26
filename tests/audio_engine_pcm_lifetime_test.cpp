@@ -283,6 +283,36 @@ public:
 
 namespace {
 
+bool checkStationReceiveInterruption()
+{
+    using namespace AetherSDR;
+    AudioEngine engine;
+    AudioEngineRatesTestAccess::stopTimer(engine);
+    QBuffer output;
+    output.open(QIODevice::ReadWrite);
+    AudioEngineRatesTestAccess::attachMemoryOutput(engine, output);
+    PcmProducer producer;
+    producer.start();
+    PcmReceiveGate receive;
+    const auto input = producer.produce(QVector<float>(960, 0.25f));
+    const auto received = receive.forward(*input);
+    engine.feedPcmFrame(*received);
+    const bool accepted = AudioEngineRatesTestAccess::mainSourceMatches(engine, *received);
+    receive.setInterrupted(true);
+    AudioEngineRatesTestAccess::drain(engine, 960 * sizeof(float));
+    const bool retired = !AudioEngineRatesTestAccess::mainPcmFrameHeld(engine)
+        && engine.rxBufferBytes() == 0 && output.data().isEmpty() && input->current();
+    receive.setInterrupted(false);
+    const auto resumed = receive.forward(*producer.produce(QVector<float>(960, 0.125f)));
+    engine.feedPcmFrame(*resumed);
+    const bool fresh = resumed->discontinuity() && !received->current()
+        && AudioEngineRatesTestAccess::mainSourceMatches(engine, *resumed);
+    AudioEngineRatesTestAccess::detachMemoryOutput(engine);
+    std::printf("%s: station receive hold clears converted speaker buffers without stopping the producer\n",
+                accepted && retired && fresh ? "PASS" : "FAIL");
+    return accepted && retired && fresh;
+}
+
 bool checkMonitorSelection()
 {
     using namespace AetherSDR;
@@ -635,6 +665,7 @@ int main(int argc, char** argv)
     qputenv("AETHER_AUTOMATION", "1");
     QCoreApplication app(argc, argv);
     const bool monitorChecks = checkMonitorSelection();
+    const bool receiveChecks = checkStationReceiveInterruption();
     const bool durationChecks = checkAggregateDurations();
     const bool invalidProcessingChecks = checkInvalidProcessingWithheld();
     const bool revocationDuringDspChecks = checkRevocationDuringDspWithheld();
@@ -701,7 +732,7 @@ int main(int argc, char** argv)
     const bool prepared = AetherSDR::AudioEngineRatesTestAccess::initializeSource(engine, sourceId)
         && AetherSDR::AudioEngineRatesTestAccess::sourcePrepared(engine, sourceId);
     const unsigned initializations = completedInitializations.load(std::memory_order_relaxed);
-    const bool passed = monitorChecks && durationChecks && invalidProcessingChecks && revocationDuringDspChecks
+    const bool passed = monitorChecks && receiveChecks && durationChecks && invalidProcessingChecks && revocationDuringDspChecks
         && deviceRateNrChecks && meterChecks && singleFeedChecks
         && initialized.load(std::memory_order_relaxed)
         && initializations == kRetirementCycles && retiredEpochs == kRetirementCycles && prepared;

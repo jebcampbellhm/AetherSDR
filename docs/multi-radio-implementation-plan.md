@@ -56,6 +56,70 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 19:33 UTC station receive interruption increment:
+
+- RadioStation watches the primary's normalized TX status. An observed TX holds
+  local receive PCM on the primary and additional receivers. Only a current
+  confirmed RX readback releases the hold; optimistic unkey, disconnect reset,
+  another receiver, replaced backend and removed primary cannot release it.
+  New receivers inherit a hold. The station dock displays the waiting state.
+  Connections and waterfalls are not stopped, and no radio setting is written.
+- Receive leases revoke already queued PCM and converted speaker/decoder blocks
+  independently of producer and selected-speaker lifetimes. A thread-boundary
+  revision stamps PCM before Qt delivery: pre-hold queued blocks and samples
+  emitted during the hold cannot reappear after RX. Resumed streams retain their
+  source positions and begin fresh decoder/resampler segments. The backend's
+  unchanged keying-confirmation relay now has the existing generation fence.
+- Web-888 local digital audio receives the same interruption lifetime; timed
+  routes discard partial/waiting work and revoke issued jobs without releasing
+  captures or forgetting the profile/budget. Resume requires fresh qualified
+  anchors. This does not qualify stock firmware UTC or enable timed decoding.
+  Profile marker cleanup follows capture lifetimes, preserving existing streams
+  while a replacement awaits admission or fails. A new regression reproduced
+  and fixed a premature discontinuity during such a pending replacement.
+- Eighteen selected regressions passed in station-rx-final-tests.log, including
+  the new station_receive_interruption_test, decoder conversion/history,
+  memory-only AudioEngine buffer retirement, queued backend replacement, Web-888
+  capture/decoder routing, station ownership, TX permission and offscreen view
+  behavior. A subsequent focused capture-pool regression passed after the final
+  profile-marker fix (station-rx-profile-fixed-test.log); the experimental
+  desktop was rebuilt with that fix. The offscreen UI coverage is still the
+  opt-in spectrum test target; RTL rows remain skipped in this build.
+- Removing the PCM delivery revision check made the new queued-audio assertion
+  fail; restoring it passed. See station-rx-mutant-test.log and
+  station-rx-restored-test.log. The profile rollback test also failed before its
+  fix (station-rx-profile-before-test.log). No mutations remain. Initial family
+  test startup lacked Qt6Test.dll; deploying the matching pinned Qt test DLL to
+  the experimental folder resolved it, and subsequent family/full runs passed.
+- A bounded silent live probe passed: Web-888 360448 normalized audio frames /
+  306 spectra, nRSP-ST 232960 / 100. Selected monitor frames 120832 / 119808;
+  Web-888 continued for 118784 frames after nRSP-ST removal. Selection/removal
+  revoked old monitor frames and Off leaked none. Both sessions released, no
+  AudioEngine/device opened. This validates ordinary simultaneous receive and
+  cleanup, not real TX interruption. Evidence: station-rx-live.json.
+- Experimental desktop build and minimal-PATH startup self-test passed
+  (0 / version 26.10.4). Docs build passed. Boundary (0 blockers / 101 baseline
+  warnings), capability, command-plane, registration, manifest and whitespace
+  checks passed. Build logs: station-rx-final-build.log and
+  station-rx-profile-fixed-build.log; documentation log station-rx-docs.log.
+  Daily executable remains 163880448 bytes, 2026-10-26 10:48:50 local. No app is
+  left running, no probe/build commands remain, and nothing was published.
+- Limits: this is observed-status local muting, not RF protection or a verified
+  sample-exact TX boundary. Already delivered device/external-program audio
+  cannot be recalled. Icom Ethernet status latency, hardware protection and
+  rendered normal desktop/audible behavior remain unqualified. No real TX,
+  reporting or persistent receiver settings were changed; Web-888 stays 12 kHz.
+
+NEXT: review additional-receiver speaker/device lifecycle when the primary is
+offline (currently still depends on the primary connection). Start with
+MainWindow_Session.cpp wireMonitorAudio / station workspace wiring and existing
+AudioEngine lifecycle, preserve PC Audio OFF and selected-only routing. Then
+review teardown/reconnect and remaining per-radio controls. Use memory sinks,
+socket-free fixtures and bounded silent probes; no GUI polling or real TX.
+Icom remains offline. Continue only until 21:30 UTC; pause automation then.
+
+### Earlier transmit permission checkpoint
+
 2026-10-26 18:48 UTC station transmit permission increment:
 
 - Additional RadioStation sessions are explicitly receive-only in the engine,

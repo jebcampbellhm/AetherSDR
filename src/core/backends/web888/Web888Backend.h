@@ -18,6 +18,7 @@ public:
     explicit Web888Backend(QObject* parent = nullptr);
     ~Web888Backend() override;
     RadioCapabilities capabilities() const override;
+    void setReceiveInterrupted(bool interrupted) override;
     bool ownsRxAudio() const override { return true; }
     bool isConnected() const override { return m_connected; }
     void connectRadio(const RadioConnectRequest& request) override;
@@ -103,6 +104,9 @@ private:
     std::map<int, std::shared_ptr<Receiver>> m_listeners;
     Web888CapturePool* m_capturePool{nullptr};
     Web888DecoderRouter m_decoderRouter;
+    bool m_receiveInterrupted{false};
+    std::map<int, std::weak_ptr<const std::atomic<bool>>> m_receiveSeen;
+    std::shared_ptr<std::atomic<bool>> m_receiveLifetime = std::make_shared<std::atomic<bool>>(true);
     QString m_reportedVersion;
     QString m_monitorError;
     quint64 m_monitorSamples{0};

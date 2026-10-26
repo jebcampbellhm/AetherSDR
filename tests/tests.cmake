@@ -4485,6 +4485,11 @@ add_test(NAME monitor_audio_router_test COMMAND monitor_audio_router_test)
 set_tests_properties(monitor_audio_router_test PROPERTIES TIMEOUT 15)
 
 # Socket-free independent model ownership and queued audio selection fencing.
+add_executable(station_receive_interruption_test tests/station_receive_interruption_test.cpp)
+target_link_libraries(station_receive_interruption_test PRIVATE aethercore)
+add_test(NAME station_receive_interruption_test COMMAND station_receive_interruption_test)
+set_tests_properties(station_receive_interruption_test PROPERTIES TIMEOUT 30)
+
 add_executable(radio_station_test tests/radio_station_test.cpp)
 target_link_libraries(radio_station_test PRIVATE aethercore)
 add_test(NAME radio_station_test COMMAND radio_station_test)
@@ -9966,6 +9971,7 @@ endif()
 
 set(AETHER_SETTINGS_CONSUMERS
     radio_station_test
+    station_receive_interruption_test
     radio_station_live_probe
     update_installer_test
     update_stager_test

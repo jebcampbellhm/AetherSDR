@@ -344,16 +344,21 @@ int main(int argc, char** argv)
             switchTo(model, QStringLiteral("sim"), rebuilt);
             IRadioBackend* outgoing = model.backend();
             QSignalSpy frames(&model, &RadioModel::panFeedSpectrumReady);
+            QSignalSpy confirmations(&model, &RadioModel::radioTransmitConfirmed);
             const float value = -80.0f;
             const QByteArray frame(reinterpret_cast<const char*>(&value), sizeof(value));
             const SpectrumCoverage coverage{frame, 99.0, 101.0};
             std::thread enqueue([outgoing, frame, coverage] {
                 emit outgoing->spectrumFrameReady(0, frame, coverage);
+                emit outgoing->keyingStateConfirmed(false);
             });
             enqueue.join();
             switchTo(model, QStringLiteral("hl2"), rebuilt);
             spin(100);
             check(frames.isEmpty(), "stale spectrum cannot inherit replacement backend geometry");
+            check(confirmations.isEmpty(), "stale RX confirmation cannot release a replacement station");
+            emit model.backend()->keyingStateConfirmed(false);
+            check(confirmations.size() == 1, "current unchanged RX confirmation reaches the station");
             emit model.backend()->spectrumFrameReady(0, frame);
             check(frames.size() == 1, "current backend spectrum still reaches the feed");
         }

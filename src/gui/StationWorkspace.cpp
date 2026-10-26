@@ -37,6 +37,15 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
     });
     m_hint = new QLabel(tr("Use your transmit radio as primary and add receivers here. Additional receivers cannot transmit. Listen to changes audio only."), bodyWidget());
     m_hint->setWordWrap(true); header->addWidget(m_hint, 1); layout->addLayout(header);
+    auto* receiveStatus = new QLabel(tr("Station receive audio active"), bodyWidget());
+    receiveStatus->setWordWrap(true);
+    layout->addWidget(receiveStatus);
+    connect(&m_station, &RadioStation::receiveInterruptionChanged, receiveStatus, [receiveStatus](bool held) {
+        receiveStatus->setText(held
+            ? tr("Receive audio paused: waiting for confirmed RX from the primary radio.")
+            : tr("Station receive audio active"));
+    });
+    m_station.watchTransmitter(primary);
     m_transmitPrimary = new QCheckBox(tr("Allow transmit on primary radio"), bodyWidget());
     m_transmitPrimary->setObjectName(QStringLiteral("stationTransmitPrimary"));
     m_transmitPrimary->setAccessibleDescription(tr("Explicitly designate the primary radio for transmit. This does not key it. Permission clears on disconnect."));

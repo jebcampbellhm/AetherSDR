@@ -934,6 +934,8 @@ public:
     // changing the role never keys the radio or grants capability it lacks.
     bool setStationTransmitAllowed(bool allowed);
     bool stationTransmitAllowed() const { return m_txCoordinator.transmitAllowed(); }
+    void setStationReceiveInterrupted(bool interrupted);
+    bool stationReceiveInterrupted() const { return m_stationReceiveGate.interrupted(); }
     // Trusted composition only. A producer is a lifetime, not an actor grant.
     TxCoordinator::Producer registerTxProducer(QObject* lifetime, bool continuousMicrophone = false);
     // Plain engine protocol objects invalidate this handle in their destructor.
@@ -2746,6 +2748,10 @@ private:
     // wireBackendPcm()/wireRxDemodAudioBus(). Data, not slots.
     PcmFrameGate m_backendPcmGate;
     PcmFrameGate m_slicePcmGate;
+    PcmReceiveGate m_stationReceiveGate;
+    // Stamped on the emitting thread before Qt queues delivery. Odd = held.
+    std::shared_ptr<std::atomic<quint64>> m_stationReceiveRevision =
+        std::make_shared<std::atomic<quint64>>(0);
     PcmFrameGate m_demodPcmGate;
 };
 

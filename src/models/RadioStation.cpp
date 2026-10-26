@@ -1,10 +1,54 @@
 #include "models/RadioStation.h"
 #include <QPointer>
 #include <limits>
+#include <utility>
 
 namespace AetherSDR {
 RadioStation::RadioStation(QObject* parent) : QObject(parent) {}
-RadioStation::~RadioStation() = default;
+RadioStation::~RadioStation()
+{
+    for (const auto& connection : std::as_const(m_transmitterConnections)) { disconnect(connection); }
+    if (m_transmitter) { m_transmitter->setStationReceiveInterrupted(false); }
+}
+
+void RadioStation::watchTransmitter(RadioModel* primary)
+{
+    if (m_transmitter == primary) { return; }
+    for (const auto& connection : std::as_const(m_transmitterConnections)) { disconnect(connection); }
+    m_transmitterConnections.clear();
+    if (m_transmitter) { m_transmitter->setStationReceiveInterrupted(false); }
+    m_transmitter = primary;
+    const auto revision = ++m_transmitterRevision;
+    if (!primary) { return; } // Losing observation is not proof that TX stopped.
+    m_transmitterConnections.append(connect(primary, &RadioModel::radioTransmittingChanged, this,
+        [this, revision](bool keyed) {
+            if (m_transmitter && revision == m_transmitterRevision && keyed) { setReceiveInterrupted(true); }
+        }));
+    m_transmitterConnections.append(connect(primary, &RadioModel::radioTransmitConfirmed, this,
+        [this, revision](bool keyed) {
+            if (m_transmitter && revision == m_transmitterRevision) { setReceiveInterrupted(keyed); }
+        }));
+    // An optimistic unkey or disconnect reset cannot resume interrupted audio.
+    // The next accepted RX readback may be unchanged and must still release it.
+    primary->setStationReceiveInterrupted(m_receiveInterrupted);
+    if (primary->isRadioTransmitting()) { setReceiveInterrupted(true); }
+}
+
+void RadioStation::setReceiveInterrupted(bool interrupted)
+{
+    if (m_receiveInterrupted == interrupted) { return; }
+    m_receiveInterrupted = interrupted;
+    const auto revision = ++m_receiveRevision;
+    const QPointer<RadioStation> alive(this);
+    if (m_transmitter) { m_transmitter->setStationReceiveInterrupted(interrupted); }
+    if (!alive || revision != m_receiveRevision) { return; }
+    const auto ids = sessionIds();
+    for (int id : ids) {
+        if (auto* value = session(id)) { value->radioModel().setStationReceiveInterrupted(interrupted); }
+        if (!alive || revision != m_receiveRevision) { return; }
+    }
+    emit receiveInterruptionChanged(m_receiveInterrupted);
+}
 
 int RadioStation::addSession(const QString& label)
 {
@@ -14,6 +58,7 @@ int RadioStation::addSession(const QString& label)
     // Additional sessions are receivers. Focus and speaker selection cannot
     // confer TX authority, even if a transmit-capable backend is connected.
     value->radioModel().setStationTransmitAllowed(false);
+    value->radioModel().setStationReceiveInterrupted(m_receiveInterrupted);
     value->setSessionId(id);
     value->setLabel(label);
     connect(&value->radioModel(), &RadioModel::rxDemodAudioReady, this,

@@ -178,8 +178,19 @@ and invalidates queued keying/audio. This does not disable the radio's physical
 PTT, front-panel controls or other clients. If the stop is not confirmed,
 the existing recovery interlock remains closed; reconnect before transmitting
 again rather than treating the permission checkbox as a stop acknowledgment.
-Icom Ethernet operation in a three-radio station has not yet been hardware
-validated. This preview does not provide RF protection or coordinated TX muting.
+When the primary reports transmission, the station pauses its local receive
+audio and decoder feeds for all three radios. Connections and waterfalls stay
+running. Queued receive audio and incomplete Web-888 decoder periods are
+discarded. The station waits for confirmed receive status before resuming;
+releasing a button or losing the connection does not confirm that transmission
+has stopped. The dock displays this waiting state. A resumed decoder stream
+starts a fresh segment; timed Web-888 jobs also need a fresh verified clock
+anchor. This does not enable timed decoding on unqualified firmware.
+
+This is local audio/data muting, not RF protection, and cannot mute samples
+already sent to a speaker device or another program. Keep the hardware receive
+cutoff in your antenna arrangement. Icom Ethernet operation and transmit-status
+timing in a three-radio station have not yet been hardware validated.
 
 ## See also
 

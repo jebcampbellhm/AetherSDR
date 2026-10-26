@@ -1281,7 +1281,9 @@ void RadioModel::setupBackend(const QString& family)
                 }
             });
     connect(m_backend.get(), &IRadioBackend::keyingStateConfirmed,
-            this, &RadioModel::radioTransmitConfirmed);
+            this, [this, generation](bool keyed) {
+                if (generation == m_backendReceiverGeneration) { emit radioTransmitConfirmed(keyed); }
+            });
 
     // aetherd 2.4 (#4094): power-amp status decoded in the backend drives AmpModel.
     connect(m_backend.get(), &IRadioBackend::amplifierChanged, this,
@@ -3081,28 +3083,48 @@ int RadioModel::activeTxSliceNum() const
     return -1;
 }
 
+namespace {
+// Called on the producer thread, before any Qt queue. Only the shared atomic
+// is read there; model state and stream gates remain on the model's thread.
+template<typename Deliver>
+void deliverStationPcm(QObject* receiver, const std::shared_ptr<std::atomic<quint64>>& revision,
+                       Deliver deliver)
+{
+    const auto emittedRevision = revision->load(std::memory_order_acquire);
+    if (emittedRevision & 1) { return; }
+    QMetaObject::invokeMethod(receiver, [revision, emittedRevision, deliver = std::move(deliver)] {
+        if (revision->load(std::memory_order_acquire) == emittedRevision) { deliver(); }
+    }, Qt::AutoConnection);
+}
+}
+
 void RadioModel::wireBackendPcm()
 {
+    m_backend->setReceiveInterrupted(m_stationReceiveGate.interrupted());
     const quint64 generation = m_backendReceiverGeneration;
     connect(m_backend.get(), &IRadioBackend::audioFrameReady, this,
-            [this, generation](const PcmFrame& frame) {
-        if (generation != m_backendReceiverGeneration
-            || frame.stream().purpose != PcmPurpose::Speaker
-            || !m_backendPcmGate.accept(frame)) {
-            return;
-        }
-        m_lastAudioMs = QDateTime::currentMSecsSinceEpoch();
-        emit backendAudioFrameReady(frame);
-    });
+            [this, generation, revision = m_stationReceiveRevision](const PcmFrame& frame) {
+        deliverStationPcm(this, revision, [this, generation, frame] {
+            if (generation != m_backendReceiverGeneration
+                || frame.stream().purpose != PcmPurpose::Speaker
+                || !m_backendPcmGate.accept(frame)) {
+                return;
+            }
+            m_lastAudioMs = QDateTime::currentMSecsSinceEpoch();
+            if (const auto received = m_stationReceiveGate.forward(frame)) { emit backendAudioFrameReady(*received); }
+        });
+    }, Qt::DirectConnection);
     connect(m_backend.get(), &IRadioBackend::sliceAudioFrameReady, this,
-            [this, generation](int sliceId, const PcmFrame& frame) {
-        if (generation != m_backendReceiverGeneration
-            || frame.stream().purpose != PcmPurpose::Slice
-            || frame.stream().sliceId != sliceId || !m_slicePcmGate.accept(frame)) {
-            return;
-        }
-        emit backendSliceAudioFrameReady(sliceId, frame);
-    });
+            [this, generation, revision = m_stationReceiveRevision](int sliceId, const PcmFrame& frame) {
+        deliverStationPcm(this, revision, [this, generation, sliceId, frame] {
+            if (generation != m_backendReceiverGeneration
+                || frame.stream().purpose != PcmPurpose::Slice
+                || frame.stream().sliceId != sliceId || !m_slicePcmGate.accept(frame)) {
+                return;
+            }
+            if (const auto received = m_stationReceiveGate.forward(frame)) { emit backendSliceAudioFrameReady(sliceId, *received); }
+        });
+    }, Qt::DirectConnection);
 }
 
 void RadioModel::wireRxDemodAudioBus()
@@ -3131,13 +3153,25 @@ void RadioModel::wireRxDemodAudioBus()
         // Flex: publish the VITA-49 speaker stream through the same bus as
         // seam-native audio. Speaker selection and decoder taps subscribe here.
         m_rxDemodBusConn = connect(m_panStream, &PanadapterStream::pcmFrameReady,
-                                   this, [this](const PcmFrame& frame) {
-            if (!m_demodPcmGate.accept(frame)) {
-                return;
-            }
-            emit rxDemodAudioReady(frame);
-        });
+                                   this, [this, generation = m_backendReceiverGeneration,
+                                          revision = m_stationReceiveRevision](const PcmFrame& frame) {
+            deliverStationPcm(this, revision, [this, generation, frame] {
+                if (generation != m_backendReceiverGeneration) { return; }
+                if (!m_demodPcmGate.accept(frame)) {
+                    return;
+                }
+                if (const auto received = m_stationReceiveGate.forward(frame)) { emit rxDemodAudioReady(*received); }
+            });
+        }, Qt::DirectConnection);
     }
+}
+
+void RadioModel::setStationReceiveInterrupted(bool interrupted)
+{
+    if (QThread::currentThread() != thread() || interrupted == m_stationReceiveGate.interrupted()) { return; }
+    m_stationReceiveRevision->fetch_add(1, std::memory_order_acq_rel);
+    m_stationReceiveGate.setInterrupted(interrupted);
+    if (m_backend) { m_backend->setReceiveInterrupted(interrupted); }
 }
 
 // See the header for why this falls back and why the key is station-wide.

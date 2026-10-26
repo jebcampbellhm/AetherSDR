@@ -25,10 +25,15 @@ int Web888DecoderRouter::disarmCapture(quint64 captureId)
 
 void Web888DecoderRouter::clear()
 {
-    for (auto& [id, route] : m_routes) invalidate(route);
+    disarmAll();
     m_routes.clear();
     m_reservedBytes = 0;
     m_lastTaken.reset();
+}
+
+void Web888DecoderRouter::disarmAll()
+{
+    for (auto& [id, route] : m_routes) { invalidate(route); }
 }
 
 bool Web888DecoderRouter::configure(const QVector<Web888DigitalPreset>& presets,

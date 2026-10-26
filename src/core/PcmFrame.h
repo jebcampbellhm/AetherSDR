@@ -70,15 +70,19 @@ public:
     bool current() const
     {
         return m_epoch && m_epoch->active.load(std::memory_order_acquire)
-            && (!m_routeLease || m_routeLease->load(std::memory_order_acquire));
+            && (!m_routeLease || m_routeLease->load(std::memory_order_acquire))
+            && (!m_receiveLease || m_receiveLease->load(std::memory_order_acquire));
     }
 private:
     friend class PcmFrame;
     explicit PcmEpochLease(std::shared_ptr<const detail::PcmEpoch> epoch,
-                           std::shared_ptr<const std::atomic<bool>> routeLease = {})
-        : m_epoch(std::move(epoch)), m_routeLease(std::move(routeLease)) {}
+                           std::shared_ptr<const std::atomic<bool>> routeLease = {},
+                           std::shared_ptr<const std::atomic<bool>> receiveLease = {})
+        : m_epoch(std::move(epoch)), m_routeLease(std::move(routeLease)),
+          m_receiveLease(std::move(receiveLease)) {}
     std::shared_ptr<const detail::PcmEpoch> m_epoch;
     std::shared_ptr<const std::atomic<bool>> m_routeLease;
+    std::shared_ptr<const std::atomic<bool>> m_receiveLease;
 };
 
 // Owning native-endian, interleaved IEEE float32 PCM. Metadata and samples are
@@ -100,9 +104,10 @@ public:
     bool current() const
     {
         return m_epoch && m_epoch->active.load(std::memory_order_acquire)
-            && (!m_routeLease || m_routeLease->load(std::memory_order_acquire));
+            && (!m_routeLease || m_routeLease->load(std::memory_order_acquire))
+            && (!m_receiveLease || m_receiveLease->load(std::memory_order_acquire));
     }
-    PcmEpochLease epochLease() const { return PcmEpochLease(m_epoch, m_routeLease); }
+    PcmEpochLease epochLease() const { return PcmEpochLease(m_epoch, m_routeLease, m_receiveLease); }
 
     // Compatibility boundary ONLY. Refuse formats the existing 24 kHz stereo
     // consumers cannot interpret; never resample, downmix, clip or relabel.
@@ -118,10 +123,12 @@ public:
 
 private:
     friend class MonitorAudioRouter;
+    friend class PcmReceiveGate;
     friend class PcmProducer;
     friend class PcmFrameGate;
     std::shared_ptr<const detail::PcmEpoch> m_epoch;
     std::shared_ptr<const std::atomic<bool>> m_routeLease;
+    std::shared_ptr<const std::atomic<bool>> m_receiveLease;
     QVector<float> m_samples;
     quint64 m_firstSample = 0;
     bool m_discontinuity = false;
@@ -290,6 +297,47 @@ private:
         quint64 nextSample = 0;
     };
     std::array<Cursor, kMaxStreams> m_cursors;
+};
+
+// Local station receive interruption. Keeps producer identities and sample
+// positions intact while revoking queued decoder/speaker copies, independently
+// of the speaker selection lease. One gate per model, owner-thread only.
+class PcmReceiveGate final {
+public:
+    PcmReceiveGate() = default;
+    PcmReceiveGate(const PcmReceiveGate&) = delete;
+    PcmReceiveGate& operator=(const PcmReceiveGate&) = delete;
+    ~PcmReceiveGate() { m_lifetime->store(false, std::memory_order_release); }
+    bool interrupted() const { return m_interrupted; }
+    void setInterrupted(bool interrupted) {
+        if (m_interrupted == interrupted) { return; }
+        m_interrupted = interrupted;
+        m_lifetime->store(false, std::memory_order_release);
+        m_lifetime = std::make_shared<std::atomic<bool>>(true);
+        m_seen = {};
+    }
+    std::optional<PcmFrame> forward(const PcmFrame& input) {
+        if (m_interrupted || !input.current() || input.m_receiveLease) { return {}; }
+        bool first = true;
+        std::weak_ptr<const detail::PcmEpoch>* available = nullptr;
+        for (auto& seen : m_seen) {
+            const auto epoch = seen.lock();
+            if (epoch == input.m_epoch) { first = false; break; }
+            if (!epoch || !epoch->active.load(std::memory_order_acquire)) { available = &seen; }
+        }
+        if (first) {
+            if (!available) { return {}; }
+            *available = input.m_epoch;
+        }
+        PcmFrame output = input;
+        output.m_receiveLease = m_lifetime;
+        output.m_discontinuity = output.m_discontinuity || first;
+        return output;
+    }
+private:
+    bool m_interrupted{false};
+    std::shared_ptr<std::atomic<bool>> m_lifetime = std::make_shared<std::atomic<bool>>(true);
+    std::array<std::weak_ptr<const detail::PcmEpoch>, PcmFrameGate::kMaxStreams> m_seen;
 };
 
 } // namespace AetherSDR

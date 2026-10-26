@@ -28,7 +28,9 @@ struct Web888DecoderAudio {
     quint64 firstSampleIndex{}; // relative to this uninterrupted run, including discarded startup
     double filterDelaySeconds{}; // FIR group delay; not transport latency or UTC
     std::shared_ptr<const std::atomic<bool>> lifetime;
-    bool current() const { return lifetime && lifetime->load(std::memory_order_acquire); }
+    std::shared_ptr<const std::atomic<bool>> receiveLifetime;
+    bool current() const { return lifetime && lifetime->load(std::memory_order_acquire)
+        && (!receiveLifetime || receiveLifetime->load(std::memory_order_acquire)); }
 };
 
 // Bounded streaming reference implementation. No threads or hidden work queue.
