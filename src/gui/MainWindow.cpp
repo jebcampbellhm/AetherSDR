@@ -7948,10 +7948,18 @@ void MainWindow::applyCapabilitiesToUi(bool connected, const RadioCapabilities& 
     {
         const bool radioOwnsScale = !connected || caps.radioOwnsDbmScale;
         const bool binsAbsolute = connected && caps.panBinsAbsolute();
-        const QList<SpectrumWidget*> spectra = findChildren<SpectrumWidget*>();
-        for (SpectrumWidget* spectrum : spectra) {
-            spectrum->setRadioOwnsDbmScale(radioOwnsScale);
-            spectrum->setPanBinsAbsolute(binsAbsolute);
+        const auto apply = [=](SpectrumWidget* view) {
+            if (view) {
+                view->setRadioOwnsDbmScale(radioOwnsScale);
+                view->setPanBinsAbsolute(binsAbsolute);
+            }
+        };
+        if (m_panStack) {
+            for (auto* applet : m_panStack->allApplets()) {
+                if (applet) { apply(m_panStack->spectrum(applet->panId())); }
+            }
+        } else {
+            apply(spectrum());
         }
     }
     syncSquelchScaleToUi();

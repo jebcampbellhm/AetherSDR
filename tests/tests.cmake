@@ -2628,14 +2628,29 @@ if(AETHER_BUILD_SPECTRUM_GESTURE_TEST)
         $<TARGET_PROPERTY:AetherSDR,COMPILE_OPTIONS>)
     target_link_libraries(spectrum_confirmed_geometry_test PRIVATE
         $<TARGET_PROPERTY:AetherSDR,LINK_LIBRARIES>)
+    if(WIN32 AND TARGET Qt6::QOffscreenIntegrationPlugin)
+        # Desktop deployment normally copies only qwindows. This opt-in lane
+        # needs the matching offscreen plugin, without opening a native window.
+        add_custom_command(TARGET spectrum_confirmed_geometry_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:spectrum_confirmed_geometry_test>/platforms"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+                "$<TARGET_FILE_DIR:spectrum_confirmed_geometry_test>/platforms"
+            VERBATIM)
+    endif()
     add_test(NAME spectrum_confirmed_geometry_test COMMAND spectrum_confirmed_geometry_test)
+    add_test(NAME station_display_isolation_test
+        COMMAND spectrum_confirmed_geometry_test --station-display-isolation)
+    set_tests_properties(station_display_isolation_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
     set_tests_properties(spectrum_confirmed_geometry_test PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1")
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
     # Same binary at a Retina device pixel ratio: pins the Flex pan xpixels cap.
     add_test(NAME spectrum_pan_pixels_retina_test
         COMMAND spectrum_confirmed_geometry_test --pan-pixels-retina)
     set_tests_properties(spectrum_pan_pixels_retina_test PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2;AETHER_AUTOMATION_NO_TX=1")
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
 endif()
 
 add_executable(pan_frame_guard_test tests/pan_frame_guard_test.cpp)

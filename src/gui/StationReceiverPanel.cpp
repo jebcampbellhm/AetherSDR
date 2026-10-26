@@ -94,6 +94,7 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
         refreshControls();
     });
     connect(m_model, &RadioModel::connectionError, this, [this](const QString& error) { m_status->setText(error); });
+    connect(m_model, &RadioModel::capabilitiesChanged, this, &StationReceiverPanel::applyCapabilities);
     connect(m_model, &RadioModel::panadapterAdded, this, &StationReceiverPanel::addPan);
     connect(m_model, &RadioModel::panadapterRemoved, this, &StationReceiverPanel::removePan);
     connect(m_model, &RadioModel::sliceAdded, this, &StationReceiverPanel::addSlice);
@@ -150,6 +151,14 @@ void StationReceiverPanel::refreshSlices()
     if (index >= 0) { m_slice->setCurrentIndex(index); }
     refreshControls(); refreshOverlays();
 }
+void StationReceiverPanel::applyCapabilities(bool connected, const RadioCapabilities& caps)
+{
+    for (const auto& view : std::as_const(m_pans)) {
+        view.spectrum->setRadioOwnsDbmScale(!connected || caps.radioOwnsDbmScale);
+        view.spectrum->setPanBinsAbsolute(connected && caps.panBinsAbsolute());
+    }
+    refreshControls();
+}
 void StationReceiverPanel::refreshControls()
 {
     const auto* slice = selectedSlice();
@@ -199,7 +208,7 @@ void StationReceiverPanel::addSlice(SliceModel* slice)
 void StationReceiverPanel::addPan(PanadapterModel* pan)
 {
     if (!pan || m_pans.contains(pan->panId())) { return; }
-    auto* spectrum = new SpectrumWidget(bodyWidget());
+    auto* spectrum = new SpectrumWidget(bodyWidget(), SpectrumWidget::SettingsPersistence::SessionOnly);
     spectrum->setMinimumHeight(180);
     if (auto* menu = spectrum->overlayMenu()) {
         menu->setEnabled(false);
@@ -211,6 +220,7 @@ void StationReceiverPanel::addPan(PanadapterModel* pan)
     spectrum->observeFrequencyRange(pan->centerMhz(), pan->bandwidthMhz());
     spectrum->setDbmRange(pan->minDbm(), pan->maxDbm());
     m_pans.insert(pan->panId(), {pan, spectrum}); m_pansLayout->addWidget(spectrum, 1);
+    applyCapabilities(m_model->isConnected(), m_model->backendCapabilities());
     connect(pan, &PanadapterModel::infoChanged, spectrum, &SpectrumWidget::observeFrequencyRange);
     connect(pan, &PanadapterModel::levelChanged, spectrum, &SpectrumWidget::setDbmRange);
     QPointer<PanadapterModel> guardedPan(pan);

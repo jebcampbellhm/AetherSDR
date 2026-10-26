@@ -135,7 +135,11 @@ class SpectrumWidget : public SPECTRUM_BASE_CLASS {
     Q_PROPERTY(double wfRowHighMhz READ wfRowHighMhz)
 
 public:
-    explicit SpectrumWidget(QWidget* parent = nullptr);
+    enum class SettingsPersistence { Persistent, SessionOnly };
+    // Session-only panels seed their appearance once, then keep local edits
+    // in this widget. They never write the primary pan's settings or migrate it.
+    explicit SpectrumWidget(QWidget* parent = nullptr,
+                            SettingsPersistence persistence = SettingsPersistence::Persistent);
     ~SpectrumWidget() override;
 
     // Per-pan settings persistence
@@ -1778,6 +1782,12 @@ private:
     double m_maxBwMhz{5.400};   // safe default for unknown radios
 
     // ── FFT display controls (radio-side via "display pan set") ──────────
+    const SettingsPersistence m_settingsPersistence;
+    bool m_settingsLoaded{false};
+    bool hasPersistentDisplaySettings() const {
+        return m_settingsPersistence == SettingsPersistence::Persistent;
+    }
+    void saveDisplaySetting(const QString& key, const QVariant& value);
     int   m_panIndex{0};             // per-pan settings index (0, 1, 2, 3)
     int   m_fftAverage{0};           // 0=off, 1-10 frames
     bool  m_fftWeightedAvg{false};

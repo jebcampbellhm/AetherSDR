@@ -15,6 +15,7 @@ class RadioModel;
 class SliceModel;
 class PanadapterModel;
 class SpectrumWidget;
+struct RadioCapabilities;
 
 // Every pane and intent belongs to this one model; IDs never cross radios.
 class StationReceiverPanel final : public CanonCanvas {
@@ -32,6 +33,7 @@ private:
     void addSlice(SliceModel* slice);
     void refreshSlices();
     void refreshControls();
+    void applyCapabilities(bool connected, const RadioCapabilities& caps);
     void refreshOverlays();
     SliceModel* selectedSlice() const;
     const int m_sessionId;

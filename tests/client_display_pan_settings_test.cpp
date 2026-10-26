@@ -43,7 +43,8 @@ static QString readSource(const char* relative)
 {
     QFile file(QStringLiteral(AETHER_SOURCE_DIR) + QLatin1Char('/')
                + QLatin1String(relative));
-    if (!file.open(QIODevice::ReadOnly)) {
+    // Match source statements independently of the checkout's LF/CRLF policy.
+    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         return {};
     }
     return QString::fromUtf8(file.readAll());

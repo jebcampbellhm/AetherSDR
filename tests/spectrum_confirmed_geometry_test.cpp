@@ -5,16 +5,25 @@
 #include "gui/VfoWidget.h"
 #include "gui/SpectrumOverlayMenu.h"
 #include "gui/MainWindowHelpers.h"
+#include "gui/DisplaySettings.h"
+#include "gui/StationReceiverPanel.h"
+#include "core/AppSettings.h"
+#include "core/SpectrumDecodeScale.h"
+#include "models/RadioSession.h"
+#ifdef AETHER_BACKEND_RTL
 #include "RtlInjectedDevice.h"
+#include "core/backends/rtl/RtlSdrBackend.h"
+#endif
 #include "core/backends/flex/FlexBackend.h"
 #include "core/backends/hl2/Hl2Backend.h"
-#include "core/backends/rtl/RtlSdrBackend.h"
 #include "models/SliceModel.h"
 #include "models/PanadapterModel.h"
 #include "models/BandPlanManager.h"
 #include <QImage>
 #include <QToolTip>
 #include <QPainter>
+#include <QMap>
+#include <QVariant>
 
 #include <QApplication>
 #include <QMouseEvent>
@@ -25,6 +34,7 @@
 #include <QPushButton>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 using namespace AetherSDR;
 
@@ -108,6 +118,7 @@ struct SpectrumOffscreenTestAccess {
     }
 };
 }
+#ifdef AETHER_BACKEND_RTL
 namespace AetherSDR::rtl {
 struct RtlCaptureBackendTestAccess {
     static void start(RtlSdrBackend& backend, std::unique_ptr<RtlSdrWorker::Device> device) {
@@ -118,6 +129,7 @@ struct RtlCaptureBackendTestAccess {
     static bool idle(const RtlSdrBackend& backend) { return !backend.m_capture.busy() && !backend.m_pendingDrag; }
 };
 }
+#endif
 namespace AetherSDR::hl2 {
 struct Hl2DspReadbackTestAccess {
     static void receiver(Hl2Backend& backend) {
@@ -157,7 +169,8 @@ int runPanPixelsAtRetinaScale()
         std::printf("[%s] %s\n", ok ? "OK" : "FAIL", name);
         failures += !ok;
     };
-    SpectrumWidget pan;
+    auto panStorage = std::make_unique<SpectrumWidget>();
+    auto& pan = *panStorage;
     pan.resize(1000, 600);
     const double ratio = pan.devicePixelRatioF();
     if (!near(ratio, 2.0)) {
@@ -180,10 +193,134 @@ int runPanPixelsAtRetinaScale()
 }
 }
 
+// Real widgets, isolated settings database, no window shown or radio opened.
+static int runStationDisplayIsolation()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", name);
+        failures += !ok;
+    };
+    auto& settings = AppSettings::instance();
+    settings.load();
+    QWidget parent;
+    auto primaryStorage = std::make_unique<SpectrumWidget>(&parent);
+    auto& primary = *primaryStorage;
+    primary.setSpectrumFrac(0.4f);
+    primary.setWfColorGain(50);
+    primary.setShowTuneGuides(false);
+    primary.setShowFpsMeters(false);
+    primary.setExtendedPassband(false);
+    primary.setExtendedTnf(false);
+    primary.setThreeDSliceDepth(false);
+    // A transient constructor must not run the primary slot's migration.
+    settings.setValue("DisplayFftAverage", "42");
+    settings.save();
+    const auto snapshot = [&] {
+        QMap<QString, QVariant> result;
+        for (const QString& key : settings.allKeysForDiagnostics()) { result.insert(key, settings.value(key)); }
+        return result;
+    };
+    const auto before = snapshot();
+    auto firstStorage = std::make_unique<SpectrumWidget>(&parent, SpectrumWidget::SettingsPersistence::SessionOnly);
+    auto& first = *firstStorage;
+    auto secondStorage = std::make_unique<SpectrumWidget>(&parent, SpectrumWidget::SettingsPersistence::SessionOnly);
+    auto& second = *secondStorage;
+    check(first.wfColorGain() == 50 && second.wfColorGain() == 50,
+          "extra panels seed the current appearance");
+    first.setSpectrumFrac(0.7f);
+    first.setWfColorGain(72);
+    first.setWfBlackLevel(31);
+    first.setWfAutoBlack(false);
+    first.setFftSmoothing(3);
+    first.setFftDecombHz(100);
+    first.setDssGain(40);
+    first.setDssFloorDepth(10);
+    first.setShowGrid(false);
+    first.setShowTuneGuides(true);
+    first.setShowFpsMeters(true);
+    first.setExtendedPassband(true);
+    first.setExtendedTnf(true);
+    first.setThreeDSliceDepth(true);
+    first.setWaterfallTimeMarkerSeconds(15);
+    first.setPanIndex(1);
+    first.loadSettings();
+    settings.save();
+    check(snapshot() == before, "extra panel edits and construction leave shared settings unchanged");
+    QString disk;
+    check(settings.readAppRowFromDisk("SpectrumSplitRatio", disk) && disk == "0.400"
+          && settings.readAppRowFromDisk("DisplayFftAverage", disk) && disk == "42",
+          "primary layout and legacy rows remain unchanged on disk");
+    check(std::abs(first.spectrumFrac() - 0.7f) < 0.001f && first.wfColorGain() == 72
+          && first.waterfallTimeMarkerSeconds() == 15 && first.fftSmoothing() == 3,
+          "local edits survive reload and pan-index changes");
+    check(!primary.showTuneGuides() && !primary.showFpsMeters() && !primary.extendedPassband()
+          && !primary.extendedTnf() && !primary.threeDSliceDepth()
+          && !second.showTuneGuides() && !second.showFpsMeters() && second.wfColorGain() == 50,
+          "local edits do not propagate to primary or another receiver");
+    primary.setShowTuneGuides(true);
+    primary.setShowFpsMeters(true);
+    primary.setExtendedPassband(true);
+    primary.setExtendedTnf(true);
+    primary.setThreeDSliceDepth(true);
+    primary.setSpectrumFrac(0.3f);
+    primary.setWfColorGain(60);
+    second.loadSettings();
+    check(!second.showTuneGuides() && !second.showFpsMeters() && !second.extendedPassband()
+          && !second.extendedTnf() && !second.threeDSliceDepth() && second.wfColorGain() == 50
+          && std::abs(second.spectrumFrac() - 0.4f) < 0.001f,
+          "primary edits and global display broadcasts cannot overwrite extra receivers");
+    check(settings.readAppRowFromDisk("SpectrumSplitRatio", disk) && disk == "0.300"
+          && DisplaySettings::extendedPassband(), "primary display settings still persist");
+    primary.prepareForShutdown(); first.prepareForShutdown(); second.prepareForShutdown();
+
+    // Identical per-radio stream IDs must still address different view owners.
+    RadioSession firstRadio, secondRadio;
+    PanadapterModel firstPan(QStringLiteral("0x40000000"));
+    PanadapterModel secondPan(QStringLiteral("0x40000000"));
+    StationReceiverPanel firstPanel(&firstRadio), secondPanel(&secondRadio);
+    const auto beforePanels = snapshot();
+    emit firstRadio.radioModel().panadapterAdded(&firstPan);
+    emit secondRadio.radioModel().panadapterAdded(&secondPan);
+    auto* firstView = firstPanel.findChild<SpectrumWidget*>();
+    auto* secondView = secondPanel.findChild<SpectrumWidget*>();
+    check(firstView && secondView && firstView != secondView, "receiver panels create independent views");
+    if (firstView && secondView) {
+        firstView->resize(800, 300); secondView->resize(800, 300);
+        firstView->setSpectrumFrac(0.8f);
+        check(snapshot() == beforePanels, "production receiver panels select isolated display preferences");
+        RadioCapabilities caps;
+        caps.radioOwnsDbmScale = false;
+        caps.panAmplitude.emplace();
+        caps.panAmplitude->binsAbsolute = true;
+        emit firstRadio.radioModel().capabilitiesChanged(true, caps);
+        check(!firstView->radioOwnsDbmScale() && firstView->panBinsAbsolute()
+              && secondView->radioOwnsDbmScale() && !secondView->panBinsAbsolute(),
+              "display scale policy follows only its owning radio");
+        emit firstRadio.radioModel().panFeedSpectrumReady(firstPan.panStreamId(),
+            QVector<float>(256, -104.0f), 0, SpectrumDecodeScale{});
+        check(!SpectrumOffscreenTestAccess::corrected(*firstView).isEmpty()
+              && SpectrumOffscreenTestAccess::corrected(*secondView).isEmpty(),
+              "identical stream IDs on different radios do not cross-feed spectrum");
+        const auto retained = SpectrumOffscreenTestAccess::corrected(*firstView);
+        firstPanel.detach();
+        emit firstRadio.radioModel().panFeedSpectrumReady(firstPan.panStreamId(),
+            QVector<float>(256, -64.0f), 0, SpectrumDecodeScale{});
+        emit firstRadio.radioModel().capabilitiesChanged(false, caps);
+        check(SpectrumOffscreenTestAccess::corrected(*firstView) == retained
+              && !firstView->radioOwnsDbmScale(), "detached panel rejects later model data and capability changes");
+    }
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv)
 {
     TestSettingsProfile profile("spectrum-confirmed-geometry");
+    if (!profile.isValid()) { return 2; }
     QApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--station-display-isolation"))) {
+        return runStationDisplayIsolation();
+    }
     if (app.arguments().contains(QStringLiteral("--flex-squelch-bridge-fixture"))) {
         return runFlexSquelchBridgeFixture(app);
     }
@@ -196,7 +333,8 @@ int main(int argc, char** argv)
         failures += !ok;
     };
     {
-        SpectrumWidget sql;
+        auto sqlStorage = std::make_unique<SpectrumWidget>();
+        auto& sql = *sqlStorage;
         sql.setSquelchScale(legacyDbmSquelchScale());
         sql.setAutoSquelchEnable(true);
         sql.setSquelchLine(true, 60);
@@ -250,7 +388,8 @@ int main(int argc, char** argv)
     const DbmRangeTransition::Range original{-165, -35};
     for (const DbmRangeTransition::Range target : {
              DbmRangeTransition::Range{-127.5f, 2.5f}, {-180, -50}, {-170, -90}}) {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setNoiseFloorEnable(false);
         trace.setDbmRange(original.minDbm, original.maxDbm);
         trace.setEncoderDbmRange(original.minDbm, original.maxDbm, 1);
@@ -280,7 +419,8 @@ int main(int argc, char** argv)
         trace.prepareForShutdown();
     }
     for (const bool gainChange : {true, false}) {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setNoiseFloorEnable(false);
         trace.setDbmRange(-165, -35);
         trace.setEncoderDbmRange(-165, -35, 1);
@@ -300,7 +440,8 @@ int main(int argc, char** argv)
         trace.prepareForShutdown();
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setNoiseFloorEnable(false);
         trace.setDbmRange(-165, -35);
         trace.setEncoderDbmRange(-165, -35, 1);
@@ -333,7 +474,8 @@ int main(int argc, char** argv)
         trace.prepareForShutdown();
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.resize(1000, 900);
         trace.setDbmRange(-135, -40);
         trace.setEncoderDbmRange(-135, -40);
@@ -400,7 +542,8 @@ int main(int argc, char** argv)
         check(lockedRef > -100, "initial local floor lock was established");
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setDbmRange(-100, -16);
         trace.setEncoderDbmRange(-100, -16);
         trace.setNoiseFloorPosition(25);
@@ -446,7 +589,8 @@ int main(int argc, char** argv)
     {
         // A pan another client owns: this session cannot request headroom, so
         // holding the baseline would stall auto floor for the whole session.
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setDbmRange(-100, -16);
         trace.setEncoderDbmRange(-100, -16);
         trace.setNoiseFloorPosition(25);
@@ -468,7 +612,8 @@ int main(int argc, char** argv)
     {
         // The floor already sits at Flex's -180 dBm limit: no recovery can
         // come, so holding the baseline would stall auto floor for good.
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setDbmRange(-180, -90);
         trace.setEncoderDbmRange(-180, -90);
         trace.setNoiseFloorPosition(25);
@@ -491,7 +636,8 @@ int main(int argc, char** argv)
               "a floor already at -180 dBm is not held for a recovery that cannot come");
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.updateSpectrum(QVector<float>(32,-80));
         trace.updateSpectrum(QVector<float>(32,-20));
         check(std::abs(SpectrumOffscreenTestAccess::trace(trace).front()+59)<.001,
@@ -501,6 +647,7 @@ int main(int argc, char** argv)
         trace.updateSpectrum(QVector<float>(32,-10));
         check(SpectrumOffscreenTestAccess::trace(trace)==QVector<float>(32,-10),
               "backend-averaged bins reach the displayed trace without a second EMA");
+#ifdef AETHER_BACKEND_RTL
         const auto caps=rtl::RtlSdrBackend().capabilities();
         const auto averaging=caps.backendPanAveraging.value_or(BackendPanAveraging{0,false,{},{}});
         auto* menu=trace.overlayMenu();
@@ -514,6 +661,7 @@ int main(int argc, char** argv)
         check(avg && weighted && avg->accessibleDescription().isEmpty()
             && weighted->toolTip().contains("Weights recent"),
             "switching to an undeclared family restores its original wording");
+#endif
         trace.observeFrequencyRange(100.0, 0.01875);
         trace.updateSpectrum(QVector<float>(512, -80));
         QVector<float> capture(65536, -90);
@@ -559,7 +707,8 @@ int main(int argc, char** argv)
         check(near(dss.rowCenterMhzAtAge(0) + dss.rowBandwidthMhzAtAge(0) / 2, 101.2),
             "a zoom preview preserves explicit coherent RF bounds instead of relabeling a padded preview frame");
     }
-    SpectrumWidget widget;
+    auto widgetStorage = std::make_unique<SpectrumWidget>();
+    auto& widget = *widgetStorage;
     widget.resize(1200, 600);
     widget.setBandwidthLimits(0.01, 2.16);
     widget.setPanGeometryConfirmationRequired(true);
@@ -684,6 +833,7 @@ int main(int argc, char** argv)
     widget.observeFrequencyRange(460.3, 0.125);
     check(near(widget.centerMhz(), optimistic), "Flex retains stale-echo hold during drag");
     mouse(widget, QEvent::MouseButtonRelease, 300, 150);
+#ifdef AETHER_BACKEND_RTL
     // Real marker -> the owner dispatch helper -> RadioModel -> RTL worker.
     // Routing reveal as Range must fail: that request cannot leave capture.
     {
@@ -704,7 +854,8 @@ int main(int argc, char** argv)
         SliceModel* slice = model.slice(0);
         PanadapterModel* pan = slice ? model.panadapter(slice->panId()) : nullptr;
         if (pan) {
-            SpectrumWidget reveal;
+            auto revealStorage = std::make_unique<SpectrumWidget>();
+            auto& reveal = *revealStorage;
             reveal.resize(1200, 600);
             reveal.setPanGeometryConfirmationRequired(true);
             int tunes = 0, reveals = 0;
@@ -777,6 +928,9 @@ int main(int argc, char** argv)
         }
         backend.disconnectRadio();
     }
+#else
+    std::printf("[SKIP] RTL-specific backend rows: RTL-SDR is disabled in this build\n");
+#endif
     // Independent pan windows keep the historical Range dispatch. Offline
     // command capture and receiver state only: no Flex/Hermes connection.
     {
@@ -805,7 +959,8 @@ int main(int argc, char** argv)
         plans.setActivePlan(QStringLiteral("IARU Region 1"));
         check(plans.activePlanName() == QStringLiteral("IARU Region 1"),
               "usage hover: IARU Region 1 plan loads from resources");
-        SpectrumWidget band;
+        auto bandStorage = std::make_unique<SpectrumWidget>();
+        auto& band = *bandStorage;
         band.resize(800, 400);
         band.setBandPlanManager(&plans);
         band.setBandPlanFontSize(6);
@@ -850,7 +1005,8 @@ int main(int argc, char** argv)
     {
         // The cap holds without a scale factor, so it stays pinned even if the
         // --pan-pixels-retina registration's QT_SCALE_FACTOR is ignored.
-        SpectrumWidget wide;
+        auto wideStorage = std::make_unique<SpectrumWidget>();
+        auto& wide = *wideStorage;
         wide.resize(5000, 600);
         if (near(wide.devicePixelRatioF(), 1.0)) {
             check(panXpixelsFor(&wide) == 3840, "pan pixels: a 5000-pixel pan at ratio 1 is capped at 3840");
@@ -864,7 +1020,8 @@ int main(int argc, char** argv)
         // Anchored gesture zoom (the shared applyAnchoredZoom extracted from the
         // trackpad/pinch paths). Under confirmation the new span is requested,
         // not applied locally, so assert the requested span and the clamp.
-        SpectrumWidget widget;
+        auto widgetStorage = std::make_unique<SpectrumWidget>();
+        auto& widget = *widgetStorage;
         widget.resize(1000, 400);
         widget.setPanGeometryConfirmationRequired(true);
         widget.setFrequencyRangeImmediate(14.200, 0.200);

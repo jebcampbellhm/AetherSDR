@@ -56,6 +56,54 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 18:23 UTC display isolation increment:
+
+- Additional receiver spectra now use an explicit session-only display policy.
+  They seed appearance once, retain local edits, and never migrate or overwrite
+  primary pan settings. Global display-toggle broadcasts exclude these views
+  in both directions. This is transient isolation, not saved per-radio profiles;
+  no invented flat-key slot namespace was added. User documentation states the
+  restart/removal lifetime of these edits.
+- Primary capability and slice-migration updates now enumerate the primary
+  pan stack instead of recursively reaching additional receivers. Each receiver
+  panel applies its own model's dBm ownership and absolute-bin declarations.
+- The new socket-free station_display_isolation_test constructs real widgets
+  with an isolated settings database. It verifies disk/store preservation,
+  local settings, primary persistence, production panel policy, independent
+  capability updates, identical stream IDs on different radios, and detached
+  panel rejection. Removing the central save guard produced three assertion
+  failures (exit 1); restoring it passed. No radio or audio device was opened.
+- Fixed pre-existing portability problems in the opt-in widget harness:
+  unconditional RTL references in builds without RTL, large stack-allocated
+  widgets overflowing the Windows stack before main initialized, and missing
+  offscreen-plugin deployment. Widget fixtures now use heap ownership; Windows
+  builds copy Qt's matching offscreen plugin; registered runs have 30-second
+  limits. RTL-specific rows are explicitly skipped in this build, not qualified.
+  The client display source checks now read text with CRLF normalization.
+- Final five tests passed: spectrum_confirmed_geometry_test,
+  station_display_isolation_test, spectrum_pan_pixels_retina_test,
+  client_display_settings_test and client_display_pan_settings_test. The first
+  four-test run also passed before mutation testing. Earlier failed/crashed
+  harness runs are not validation evidence; final logs supersede them.
+- Experimental desktop rebuilt and minimal-PATH --update-selftest returned
+  0 / 26.10.4. Docs build, engine boundary (0 blockers / 101 baseline warnings),
+  capability, command-plane, registration, manifest and whitespace checks passed.
+  Daily executable is still unchanged (2026-10-26 10:48:50 local). No normal
+  desktop launch, GPU rendering qualification, audible playback or live probe
+  in this increment. No leases remain open.
+- Evidence under build-web888-evidence: station-display-final-build.log,
+  station-display-final-tests.log, station-display-mutation.log,
+  station-display-startup-marker.txt, station-display-docs.log and
+  station-display-boundary.log. Production guard restored; all commands ended.
+
+NEXT: explicit station TX designation and all-entry-point fencing, then observed
+TX receive interruption/recovery, using offline injected tests. The Icom remains
+offline. Additional-receiver audio without an online primary, saved per-radio
+display/DSP profiles, full controls and rendered desktop checks remain pending.
+Keep PC audio off and preserve the working daily executable.
+
+### Earlier selected monitor checkpoint
+
 2026-10-26 17:50 UTC selected monitor audio increment:
 
 - Added the `MonitorAudioRouter` model and **Listen to:** selector in Additional

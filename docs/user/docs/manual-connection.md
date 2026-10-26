@@ -150,6 +150,11 @@ edges. Selecting a slice or clicking its spectrum affects that receiver only.
 Use the panel's close button to disconnect and remove it. Closing the dock only
 hides it; its receivers continue running until removed or AetherSDR exits.
 
+Extra waterfalls start with the primary display's current appearance. Their
+display adjustments stay local for the life of each waterfall and do not change
+the primary display or another receiver. These extra display preferences are
+not yet saved across removal or restart.
+
 Use **Listen to:** to choose **Primary radio**, one additional receiver, or
 **Off**. Only that radio feeds the main speaker route; changing the selection
 discards queued audio from the previous choice. Removing the selected receiver

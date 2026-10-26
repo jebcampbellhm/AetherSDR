@@ -2375,7 +2375,13 @@ void MainWindow::onSliceAdded(SliceModel* s)
         }
         // A migrated receiver starts from the new pan's floor, never an EWMA
         // inherited from the pan it left.
-        for (SpectrumWidget* sw : findChildren<SpectrumWidget*>()) {
+        if (m_panStack) {
+            for (auto* applet : m_panStack->allApplets()) {
+                if (applet) {
+                    if (auto* sw = m_panStack->spectrum(applet->panId())) { sw->setAutoSquelchEnable(false); }
+                }
+            }
+        } else if (auto* sw = spectrum()) {
             sw->setAutoSquelchEnable(false);
         }
         syncSquelchScaleToUi();
