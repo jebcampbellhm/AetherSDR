@@ -2801,7 +2801,7 @@ so `connect show` is safe when the dialog is already open. `connect local first`
 captures the first currently discovered local radio's serial before scheduling
 the request, so the response and deferred connect target stay consistent.
 `connect local serial <serial>` selects by discovery serial. `connect ip
-<host-or-ip> [flex|hl2|icom]` uses the manual **Connect by IP** probe path; if the
+<host-or-ip> [flex|hl2|icom|nrsp]` uses the manual **Connect by IP** probe path; if the
 probe finds a radio, the panel emits its normal `connectRequested` signal and
 `MainWindow` performs the standard Multi-Flex/client-slot checks before
 `RadioModel` connects.
@@ -2813,6 +2813,14 @@ uses the CI-V backend. They are disjoint — a Hermes-Lite 2 never answers the
 Flex probe and vice versa — so an address is only reached with the right type.
 A directed HL2 probe is the only way to reach a Hermes-Lite 2 that discovery
 broadcasts cannot see (VPN, routed subnet), and it is bounded at ~600 ms.
+
+`connect ip 10.10.31.50 nrsp` selects the direct nRSP-ST receiver on TCP/50000.
+Its native backend verifies the session and reads current source settings;
+SDRconnect is not required. If the radio requires account authentication, use
+the connection dialog's **Username** and **Password** fields; the password is
+not stored or accepted as a positional `connect ip` argument. A valid account
+without control can receive and tune within the existing source capture.
+See the [nRSP-ST protocol](nrsp-st-protocol.md).
 
 **Omit the type and discovery decides.** If the address appears in `connect
 list`, that entry's `family` is used, so `connect ip <addr>` reaches an HL2

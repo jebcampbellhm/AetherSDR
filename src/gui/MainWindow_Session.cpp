@@ -89,6 +89,7 @@
 #include <QPointer>
 #include <QThread>
 #include <QTimer>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <cmath>
@@ -464,7 +465,7 @@ void MainWindow::wireDiscovery()
     });
 
     connect(m_connPanel, &ConnectionPanel::connectRequested,
-            this, [this](const RadioInfo& info){
+            this, [this](const RadioInfo& info, const QVariantMap& params){
         QList<quint32> disconnectHandles;
         if (!confirmClientSlotAvailability(info, &disconnectHandles)) {
             m_connPanel->setStatusText("Connection canceled");
@@ -476,7 +477,7 @@ void MainWindow::wireDiscovery()
         m_connPanel->setStatusText("Connecting…");
         m_userDisconnected = false;
         setPanadapterConnectionAnimation(true, "Connecting to radio…");
-        m_radioModel.connectToRadio(info);
+        m_radioModel.connectToRadio(info, params);
         auto& s = AppSettings::instance();
         s.setValue("LastConnectedRadioSerial", info.serial);
         if (info.isRouted) {

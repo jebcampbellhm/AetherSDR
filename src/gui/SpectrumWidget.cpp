@@ -8889,8 +8889,10 @@ void SpectrumWidget::updateWaterfallRow(const QVector<float>& binsIntensity,
             // Use noise floor directly as threshold — noise maps to black,
             // signals above stand out with better contrast.
             const float target = noiseFloor;
-            // Smooth to prevent jitter
-            m_autoBlackThresh = 0.95f * m_autoBlackThresh + 0.05f * target;
+            // Absolute dB rows cannot start from the positive Flex-intensity
+            // seed: that would blank initial rows while smoothing converges.
+            m_autoBlackThresh = m_panBinsAbsolute && !m_hasNativeWaterfall
+                ? target : 0.95f * m_autoBlackThresh + 0.05f * target;
         }
     }
 

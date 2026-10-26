@@ -36,6 +36,7 @@ const sidebars = {
         "networked-icom",
         "anan-g2",
         "rtl-sdr",
+        "nrsp-st",
         "kiwisdr-and-web-888",
         "demo-mode"
       ]

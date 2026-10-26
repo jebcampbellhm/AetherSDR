@@ -12,6 +12,7 @@ Use **Connect by IP** for:
 - A radio behind a VPN, including a FLEX-8000/Aurora on your tailnet (see [Tailscale Remote Access](./tailscale-remote-access.md))
 - Remote access via a public IP with port forwarding (without SmartLink)
 - A networked Icom, which is always reached this way (see [Networked Icom](./networked-icom.md))
+- An SDRplay nRSP-ST for direct IQ Lite reception (see [SDRplay nRSP-ST](./nrsp-st.md))
 
 ## Setup
 
@@ -26,10 +27,14 @@ The **Radio IP address** group starts with two rows:
 
 | Row | What to enter |
 |-----|---------------|
-| **Radio type:** | The radio family to look for: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)** or **RTL-SDR (USB)**. Only this family is probed. |
+| **Radio type:** | The radio family to look for: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)**, **SDRplay nRSP-ST** or **RTL-SDR (USB)**. Only this family is contacted. |
 | **Radio IP:** | The IP address or host name, for example `10.0.0.25`. |
 
 **RTL-SDR (USB)** appears only in builds that include the RTL-SDR backend. Choosing **Icom (network)** adds its connection rows. **ANAN-G2** shows a pointer to **Settings → Radio Setup... → Radio → ANAN Front End**, where its receive options are configured before connecting; see [Networked Icom](./networked-icom.md) and [ANAN-G2](./anan-g2.md). For every family's status, see [Supported Radios](./supported-radios.md).
+
+Choosing **SDRplay nRSP-ST** adds optional **Username:** and **Password:**
+fields for the radio's streaming account. The password is not saved. See
+[SDRplay nRSP-ST](./nrsp-st.md) for authentication and control permissions.
 
 ## Using Connect by IP
 

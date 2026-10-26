@@ -6597,14 +6597,14 @@ QJsonObject AutomationServer::doConnect(const QString& action,
         if (ipTokens.size() > 1) {
             family = ipTokens.at(1).toLower();
             if (family != QLatin1String("flex") && family != QLatin1String("hl2")
-                && family != QLatin1String("icom")) {
+                && family != QLatin1String("icom") && family != QLatin1String("nrsp")) {
                 return err(QStringLiteral(
-                               "connect ip radio type must be flex, hl2 or icom, got '%1'")
+                               "connect ip radio type must be flex, hl2, icom or nrsp, got '%1'")
                                .arg(ipTokens.at(1)));
             }
         }
         if (ipTokens.size() > 2) {
-            return err(QStringLiteral("connect ip takes at most <host-or-ip> [flex|hl2|icom]"));
+            return err(QStringLiteral("connect ip takes at most <host-or-ip> [flex|hl2|icom|nrsp]"));
         }
 
         // Match on the textual address the list itself publishes, so a caller

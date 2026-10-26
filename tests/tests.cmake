@@ -4454,6 +4454,44 @@ target_link_libraries(adaptive_engine_test PRIVATE Qt6::Core)
 set_target_properties(adaptive_engine_test PROPERTIES AUTOMOC ON)
 add_test(NAME adaptive_engine_test COMMAND adaptive_engine_test)
 
+# not registered: manual positive live-radio diagnostic; requires --host and --output.
+add_executable(nrsp_live_probe EXCLUDE_FROM_ALL tests/nrsp_live_probe.cpp)
+target_link_libraries(nrsp_live_probe PRIVATE aethercore)
+
+# Socket-free acquisition-event injection through production worker relays.
+add_executable(nrsp_backend_test tests/nrsp_backend_test.cpp)
+target_link_libraries(nrsp_backend_test PRIVATE aethercore)
+add_test(NAME nrsp_backend_test COMMAND nrsp_backend_test)
+set_tests_properties(nrsp_backend_test PROPERTIES TIMEOUT 30)
+
+add_executable(nrsp_demodulator_test tests/nrsp_demodulator_test.cpp)
+target_link_libraries(nrsp_demodulator_test PRIVATE aethercore)
+add_test(NAME nrsp_demodulator_test COMMAND nrsp_demodulator_test)
+set_tests_properties(nrsp_demodulator_test PROPERTIES TIMEOUT 90)
+
+add_executable(nrsp_session_test
+    tests/nrsp_session_test.cpp
+    src/core/backends/nrsp/NrspSession.cpp
+    src/core/backends/nrsp/NrspProtocol.cpp
+    src/core/backends/nrsp/NrspAuthentication.cpp
+    src/core/backends/nrsp/NrspData.cpp
+)
+target_include_directories(nrsp_session_test PRIVATE src)
+target_link_libraries(nrsp_session_test PRIVATE Qt6::Core aether_zstd ${AETHER_NRSP_CRYPTO})
+add_test(NAME nrsp_session_test COMMAND nrsp_session_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/nrsp/wire-examples.json)
+
+add_executable(nrsp_protocol_test
+    tests/nrsp_protocol_test.cpp
+    src/core/backends/nrsp/NrspProtocol.cpp
+    src/core/backends/nrsp/NrspAuthentication.cpp
+    src/core/backends/nrsp/NrspData.cpp
+)
+target_include_directories(nrsp_protocol_test PRIVATE src)
+target_link_libraries(nrsp_protocol_test PRIVATE Qt6::Core aether_zstd ${AETHER_NRSP_CRYPTO})
+add_test(NAME nrsp_protocol_test COMMAND nrsp_protocol_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/nrsp/wire-examples.json)
+
 add_executable(kiwi_sdr_protocol_test
     tests/kiwi_sdr_protocol_test.cpp
     src/core/KiwiSdrProtocol.cpp
@@ -9797,6 +9835,7 @@ set(AETHER_SETTINGS_CONSUMERS
     cw_rx_model_test
     asr_native_receiver_test
     gps_fix_state_test
+    nrsp_backend_test
     dax_receive_applet_test
     graphic_eq_persistence_test
     hl2_discovery_logging_test

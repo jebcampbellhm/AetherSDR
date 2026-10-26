@@ -24,6 +24,7 @@
 #include <QSpacerItem>
 #include <QStyle>
 #include <QToolButton>
+#include <QVariantMap>
 
 #include <cstdio>
 #include <string>
@@ -449,6 +450,42 @@ void checkIcomUsesRoutedRetention()
     settings.save();
 }
 
+void checkNrspTransientCredentials()
+{
+    ConnectionPanel panel;
+    panel.selectManualConnection();
+    auto* type = panel.findChild<QComboBox*>(QStringLiteral("connectionManualRadioType"));
+    auto* address = panel.findChild<QLineEdit*>(QStringLiteral("connectionManualIp"));
+    auto* user = panel.findChild<QLineEdit*>(QStringLiteral("connectionManualNrspUser"));
+    auto* password = panel.findChild<QLineEdit*>(QStringLiteral("connectionManualNrspPassword"));
+    auto* button = panel.findChild<QPushButton*>(QStringLiteral("connectionManualConnectButton"));
+    report("nRSP credential fields exist", type && address && user && password && button);
+    if (!type || !address || !user || !password || !button) { return; }
+    const int nrsp = type->findData(QStringLiteral("nrsp"));
+    report("nRSP family is available", nrsp >= 0);
+    if (nrsp < 0) { return; }
+    type->setCurrentIndex(nrsp);
+    address->setText(QStringLiteral("127.0.0.1"));
+    user->setText(QStringLiteral("test-listener"));
+    password->setText(QStringLiteral("dummy-session-secret"));
+    report("nRSP password is masked", password->echoMode() == QLineEdit::Password);
+    bool emitted = false;
+    QVariantMap supplied;
+    QObject::connect(&panel, &ConnectionPanel::connectRequested,
+                     [&](const RadioInfo& info, const QVariantMap& params) {
+        emitted = info.family == QStringLiteral("nrsp") && info.port == 50000;
+        supplied = params;
+    });
+    button->click();
+    report("nRSP routes transient credentials with the selected endpoint",
+           emitted && supplied.value("nrsp.username").toString() == QStringLiteral("test-listener")
+                   && supplied.value("nrsp.password").toString() == QStringLiteral("dummy-session-secret"));
+    report("nRSP clears password after submission", password->text().isEmpty());
+    password->setText(QStringLiteral("another-dummy-secret"));
+    type->setCurrentIndex(type->findData(QStringLiteral("flex")));
+    report("changing family clears nRSP password", password->text().isEmpty());
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -813,6 +850,7 @@ int main(int argc, char** argv)
     checkIcomManualGuidanceIsModelNeutral();
     checkIcomCustomNatPorts();
     checkIcomUsesRoutedRetention();
+    checkNrspTransientCredentials();
     std::printf("\n%s\n", g_failed == 0 ? "ALL PASS" : "FAILURES PRESENT");
     return g_failed == 0 ? 0 : 1;
 }

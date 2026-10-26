@@ -64,6 +64,7 @@
 #include <memory>
 
 #include <QTimer>
+#include <QVariantMap>
 #include <QElapsedTimer>
 
 namespace AetherSDR {
@@ -890,7 +891,9 @@ public:
                                    QString* error = nullptr);
 
     // High-level actions
-    void connectToRadio(const RadioInfo& info);
+    // Transient connect parameters are forwarded only for this explicit attempt;
+    // they are never retained in discovery, settings, or reconnect state.
+    void connectToRadio(const RadioInfo& info, const QVariantMap& params = {});
     // One explicit wake, followed by one bounded connection attempt. Never persisted.
     bool wakeIcomRadio(int modelId, int address, QString* error = nullptr);
     bool radioWakeActive() const { return m_radioWakeActive; }

@@ -1,4 +1,34 @@
 {
+ "core/backends/nrsp/NrspSession.h": {
+  "tag": "vendor(nrsp)",
+  "note": "Private nRSP-ST authentication, receiver lifecycle and shared-source wire state machine.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspWorker.h": {
+  "tag": "vendor(nrsp)",
+  "note": "Private nRSP-ST TCP acquisition and source readback worker below IRadioBackend.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspProtocol.h": {
+  "tag": "vendor(nrsp)",
+  "note": "nRSP-ST TCP framing, integer encoding, session keys and source-state parsing. Private to the direct receiver backend; protocol evidence and provenance are in docs/nrsp-st-protocol.md.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspAuthentication.h": {
+  "tag": "vendor(nrsp)",
+  "note": "nRSP-ST nonce challenge and RSA server verification, private to the receiver session.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspData.h": {
+  "tag": "vendor(nrsp)",
+  "note": "Bounded nRSP-ST IQ Lite and display decompression and receiver-id decoding, below the radio seam.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/DxSpotLineParser.h": {
   "tag": "universal",
   "note": "Parses DX-cluster `DX de` lines (DXSpider/AR/CC/RBN/GoCluster) into DxSpot, including the GoCluster fixed-column tail and SNR report, and replays saved spot logs with per-session provenance. Pure line-to-value logic; no vendor radio ties.",

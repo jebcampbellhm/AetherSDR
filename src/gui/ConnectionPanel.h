@@ -20,6 +20,7 @@
 #include <QCommandLinkButton>
 #include <QStackedWidget>
 #include <QToolButton>
+#include <QVariantMap>
 
 class QVBoxLayout;
 class QScreen;
@@ -82,6 +83,7 @@ public:
     // handshake needs a username and password before the radio will answer with
     // anything useful, which is why the manual page grows credential fields.
     static constexpr const char* kFamilyIcom = "icom";
+    static constexpr const char* kFamilyNrsp = "nrsp";
     // RTL-SDR USB dongles (RTL2832U / R820T). USB-addressed (device index +
     // serial), not network. Receive-only (Principle VI).
     static constexpr const char* kFamilyRtl  = "rtl";
@@ -130,7 +132,7 @@ public slots:
     void setSmartLinkClient(SmartLinkClient* client);
 
 signals:
-    void connectRequested(const RadioInfo& radio);
+    void connectRequested(const RadioInfo& radio, const QVariantMap& params = {});
     void wanConnectRequested(const WanRadioInfo& radio);
     void wanDisconnectClientsRequested(const WanRadioInfo& radio);
     void disconnectRequested();
@@ -231,7 +233,7 @@ private:
     // Interactive/automation attempts are silent once the startup probe ends.
     void reportStartupProbeFailure(const QString& reason);
     void handleHl2ProbeResult(Hl2ProbeResult probe, const QString& ip);
-    void finishManualProbe(const RadioInfo& info, bool routedOnly = false);
+    void finishManualProbe(const RadioInfo& info, bool routedOnly = false, const QVariantMap& params = {});
     friend struct ConnectionPanelStartupTestAccess;
     void resetManualConnectButton();
     // Re-activate the body layout after a page change. The overlap this used to
@@ -316,6 +318,10 @@ private:
     QWidget*     m_manualIcomCivCustomRow{nullptr};
     QLineEdit*   m_manualIcomUserEdit{nullptr};
     QLineEdit*   m_manualIcomPassEdit{nullptr};
+    QWidget*    m_manualNrspUserRow{nullptr};
+    QWidget*    m_manualNrspPassRow{nullptr};
+    QLineEdit*  m_manualNrspUserEdit{nullptr};
+    QLineEdit*  m_manualNrspPassEdit{nullptr};
     QComboBox*   m_manualIcomPortCombo{nullptr};
     QSpinBox*    m_manualIcomBasePortSpin{nullptr};
     // The model chooser. Non-editable: it enumerates a known set with an escape

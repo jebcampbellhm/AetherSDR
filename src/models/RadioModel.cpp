@@ -17,6 +17,7 @@
 #include "core/backends/flex/FlexBackend.h"   // aetherd RFC 2.2 radio-facing seam
 #include "core/backends/sim/SimBackend.h"     // RFC #4288 demo-mode backend (Route A)
 #include "core/backends/hl2/Hl2Backend.h"      // aetherd Gap A — HL2 backend (family "hl2")
+#include "core/backends/nrsp/NrspBackend.h"
 #include "models/ConnectStatePolicy.h"
 #include "core/backends/anan/AnanBackend.h"    // aetherd ANAN P2 Phase 1b (family "anan")
 #include "core/backends/anan/AnanSettings.h"   // owned "Anan" settings object (Principle V)
@@ -787,6 +788,9 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
 
 std::unique_ptr<IRadioBackend> RadioModel::makeBackend(const QString& family)
 {
+    if (family.compare(QLatin1String("nrsp"), Qt::CaseInsensitive) == 0) {
+        return std::make_unique<NrspBackend>();
+    }
     if (family.compare(QLatin1String("hl2"), Qt::CaseInsensitive) == 0)
         return std::make_unique<hl2::Hl2Backend>();
     // ANAN-G2 (openHPSDR Protocol 2). Like HL2 this is a pure seam backend —
@@ -2705,6 +2709,10 @@ RadioModel::RadioModel(QObject* parent)
     connect(&m_operatingStateMaxWaitTimer, &QTimer::timeout, this,
             [this] { persistOperatingState(false); });
     connect(&m_reconnectTimer, &QTimer::timeout, this, [this]() {
+        if (m_backend && m_backend->reconnectPolicy() == IRadioBackend::ReconnectPolicy::OperatorInitiated) {
+            m_reconnectTimer.stop();
+            return;
+        }
         if (!m_intentionalDisconnect && !m_lastInfo.address.isNull()) {
             qCDebug(lcProtocol) << "RadioModel: auto-reconnecting to" << m_lastInfo.address.toString();
             // A retry is an attempt too (#4912). This path does NOT go through
@@ -3753,7 +3761,7 @@ void RadioModel::emitInterlockNotification(const QString& message,
 
 // ─── Actions ──────────────────────────────────────────────────────────────────
 
-void RadioModel::connectToRadio(const RadioInfo& info)
+void RadioModel::connectToRadio(const RadioInfo& info, const QVariantMap& params)
 {
     discardTuneInhibit();
     resetTuneOutputControl();
@@ -3882,6 +3890,9 @@ void RadioModel::connectToRadio(const RadioInfo& info)
         req.serial = info.serial;
         req.serialIdentity = info.serialIdentity;
         populateFamilyParams(req, info.family, info.sessionBindAddress);
+        for (auto it = params.cbegin(); it != params.cend(); ++it) {
+            req.params.insert(it.key(), it.value());
+        }
         handRestoredStateToBackend();
         m_backend->connectRadio(req);
     }
@@ -6062,8 +6073,13 @@ bool RadioModel::requestConfirmedReceiveTune(int sliceId, double mhz, IRadioBack
     if (!receiver || receiver->isLocked() || !sliceMayBelongToUs(sliceId)
         || !receiveControlPanId(receiver->panId())) { return false; }
     const auto control = backendCapabilities().sliceFrequencyControl;
-    if (control.authority == SliceFrequencyControl::Authority::Unknown
-        || mhz * 1e6 < control.minimumHz || mhz * 1e6 > control.maximumHz) { return false; }
+    if (control.authority == SliceFrequencyControl::Authority::Unknown) { return false; }
+    if (mhz * 1e6 < control.minimumHz || mhz * 1e6 > control.maximumHz) {
+        emit configurationWarning(tr("Tuning refused. This receiver currently allows %1 to %2 MHz.")
+            .arg(control.minimumHz / 1e6, 0, 'f', 6)
+            .arg(control.maximumHz / 1e6, 0, 'f', 6));
+        return false;
+    }
     return m_backend->requestReceiveTune(sliceId, mhz * 1e6, view);
 }
 
@@ -8513,7 +8529,8 @@ void RadioModel::onDisconnected()
         qCDebug(lcProtocol) << "RadioModel: WAN disconnected";
         m_wanConn->disconnect(this);
         m_wanConn = nullptr;
-    } else if (!m_intentionalDisconnect && !m_radioWakeActive && !m_lastInfo.address.isNull()) {
+    } else if (!m_intentionalDisconnect && !m_radioWakeActive && !m_lastInfo.address.isNull()
+               && (!m_backend || m_backend->reconnectPolicy() == IRadioBackend::ReconnectPolicy::Automatic)) {
         qCDebug(lcProtocol) << "RadioModel: unexpected disconnect — reconnecting in 3s";
         m_reconnectTimer.start();
     }
@@ -8558,6 +8575,7 @@ void RadioModel::onConnectionError(const QString& msg)
     // A refused connect may never emit disconnected, but the radio can recover
     // after expiring a stale session. Keep retrying the same discovered radio.
     if (!m_wanConn && !m_intentionalDisconnect && !m_lastInfo.address.isNull()
+            && (!m_backend || m_backend->reconnectPolicy() == IRadioBackend::ReconnectPolicy::Automatic)
             && !m_reconnectTimer.isActive()) {
         qCDebug(lcProtocol) << "RadioModel: connection error — reconnecting in 5s";
         m_reconnectTimer.start();

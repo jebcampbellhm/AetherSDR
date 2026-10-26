@@ -381,7 +381,12 @@ void SliceModel::notifyReceiveFilterIntent(SliceFilterRequest::Origin origin)
 
 void SliceModel::setRxAntenna(const QString& ant)
 {
+    if (refuseOffThread(__func__)) { return; }
     if (m_rxAntenna == ant) return;
+    if (confirmsControls()) {
+        emit receiveRxAntennaRequested(ant);
+        return;
+    }
     m_rxAntenna = ant;
     publishReceiveIntent(m_rxAntennaIntentRevision,
                          [this, ant] { emit rxAntennaChanged(ant); },

@@ -335,6 +335,12 @@ public:
     virtual void disconnectRadio() = 0;
     virtual bool isConnected() const = 0;
 
+    // Some receive protocols report an administrator eviction as plain EOF.
+    // Such a backend requires a new operator connect intent instead of the
+    // model's generic retry timer. Existing families retain automatic recovery.
+    enum class ReconnectPolicy { Automatic, OperatorInitiated };
+    virtual ReconnectPolicy reconnectPolicy() const { return ReconnectPolicy::Automatic; }
+
     // A session with the radio is up, WHATEVER TRANSPORT CARRIED IT.
     //
     // Exists because "connected" is not observable inside a backend on every
