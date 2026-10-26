@@ -56,6 +56,42 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 20:12 UTC bidirectional live reconnect checkpoint:
+
+- Extended the opt-in radio_station_live_probe with --reconnect web|nrsp.
+  It uses the desktop's positive additional-source IDs, observes availability,
+  reconnects the selected model, verifies a new PCM epoch/discontinuity, removes
+  nRSP-ST and verifies continuing Web-888 reception, then closes both. It opens
+  no AudioEngine/device and refuses to run without its isolated settings profile.
+  Reconnect mode has a 60-second deadline; the original mode retains 40 seconds.
+- Both runs passed. nRSP-ST reconnect: Web-888 delivered 63488 audio frames
+  during the interruption; reconnected nRSP-ST supplied 113152 selected monitor
+  frames. Totals Web-888 607232 audio / 504 spectrum; nRSP-ST 369664 / 157.
+  Web-888 reconnect: nRSP-ST delivered 24576 frames during the interruption;
+  reconnected Web-888 supplied 72704 selected monitor frames. Totals Web-888
+  543744 / 480, nRSP-ST 400896 / 170. Counts are normalized PCM, not ADC-rate or
+  RF-quality measurements.
+- In both directions the selected source became unavailable then available,
+  old audio stayed revoked, the first new epoch was discontinuous, selection
+  and removal revoked routed copies, and Off leaked none. Each run released
+  both sessions. No audio device, TX, reporting, public receiver or persistent
+  radio-setting change. Credentials were loaded from keychain, never printed.
+  Evidence: station-reconnect-build.log, station-reconnect-nrsp.json and
+  station-reconnect-web.json under build-web888-evidence.
+- Only the diagnostic source changed; the experimental desktop remains the
+  independent-playback build and the daily executable remains untouched.
+  These are model/transport checks, not rendered desktop or audible playback
+  qualification. Icom remains unavailable.
+
+NEXT: review receiver-panel teardown and deferred controls. In particular,
+removed waterfall widgets use guarded pan pointers but some callbacks compare
+only reused pan/slice IDs; test whether a queued old gesture can target a new
+view after pan replacement, then fix any demonstrated defect. Prefer offscreen
+fixtures; never automate a running user GUI. Work locally until 21:30 UTC, then
+stop and pause the automation.
+
+### Earlier independent speaker lifecycle checkpoint
+
 2026-10-26 20:00 UTC independent speaker lifecycle increment:
 
 - MonitorAudioRouter now tracks source availability separately from selection.
