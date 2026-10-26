@@ -6,6 +6,7 @@
 #include "icom/IcomCivBackend.h"
 #include "sim/SimBackend.h"
 #include "web888/Web888Backend.h"
+#include "nrsp/NrspBackend.h"
 #ifdef AETHER_BACKEND_RTL
 #include "rtl/RtlSdrBackend.h"
 #endif
@@ -14,6 +15,7 @@ namespace AetherSDR {
 std::unique_ptr<IRadioBackend> createRadioBackend(const QString& family)
 {
     const QString name = family.toLower();
+    if (name == QStringLiteral("nrsp")) { return std::make_unique<NrspBackend>(); }
     if (name == QStringLiteral("hl2")) {
         return std::make_unique<hl2::Hl2Backend>();
     }

@@ -4,7 +4,7 @@
 
 Burndown manifest for the engine/UI decoupling ([RFC](../aetherd-headless-engine-design.md) §2, §10). One row per engine header the UI includes; converting a touchpoint means the UI reaches that surface through the versioned protocol instead of the header.
 
-**Totals:** 275 touchpoint headers (223 core, 52 models) — 275/275 tagged, 0/275 converted.
+**Totals:** 276 touchpoint headers (224 core, 52 models) — 275/276 tagged, 0/276 converted.
 
 | Header | Includers | Tag | Status |
 |---|---:|---|---|
@@ -114,6 +114,7 @@ Burndown manifest for the engine/UI decoupling ([RFC](../aetherd-headless-engine
 | `core/NetworkSettings.h` | 1 | ui-support — AppSettings JSON wrapper persisting VITA-49 SO_RCVBUF tuning; settings storage, not radio state — engine config knob, no protocol msg | unconverted |
 | `core/NnrControls.h` | 1 | ui-support — Compile-time NNR control ranges and default-marker positions read out of WDSP 2.10; no state and no WDSP include, shared by the ADSP tab and the filter | unconverted |
 | `core/NnrSettings.h` | 3 | ui-support — AppSettings-backed JSON store for NNR strength, model and the six WDSP tuning controls; persistence, not radio state | unconverted |
+| `core/NrspCredentials.h` | 1 | — | unconverted |
 | `core/NvidiaAfxPack.h` | 1 | ui-support — Download/install manager for NVIDIA AFX BNR runtime pack (CUDA/TensorRT); deployment plumbing, no radio state | unconverted |
 | `core/NvidiaBnrSettings.h` | 1 | ui-support — AppSettings-backed JSON store for Maxine BNR intensity + licence acceptance; persistence, not radio state | unconverted |
 | `core/PerfTelemetry.h` | 3 | ui-support — Singleton perf-instrumentation logger for client render/UDP/input timing; diagnostics, not radio state. | unconverted |

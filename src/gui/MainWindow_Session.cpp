@@ -89,6 +89,7 @@
 #include <QPointer>
 #include <QThread>
 #include <QTimer>
+#include <QVariantMap>
 
 #include <algorithm>
 #include <cmath>

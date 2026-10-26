@@ -130,6 +130,7 @@ An explicit `CMAKE_PREFIX_PATH` always wins over the cached release Qt;
 | qt6-websockets-dev | TCI server, FreeDV Reporter spots |
 | qt6-serialport-dev | FlexControl, serial PTT/CW, MIDI controllers |
 | libfftw3-dev | NR2 spectral noise reduction |
+| libssl-dev | nRSP-ST server signature verification on Linux |
 | librtlsdr-dev | RTL-SDR USB receiver backend (optional) |
 | portaudio19-dev | PortAudio audio backend |
 | libhidapi-dev | USB HID encoders (RC-28, PowerMate, FlexControl) |

@@ -40,6 +40,7 @@ inline constexpr FlatCredential kFlatCredentials[] = {
 // Endpoint hashes follow this prefix in the same OS-keychain service. These
 // keys are never AppSettings rows or fields of retained connection routes.
 inline constexpr const char* kWeb888PasswordKeyPrefix = "web888_password_";
+inline constexpr const char* kNrspPasswordKeyPrefix = "nrsp_password_";
 
 // Credential-bearing FIELDS inside feature-owned JSON document values.
 struct DocFieldCredential {

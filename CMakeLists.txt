@@ -920,6 +920,13 @@ set(CORE_SOURCES
     src/core/backends/flex/SmartLinkClient.cpp  # SmartLink WAN auth + radio list
     src/core/backends/flex/WanConnection.cpp    # SmartLink TLS transport (#5554 §2.6)
     src/core/backends/sim/SimBackend.cpp     # demo mode — 2nd IRadioBackend (RFC #4288)
+    src/core/backends/nrsp/NrspProtocol.cpp
+    src/core/backends/nrsp/NrspAuthentication.cpp
+    src/core/backends/nrsp/NrspData.cpp
+    src/core/backends/nrsp/NrspSession.cpp
+    src/core/backends/nrsp/NrspDemodulator.cpp
+    src/core/backends/nrsp/NrspWorker.cpp
+    src/core/backends/nrsp/NrspBackend.cpp
     src/core/backends/sim/SimSignalSource.cpp  # demo RX engine, worker thread (#4878)
     src/core/backends/sim/SpectrumPatternGenerator.cpp  # demo mode — signal engine (RFC #4288 Phase 2)
     src/core/backends/sim/NoiseMixer.cpp                 # demo mode — audio engine (RFC #4288 Phase 2b)
@@ -1056,6 +1063,7 @@ set(CORE_SOURCES
     src/core/CatPort.cpp
     src/core/KiwiSdrProtocol.cpp
     src/core/KiwiSdrRedirectPolicy.cpp
+    src/core/NrspCredentials.cpp
     src/core/KiwiSdrCredentialStore.cpp
     src/core/KiwiSdrClient.cpp
     src/core/NetworkReceiverCredentials.cpp
@@ -1707,6 +1715,22 @@ else()
     target_compile_options(aether_esp_flasher PRIVATE -w)
 endif()
 
+# RSA server signatures use operating-system providers on Windows/macOS and
+# OpenSSL on Linux. libssl-dev is already present in the Linux CI image.
+function(aether_nrsp_crypto_dependency)
+    if(WIN32)
+        set(AETHER_NRSP_CRYPTO bcrypt PARENT_SCOPE)
+    elseif(APPLE)
+        find_library(AETHER_NRSP_SECURITY_FRAMEWORK Security REQUIRED)
+        find_library(AETHER_NRSP_CF_FRAMEWORK CoreFoundation REQUIRED)
+        set(AETHER_NRSP_CRYPTO ${AETHER_NRSP_SECURITY_FRAMEWORK} ${AETHER_NRSP_CF_FRAMEWORK} PARENT_SCOPE)
+    else()
+        find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+        set(AETHER_NRSP_CRYPTO OpenSSL::Crypto PARENT_SCOPE)
+    endif()
+endfunction()
+aether_nrsp_crypto_dependency()
+
 # Bundled Monocypher (CC0-1.0 OR BSD-2-Clause): Ed25519 signature checks on
 # downloaded firmware manifests, without depending on OpenSSL being present.
 add_library(aether_monocypher STATIC
@@ -1879,7 +1903,7 @@ add_library(aethercore ${_aether_core_library_type}
 )
 target_link_libraries(aethercore PRIVATE aether::wdsp)
 target_link_libraries(aethercore PRIVATE aether_monocypher)   # core: EspFirmwareCatalog, UpdateStager
-target_link_libraries(aethercore PRIVATE aether_zstd)         # core: UpdateStager
+target_link_libraries(aethercore PRIVATE aether_zstd ${AETHER_NRSP_CRYPTO}) # core: UpdateStager, nRSP-ST
 target_compile_definitions(aethercore PRIVATE
     AETHER_FIRMWARE_DEV_OVERRIDES=$<BOOL:${AETHER_FIRMWARE_DEV_OVERRIDES}>
     AETHER_UPDATE_DEV_OVERRIDES=$<BOOL:${AETHER_UPDATE_DEV_OVERRIDES}>)

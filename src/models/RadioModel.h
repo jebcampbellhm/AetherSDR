@@ -64,6 +64,7 @@
 #include <memory>
 
 #include <QTimer>
+#include <QVariantMap>
 #include <QElapsedTimer>
 
 namespace AetherSDR {

@@ -6036,8 +6036,13 @@ bool RadioModel::requestConfirmedReceiveTune(int sliceId, double mhz, IRadioBack
     if (!receiver || receiver->isLocked() || !sliceMayBelongToUs(sliceId)
         || !receiveControlPanId(receiver->panId())) { return false; }
     const auto control = backendCapabilities().sliceFrequencyControl;
-    if (control.authority == SliceFrequencyControl::Authority::Unknown
-        || mhz * 1e6 < control.minimumHz || mhz * 1e6 > control.maximumHz) { return false; }
+    if (control.authority == SliceFrequencyControl::Authority::Unknown) { return false; }
+    if (mhz * 1e6 < control.minimumHz || mhz * 1e6 > control.maximumHz) {
+        emit configurationWarning(tr("Tuning refused. This receiver currently allows %1 to %2 MHz.")
+            .arg(control.minimumHz / 1e6, 0, 'f', 6)
+            .arg(control.maximumHz / 1e6, 0, 'f', 6));
+        return false;
+    }
     return m_backend->requestReceiveTune(sliceId, mhz * 1e6, view);
 }
 
