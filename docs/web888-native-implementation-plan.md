@@ -1208,3 +1208,34 @@ automatically. Stock 12 kHz is the operating baseline going forward.
 
 The digital splitter remains available; the interactive sharing path is removed.
 Timed decoding remains gated on qualified sample-to-UTC mapping.
+
+## Combined daily build - 2026-10-26
+
+- Updated Web-888 to upstream v26.10.4 (`9efd0fb0`). Keep `web888-native`
+  and `nrsp-st` independently reviewable; `integration/web888-nrsp` combines
+  both for daily use. No upstream PR or receiver configuration change.
+- Web-888 explicit credentials save only after admission. nRSP-ST credentials
+  now use the OS keychain, scoped by receiver, port and username; a blank
+  password reuses the saved value and Forget removes it. Cancelled/obsolete
+  loads are fenced. Passwords are excluded from connection profiles.
+- Fixed upstream touch-hold members being incorrectly guarded by HAVE_HIDAPI;
+  builds without HIDAPI now compile. This fix is on both feature branches.
+- Built `build-daily-web888-nrsp/AetherSDR.exe` with pinned Qt 6.12,
+  Vulkan/ASR, NR4, DFNR, ONNX Runtime (DeepFist/DeepCW) and QtKeychain.
+  Existing `build-web888-neural-cw` was preserved.
+- Sixteen selected receiver/transport/DSP/CW tests passed in the first fully
+  staged runtime run; the connection-panel test then passed after correcting
+  its merged Web-888 signal subscription (17 selected tests passed overall).
+  Initial pre-staging runs failed to load missing DLLs; deployment resolved
+  that environment issue. Credential tests use fake storage, not a real
+  keychain round trip or live authenticated radio session.
+- Engine boundary, command-plane, capability and settings ratchets passed;
+  generated touchpoint manifest is current and the user documentation built.
+- Qt deployment completed. The shipped executable's `--update-selftest`
+  returned 0 and wrote version 26.10.4 with PATH limited to Windows system
+  directories and Qt plugin environment overrides removed. It opens no main
+  window and connects to no radio. No GUI automation or hardware/RF
+  qualification was performed.
+- Local logs: `build-web888-evidence/daily-configure.log`,
+  `daily-build-retry.log`, `daily-tests.log`, `daily-form-retest.log`,
+  `daily-deploy.log`, and `daily-startup-marker2.txt`.
