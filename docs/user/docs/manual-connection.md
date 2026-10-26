@@ -148,7 +148,8 @@ can remain alongside the main radio's display.
 Each panel owns its waterfalls, receive slices, frequency, mode and filter
 edges. Selecting a slice or clicking its spectrum affects that receiver only.
 If a waterfall is removed or replaced, its pending tuning gestures are discarded
-so they cannot change a replacement waterfall's slices.
+so they cannot change a replacement waterfall's slices. Removing a receiver also
+discards its pending display updates.
 Use the panel's close button to disconnect and remove it. Closing the dock only
 hides it; its receivers continue running until removed or AetherSDR exits.
 

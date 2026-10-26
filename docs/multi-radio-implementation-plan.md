@@ -56,6 +56,35 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 20:34 UTC queued model-update teardown checkpoint:
+
+- Demonstrated that disconnecting a receiver panel's signals did not cancel
+  already queued spectrum/capability deliveries: detached views still changed.
+  The panel now checks its attached model before applying queued state, data,
+  capability or lifecycle callbacks. Incoming pan geometry/levels use the same
+  current-view ownership guard as outgoing controls. Late pan creation cannot
+  dereference the cleared model after detach.
+- Offscreen tests now queue real model signals before detach, then drain them.
+  They cover spectrum/capabilities, pan geometry/levels, pan creation/removal,
+  slice arrival and positive geometry while attached. The original data/caps
+  test failed before the fix; removing the geometry guard failed its dedicated
+  assertion. The restored code passed all four selected GUI regressions.
+- Rebuilt experimental desktop; minimal-PATH startup returned 0 / 26.10.4.
+  Docs build and whitespace checks passed. This adds no includes above the
+  engine boundary, settings keys, dependency or test registration. Evidence:
+  station-detach-before-test.log, station-detach-mutation-test.log,
+  station-detach-build.log, station-detach-test.log, station-detach-docs.log,
+  station-detach-startup-marker.txt in build-web888-evidence.
+- No normal GUI, live receiver or audio device used; all tests are finished,
+  no mutations remain, and the daily executable is preserved. Rendered/audible
+  desktop and Icom hardware qualification remain outstanding.
+
+NEXT: review connection-form reuse and manual recovery for additional receivers;
+fresh credential options must be collected for every explicit attempt. Then
+finish the window handoff. Stop at 21:30 UTC and pause the automation.
+
+### Earlier retired waterfall controls checkpoint
+
 2026-10-26 20:25 UTC retired waterfall controls checkpoint:
 
 - Reproduced a queued gesture from a removed receiver waterfall tuning a new

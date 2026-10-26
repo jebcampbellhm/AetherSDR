@@ -27,6 +27,8 @@
 #include <QVariant>
 #include <QCheckBox>
 #include <QComboBox>
+#include <QPointer>
+#include <QEvent>
 
 #include <QApplication>
 #include <QMouseEvent>
@@ -355,8 +357,38 @@ static int runStationDisplayIsolation()
         emit firstRadio.radioModel().capabilitiesChanged(true, caps);
         emit firstRadio.radioModel().panFeedSpectrumReady(replacement.panStreamId(),
             QVector<float>(256, -104.0f), 0, SpectrumDecodeScale{});
+        emit replacement.infoChanged(14.2, 0.2);
+        check(firstView->centerMhz() == 14.2 && firstView->bandwidthMhz() == 0.2,
+              "current pan still delivers confirmed geometry");
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
         const auto retained = SpectrumOffscreenTestAccess::corrected(*firstView);
+        const double retainedCenter = firstView->centerMhz();
+        const double retainedSpan = firstView->bandwidthMhz();
+        const float retainedLevel = firstView->refLevel();
+        const float retainedRange = firstView->dynamicRange();
+        PanadapterModel latePan(QStringLiteral("0x40000001"));
+        auto delayedModelUpdate = std::unique_ptr<QThread>(QThread::create([&] {
+            emit firstRadio.radioModel().panFeedSpectrumReady(replacement.panStreamId(),
+                QVector<float>(256, -54.0f), 0, SpectrumDecodeScale{});
+            emit firstRadio.radioModel().capabilitiesChanged(false, caps);
+            emit replacement.infoChanged(28.4, 0.1);
+            emit replacement.levelChanged(-60.0f, 0.0f);
+            emit firstRadio.radioModel().panadapterAdded(&latePan);
+            emit firstRadio.radioModel().sliceAdded(fixtureSlice);
+            emit firstRadio.radioModel().panadapterRemoved(replacement.panId());
+        }));
+        delayedModelUpdate->start(); delayedModelUpdate->wait();
+        const qsizetype retainedViews = firstPanel.findChildren<SpectrumWidget*>().size();
         firstPanel.detach();
+        QCoreApplication::processEvents();
+        check(SpectrumOffscreenTestAccess::corrected(*firstView) == retained
+              && !firstView->radioOwnsDbmScale(), "detached panel rejects already queued data and capability updates");
+        check(firstView->centerMhz() == retainedCenter && firstView->bandwidthMhz() == retainedSpan,
+              "detached panel rejects queued pan geometry updates");
+        check(firstView->refLevel() == retainedLevel && firstView->dynamicRange() == retainedRange,
+              "detached panel rejects queued pan level updates");
+        check(firstPanel.findChildren<SpectrumWidget*>().size() == retainedViews,
+              "detached panel ignores queued pan creation and removal");
         emit firstRadio.radioModel().panFeedSpectrumReady(firstPan.panStreamId(),
             QVector<float>(256, -64.0f), 0, SpectrumDecodeScale{});
         emit firstRadio.radioModel().capabilitiesChanged(false, caps);

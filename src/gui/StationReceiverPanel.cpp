@@ -89,27 +89,33 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
         }
     });
     connect(m_model, &RadioModel::connectionStateChanged, this, [this](bool on) {
+        if (!m_model) { return; }
         m_status->setText(on ? tr("Receiving") : tr("Disconnected"));
         if (!on) { for (const auto& view : std::as_const(m_pans)) { view.spectrum->clearDisplay(); } }
         refreshControls();
     });
-    connect(m_model, &RadioModel::connectionError, this, [this](const QString& error) { m_status->setText(error); });
+    connect(m_model, &RadioModel::connectionError, this, [this](const QString& error) {
+        if (m_model) { m_status->setText(error); }
+    });
     connect(m_model, &RadioModel::capabilitiesChanged, this, &StationReceiverPanel::applyCapabilities);
     connect(m_model, &RadioModel::panadapterAdded, this, &StationReceiverPanel::addPan);
     connect(m_model, &RadioModel::panadapterRemoved, this, &StationReceiverPanel::removePan);
     connect(m_model, &RadioModel::sliceAdded, this, &StationReceiverPanel::addSlice);
     connect(m_model, &RadioModel::sliceRemoved, this, [this](int id) {
+        if (!m_model) { return; }
         for (const auto& view : std::as_const(m_pans)) { view.spectrum->removeSliceOverlay(id); }
         refreshSlices();
     });
     connect(m_model, &RadioModel::panFeedSpectrumReady, this,
         [this](quint32 stream, const QVector<float>& bins, qint64, const SpectrumDecodeScale& scale) {
+            if (!m_model) { return; }
             for (const auto& view : std::as_const(m_pans)) {
                 if (view.model && view.model->panStreamId() == stream) { view.spectrum->updateSpectrum(bins, scale); }
             }
         });
     connect(m_model, &RadioModel::panFeedWaterfallRowReady, this,
         [this](quint32 stream, const QVector<float>& bins, double lo, double hi, quint32 time, qint64, bool coherent) {
+            if (!m_model) { return; }
             for (const auto& view : std::as_const(m_pans)) {
                 if (view.model && view.model->wfStreamId() == stream) {
                     view.spectrum->updateWaterfallRow(bins, lo, hi, time, coherent);
@@ -138,6 +144,7 @@ SliceModel* StationReceiverPanel::selectedSlice() const
 }
 void StationReceiverPanel::refreshSlices()
 {
+    if (!m_model) { return; }
     int previous = m_slice->currentIndex() < 0 ? -1 : m_slice->currentData().toInt();
     if (m_model) {
         for (auto* slice : m_model->slices()) { if (slice->isActive()) { previous = slice->sliceId(); break; } }
@@ -153,6 +160,7 @@ void StationReceiverPanel::refreshSlices()
 }
 void StationReceiverPanel::applyCapabilities(bool connected, const RadioCapabilities& caps)
 {
+    if (!m_model) { return; }
     for (const auto& view : std::as_const(m_pans)) {
         view.spectrum->setRadioOwnsDbmScale(!connected || caps.radioOwnsDbmScale);
         view.spectrum->setPanBinsAbsolute(connected && caps.panBinsAbsolute());
@@ -161,6 +169,7 @@ void StationReceiverPanel::applyCapabilities(bool connected, const RadioCapabili
 }
 void StationReceiverPanel::refreshControls()
 {
+    if (!m_model) { return; }
     const auto* slice = selectedSlice();
     for (QWidget* control : std::array<QWidget*, 4>{m_frequency, m_mode, m_low, m_high}) {
         control->setEnabled(slice && m_model && m_model->isConnected());
@@ -196,6 +205,7 @@ void StationReceiverPanel::refreshOverlays()
 }
 void StationReceiverPanel::addSlice(SliceModel* slice)
 {
+    if (!m_model || !slice) { return; }
     const auto refresh = [this] { refreshControls(); refreshOverlays(); };
     connect(slice, &SliceModel::frequencyChanged, this, refresh);
     connect(slice, &SliceModel::modeChanged, this, refresh);
@@ -207,7 +217,7 @@ void StationReceiverPanel::addSlice(SliceModel* slice)
 }
 void StationReceiverPanel::addPan(PanadapterModel* pan)
 {
-    if (!pan || m_pans.contains(pan->panId())) { return; }
+    if (!m_model || !pan || m_pans.contains(pan->panId())) { return; }
     auto* spectrum = new SpectrumWidget(bodyWidget(), SpectrumWidget::SettingsPersistence::SessionOnly);
     spectrum->setMinimumHeight(180);
     if (auto* menu = spectrum->overlayMenu()) {
@@ -221,8 +231,6 @@ void StationReceiverPanel::addPan(PanadapterModel* pan)
     spectrum->setDbmRange(pan->minDbm(), pan->maxDbm());
     m_pans.insert(pan->panId(), {pan, spectrum}); m_pansLayout->addWidget(spectrum, 1);
     applyCapabilities(m_model->isConnected(), m_model->backendCapabilities());
-    connect(pan, &PanadapterModel::infoChanged, spectrum, &SpectrumWidget::observeFrequencyRange);
-    connect(pan, &PanadapterModel::levelChanged, spectrum, &SpectrumWidget::setDbmRange);
     QPointer<PanadapterModel> guardedPan(pan);
     QPointer<SpectrumWidget> guardedSpectrum(spectrum);
     // A retired widget can still have queued gestures, and a replacement can
@@ -233,6 +241,12 @@ void StationReceiverPanel::addPan(PanadapterModel* pan)
         return view != m_pans.cend() && view->model == guardedPan
             && view->spectrum == guardedSpectrum;
     };
+    connect(pan, &PanadapterModel::infoChanged, spectrum, [spectrum, currentPan](double center, double span) {
+        if (currentPan()) { spectrum->observeFrequencyRange(center, span); }
+    });
+    connect(pan, &PanadapterModel::levelChanged, spectrum, [spectrum, currentPan](float min, float max) {
+        if (currentPan()) { spectrum->setDbmRange(min, max); }
+    });
     const auto geometry = [this, guardedPan, currentPan](std::optional<double> center, std::optional<double> span) {
         if (currentPan()) {
             m_model->requestPanDisplay(guardedPan, {PanDisplayField::Geometry, PanGeometryRequest{center, span}});
@@ -284,7 +298,7 @@ void StationReceiverPanel::addPan(PanadapterModel* pan)
 }
 void StationReceiverPanel::removePan(const QString& id)
 {
-    if (!m_pans.contains(id)) { return; }
+    if (!m_model || !m_pans.contains(id)) { return; }
     const auto view = m_pans.take(id);
     view.spectrum->prepareForShutdown(); m_pansLayout->removeWidget(view.spectrum);
     view.spectrum->hide(); view.spectrum->deleteLater();
