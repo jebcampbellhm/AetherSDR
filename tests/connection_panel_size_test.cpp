@@ -868,7 +868,7 @@ int main(int argc, char** argv)
             report("Web-888 port editor has room to display all five digits",
                    portEditor && portEditor->width() > portEditor->fontMetrics().horizontalAdvance(QStringLiteral("65535")));
             QList<RadioInfo> requested;
-            QObject::connect(&panel, &ConnectionPanel::connectWithOptionsRequested, &panel,
+            QObject::connect(&panel, &ConnectionPanel::connectRequested, &panel,
                 [&requested](const RadioInfo& info) { requested.push_back(info); });
             address->setText(QStringLiteral("127.0.0.1"));
             port->setValue(18073);
