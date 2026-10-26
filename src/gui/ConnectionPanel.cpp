@@ -826,10 +826,14 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_manualNrspPassEdit->setPlaceholderText(tr("Blank uses saved password"));
     ThemeManager::instance().applyStyleSheet(m_manualNrspPassEdit, lineEditStyle);
     auto* nrspPasswordField = new QWidget(manualGroup);
+    nrspPasswordField->setFocusProxy(m_manualNrspPassEdit);
+    m_manualNrspPassEdit->setMinimumHeight(kManualFieldHeight);
     auto* nrspPasswordLayout = new QHBoxLayout(nrspPasswordField);
     nrspPasswordLayout->setContentsMargins(0, 0, 0, 0);
     auto* forgetNrsp = new QPushButton(tr("Forget"), nrspPasswordField);
     forgetNrsp->setObjectName(QStringLiteral("connectionNrspForgetPassword"));
+    forgetNrsp->setAutoDefault(false);
+    forgetNrsp->setAccessibleName(tr("Forget saved nRSP-ST password"));
     forgetNrsp->setToolTip(tr("Remove the saved password for this receiver and username."));
     nrspPasswordLayout->addWidget(m_manualNrspPassEdit, 1);
     nrspPasswordLayout->addWidget(forgetNrsp);

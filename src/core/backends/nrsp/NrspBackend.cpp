@@ -146,19 +146,20 @@ void NrspBackend::attachWorker(const std::shared_ptr<std::atomic<qsizetype>>& de
     connect(m_worker, &nrsp::NrspWorker::ready, this,
         [this](quint64 token, const QVariantMap& source) {
             if (!accepts(token)) { return; }
+            QPointer<NrspBackend> self(this);
             if (!m_credentialEndpoint.isEmpty() && !m_password.isEmpty()) {
                 NrspCredentials::saveAccepted(m_credentialEndpoint, m_password, this,
                     [this, token](const QString& error) {
                         if (accepts(token) && !error.isEmpty()) { emit configurationWarning(error); }
                     });
             }
+            if (!self || !accepts(token)) { return; }
             m_password.clear();
             m_connecting = false;
             m_connected = true;
             m_source = source;
             m_center = source.value("frequencyHz").toDouble();
             m_bandwidth = source.value("sampleRate").toDouble() * nrsp::NrspWorker::kInitialSpanFraction;
-            QPointer<NrspBackend> self(this);
             emit connected();
             if (!self || !accepts(token)) { return; }
             emit panCenterBandwidthChanged(kPanId, m_center / 1e6, m_bandwidth / 1e6);
