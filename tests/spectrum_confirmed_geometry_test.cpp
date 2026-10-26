@@ -279,6 +279,9 @@ static int runStationDisplayIsolation()
 
     // Identical per-radio stream IDs must still address different view owners.
     RadioSession firstRadio, secondRadio;
+    QString fixtureError;
+    check(firstRadio.radioModel().automationApplySliceFixture(0, QStringLiteral("A"), &fixtureError),
+          "offline receive slice fixture created without a transport connection");
     PanadapterModel firstPan(QStringLiteral("0x40000000"));
     PanadapterModel secondPan(QStringLiteral("0x40000000"));
     StationReceiverPanel firstPanel(&firstRadio), secondPanel(&secondRadio);
@@ -305,6 +308,53 @@ static int runStationDisplayIsolation()
         check(!SpectrumOffscreenTestAccess::corrected(*firstView).isEmpty()
               && SpectrumOffscreenTestAccess::corrected(*secondView).isEmpty(),
               "identical stream IDs on different radios do not cross-feed spectrum");
+        auto* fixtureSlice = firstRadio.radioModel().slice(0);
+        int tuneIntents = 0;
+        if (!fixtureSlice) { return 1; }
+        QObject::connect(fixtureSlice, &SliceModel::frequencyCommandIssued, &firstPanel,
+                         [&](double) { ++tuneIntents; });
+        // Queue the actual widget signal, then retire/reuse the pan ID before
+        // its delivery. The old PanadapterModel deliberately stays alive.
+        auto delayedGesture = std::unique_ptr<QThread>(QThread::create([firstView] {
+            emit firstView->frequencyClicked(14.100000);
+        }));
+        delayedGesture->start(); delayedGesture->wait();
+        const QPointer<SpectrumWidget> retiredView(firstView);
+        emit firstRadio.radioModel().panadapterRemoved(firstPan.panId());
+        PanadapterModel replacement(firstPan.panId());
+        emit firstRadio.radioModel().panadapterAdded(&replacement);
+        SpectrumWidget* replacementView = nullptr;
+        for (auto* candidate : firstPanel.findChildren<SpectrumWidget*>()) {
+            if (candidate != firstView) { replacementView = candidate; }
+        }
+        check(replacementView != nullptr, "same pan ID can receive a new waterfall widget");
+        if (!replacementView) { return 1; }
+        QCoreApplication::processEvents();
+        check(tuneIntents == 0, "queued gesture from a retired waterfall cannot tune a replacement with the same pan ID");
+        const int beforeCurrentGesture = tuneIntents;
+        emit replacementView->frequencyClicked(14.101000);
+        check(tuneIntents == beforeCurrentGesture + 1, "current waterfall still sends its own receive-tuning intent");
+        const int beforeReuse = tuneIntents;
+        auto reusedModelGesture = std::unique_ptr<QThread>(QThread::create([replacementView] {
+            emit replacementView->frequencyClicked(14.102000);
+        }));
+        reusedModelGesture->start(); reusedModelGesture->wait();
+        const QPointer<SpectrumWidget> retiredReplacement(replacementView);
+        emit firstRadio.radioModel().panadapterRemoved(replacement.panId());
+        emit firstRadio.radioModel().panadapterAdded(&replacement);
+        firstView = nullptr;
+        for (auto* candidate : firstPanel.findChildren<SpectrumWidget*>()) {
+            if (candidate != retiredView.data() && candidate != retiredReplacement.data()) { firstView = candidate; }
+        }
+        check(firstView != nullptr, "same pan model can receive a replacement waterfall widget");
+        if (!firstView) { return 1; }
+        QCoreApplication::processEvents();
+        check(tuneIntents == beforeReuse, "reusing the same pan model cannot revive its old widget's queued gesture");
+        emit firstView->frequencyClicked(14.103000);
+        check(tuneIntents == beforeReuse + 1, "replacement view for the reused model still sends tuning intent");
+        emit firstRadio.radioModel().capabilitiesChanged(true, caps);
+        emit firstRadio.radioModel().panFeedSpectrumReady(replacement.panStreamId(),
+            QVector<float>(256, -104.0f), 0, SpectrumDecodeScale{});
         const auto retained = SpectrumOffscreenTestAccess::corrected(*firstView);
         firstPanel.detach();
         emit firstRadio.radioModel().panFeedSpectrumReady(firstPan.panStreamId(),

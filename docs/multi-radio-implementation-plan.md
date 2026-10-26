@@ -56,6 +56,37 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 20:25 UTC retired waterfall controls checkpoint:
+
+- Reproduced a queued gesture from a removed receiver waterfall tuning a new
+  view with the same pan ID. StationReceiverPanel now requires both the current
+  pan model and the current widget for outgoing geometry, tune, filter, slice
+  creation/removal and selection requests. Reusing the model itself cannot
+  revive the old widget's queued input. Slice selection also checks pan ownership.
+- Extended the offscreen station_display_isolation_test with an offline slice
+  fixture and genuinely queued widget signals. It covers replacement models,
+  reuse of the same model, positive current-view tuning and detached data paths.
+  The initial regression failed before the fix; removing only the widget-identity
+  comparison failed the same-model case. Restored production code passed all four
+  selected GUI regressions, including geometry, Retina pan and TX permission.
+- Experimental desktop rebuilt; minimal-PATH startup self-test returned
+  0 / 26.10.4. Docs build, boundary (0 blockers / 101 baseline warnings),
+  capability, command-plane, registration, manifest and whitespace checks passed.
+  No live receiver, audio device or normal desktop GUI was opened this increment.
+  Daily executable remains unchanged at 163880448 bytes / 10:48:50 local.
+- Evidence under build-web888-evidence: station-retired-pan-before-test.log,
+  station-retired-pan-mutation-test.log, station-retired-pan-build.log,
+  station-retired-pan-test.log, station-retired-pan-docs.log and
+  station-retired-pan-startup-marker.txt. No mutations remain.
+
+NEXT: review pending model callbacks during receiver-panel detach and session
+removal, then finish the window's build/validation handoff. Reconnect transport
+has been checked in both directions; reconnect-in-place UI, audible/rendered
+desktop qualification and real Icom qualification remain separate work.
+Keep PC audio off and daily build unchanged; stop at 21:30 UTC.
+
+### Earlier bidirectional reconnect checkpoint
+
 2026-10-26 20:12 UTC bidirectional live reconnect checkpoint:
 
 - Extended the opt-in radio_station_live_probe with --reconnect web|nrsp.

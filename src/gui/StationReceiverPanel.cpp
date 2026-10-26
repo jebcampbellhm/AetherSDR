@@ -224,8 +224,17 @@ void StationReceiverPanel::addPan(PanadapterModel* pan)
     connect(pan, &PanadapterModel::infoChanged, spectrum, &SpectrumWidget::observeFrequencyRange);
     connect(pan, &PanadapterModel::levelChanged, spectrum, &SpectrumWidget::setDbmRange);
     QPointer<PanadapterModel> guardedPan(pan);
-    const auto geometry = [this, guardedPan](std::optional<double> center, std::optional<double> span) {
-        if (m_model && guardedPan) {
+    QPointer<SpectrumWidget> guardedSpectrum(spectrum);
+    // A retired widget can still have queued gestures, and a replacement can
+    // reuse both the pan ID and model. Only the currently owned view may act.
+    const auto currentPan = [this, guardedPan, guardedSpectrum] {
+        if (!m_model || !guardedPan || !guardedSpectrum) { return false; }
+        const auto view = m_pans.constFind(guardedPan->panId());
+        return view != m_pans.cend() && view->model == guardedPan
+            && view->spectrum == guardedSpectrum;
+    };
+    const auto geometry = [this, guardedPan, currentPan](std::optional<double> center, std::optional<double> span) {
+        if (currentPan()) {
             m_model->requestPanDisplay(guardedPan, {PanDisplayField::Geometry, PanGeometryRequest{center, span}});
         }
     };
@@ -235,27 +244,35 @@ void StationReceiverPanel::addPan(PanadapterModel* pan)
         [geometry](double center) { geometry(center, {}); });
     connect(spectrum, &SpectrumWidget::bandwidthChangeRequested, this,
         [geometry](double span) { geometry({}, span); });
-    connect(spectrum, &SpectrumWidget::frequencyClicked, this, [this, guardedPan](double mhz) {
+    connect(spectrum, &SpectrumWidget::frequencyClicked, this, [this, guardedPan, currentPan](double mhz) {
+        if (!currentPan()) { return; }
         if (auto* slice = selectedSlice(); slice && guardedPan && slice->panId() == guardedPan->panId()) { slice->setFrequency(mhz); }
     });
-    connect(spectrum, &SpectrumWidget::sliceTuneRequested, this, [this, guardedPan](int id, double mhz) {
+    connect(spectrum, &SpectrumWidget::sliceTuneRequested, this, [this, guardedPan, currentPan](int id, double mhz) {
+        if (!currentPan()) { return; }
         auto* slice = m_model ? m_model->slice(id) : nullptr;
         if (slice && guardedPan && slice->panId() == guardedPan->panId()) { slice->setFrequency(mhz); }
     });
-    connect(spectrum, &SpectrumWidget::incrementalTuneRequested, this, [this, guardedPan](double mhz) {
+    connect(spectrum, &SpectrumWidget::incrementalTuneRequested, this, [this, guardedPan, currentPan](double mhz) {
+        if (!currentPan()) { return; }
         if (auto* slice = selectedSlice(); slice && guardedPan && slice->panId() == guardedPan->panId()) { slice->setFrequency(mhz); }
     });
-    connect(spectrum, &SpectrumWidget::filterChangeRequested, this, [this, guardedPan](int low, int high) {
+    connect(spectrum, &SpectrumWidget::filterChangeRequested, this, [this, guardedPan, currentPan](int low, int high) {
+        if (!currentPan()) { return; }
         if (auto* slice = selectedSlice(); slice && guardedPan && slice->panId() == guardedPan->panId()) { slice->setFilterWidth(low, high); }
     });
-    connect(spectrum, &SpectrumWidget::sliceCreateRequested, this, [this, guardedPan](double mhz) {
-        if (m_model && guardedPan) { m_model->addSliceOnPan(guardedPan->panId(), mhz); }
+    connect(spectrum, &SpectrumWidget::sliceCreateRequested, this, [this, guardedPan, currentPan](double mhz) {
+        if (currentPan()) { m_model->addSliceOnPan(guardedPan->panId(), mhz); }
     });
-    connect(spectrum, &SpectrumWidget::sliceCloseRequested, this, [this, guardedPan](int id) {
+    connect(spectrum, &SpectrumWidget::sliceCloseRequested, this, [this, guardedPan, currentPan](int id) {
+        if (!currentPan()) { return; }
         auto* slice = m_model ? m_model->slice(id) : nullptr;
         if (slice && guardedPan && slice->panId() == guardedPan->panId()) { m_model->removeSlice(id); }
     });
-    connect(spectrum, &SpectrumWidget::sliceClicked, this, [this](int id) {
+    connect(spectrum, &SpectrumWidget::sliceClicked, this, [this, guardedPan, currentPan](int id) {
+        if (!currentPan()) { return; }
+        const auto* slice = m_model->slice(id);
+        if (!slice || slice->panId() != guardedPan->panId()) { return; }
         const int index = m_slice->findData(id); if (index >= 0) {
             m_slice->setCurrentIndex(index);
             if (auto* slice = selectedSlice()) { slice->setActive(true); }
