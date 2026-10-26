@@ -137,6 +137,25 @@ Spectrum and waterfall packets are larger than the tunnel allows, so they are dr
 
 1. Lower **Network MTU**; see [Low Bandwidth Connections](./low-bandwidth-connections.md).
 
+## Additional receivers (experimental station build)
+
+The multi-radio station development build adds **File → Additional receivers…**.
+Open this dock and choose **Add receiver…** to connect a receiver without
+replacing the primary radio. Select its radio type and enter its address and
+credentials in the normal connection form. Up to two additional receiver panels
+can remain alongside the main radio's display.
+
+Each panel owns its waterfalls, receive slices, frequency, mode and filter
+edges. Selecting a slice or clicking its spectrum affects that receiver only.
+Use the panel's close button to disconnect and remove it. Closing the dock only
+hides it; its receivers continue running until removed or AetherSDR exits.
+
+This initial station preview keeps additional receivers' **PC audio off**.
+Their panels provide no transmit controls. The main radio retains its existing
+controls; selecting an additional receiver does not assign it transmit authority.
+Icom Ethernet operation in a three-radio station has not yet been hardware
+validated. This preview does not provide RF protection or coordinated TX muting.
+
 ## See also
 
 - [Tailscale Remote Access](./tailscale-remote-access.md)

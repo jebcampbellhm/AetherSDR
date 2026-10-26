@@ -1,3 +1,5 @@
+#include "gui/StationWorkspace.h"
+#include <QDockWidget>
 // MainWindow_Session.cpp — radio-session wiring: wireDiscovery() (LAN,
 // heartbeat/TCP-ping disconnect detection, SmartLink), wireRadioModel()
 // (connection state, status routing, DAX TX stream IDs), wirePanLifecycle()
@@ -3482,4 +3484,20 @@ void MainWindow::createPansSequentially(const QString& layoutId, int total,
     }
 }
 
+} // namespace AetherSDR
+
+namespace AetherSDR {
+void MainWindow::showStationWorkspace()
+{
+    auto* dock = findChild<QDockWidget*>(QStringLiteral("additionalReceiversDock"));
+    if (!dock) {
+        dock = new QDockWidget(tr("Additional receivers"), this);
+        dock->setObjectName(QStringLiteral("additionalReceiversDock"));
+        dock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::RightDockWidgetArea);
+        dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+        dock->setWidget(new StationWorkspace(dock));
+        addDockWidget(Qt::BottomDockWidgetArea, dock);
+    }
+    dock->show(); dock->raise();
+}
 } // namespace AetherSDR

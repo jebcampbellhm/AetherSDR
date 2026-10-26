@@ -305,6 +305,10 @@ void MainWindow::buildMenuBar()
         toggleConnectionDialog();
     });
 
+    auto* stationAction = fileMenu->addAction(tr("Additional receivers…"));
+    stationAction->setMenuRole(QAction::NoRole);
+    connect(stationAction, &QAction::triggered, this, &MainWindow::showStationWorkspace);
+
     auto* disconnectRadio = fileMenu->addAction("Disconnect");
     disconnectRadio->setMenuRole(QAction::NoRole);
     connect(disconnectRadio, &QAction::triggered,

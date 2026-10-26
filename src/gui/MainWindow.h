@@ -1975,6 +1975,7 @@ private:
     bool m_shuttingDown{false};
     bool m_panadapterUiPreparedForShutdown{false};
     void preparePanadapterUiForShutdown();
+    void showStationWorkspace();
     void toggleConnectionDialog();
     bool m_useSystemClock{true};     // true when no GPS installed
     bool m_paTempUseFahrenheit{true};

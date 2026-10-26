@@ -56,11 +56,57 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 17:20 UTC desktop preview increment:
+
+- `StationWorkspace` is a CanonCanvas in a dock reached through **File →
+  Additional receivers…**. Its Add receiver action reuses ConnectionPanel and
+  adds up to two independent RadioStation sessions without replacing the
+  primary MainWindow model. Close on a receiver removes it; closing the dock
+  hides it without stopping reception. No automatic connections.
+- `StationReceiverPanel` binds neutral model pan feeds by the owning model plus
+  pan/waterfall ID. It offers per-radio slice selection, frequency, mode, filter
+  edges, add/remove slice and add waterfall. Spectrum click/drag/wheel tuning
+  and pan geometry requests route only through that model. Selection reconciles
+  to the model's active-slice state. Additional panels are silent and have no
+  wired TX intent; the primary main-window controls are unchanged.
+- Full overlay menu is disabled with a reason pending proper session binding;
+  do not expose placeholder controls as working. Individual waterfall close,
+  reconnect-in-place, per-receiver display-setting namespaces and full AGC/DSP
+  controls are not yet complete. Existing SpectrumWidget preferences currently
+  inherit the default pan slot: audit/isolate this before calling the UI ready.
+- Built `build-multi-radio-station/AetherSDR.exe` separately, retaining the old
+  daily executable (unchanged timestamp 2026-10-26 10:48:50 local). Full build,
+  Qt DLL deployment, radio_station_test, docs build, engine-boundary (0 blockers,
+  101 baseline warnings), capability, command-plane, registration, manifest and
+  whitespace checks passed. Minimal-PATH `--update-selftest` returned 0 / version
+  26.10.4. No normal UI launch, rendered desktop validation, audio device or live
+  probe was performed this increment. Earlier model-level live evidence below
+  remains valid but must not be presented as rendered desktop support.
+- Scripts/logs: station-desktop-build.cmd (fresh build),
+  station-desktop-final.cmd (incremental build/deploy/test),
+  station-desktop-final-build.log, station-desktop-tests.log,
+  station-desktop-deploy.log, station-startup-marker.txt and station-docs.log in
+  build-web888-evidence. All running build/test commands have finished.
+- New UI-to-model includes are deliberate: the receiver panel consumes the
+  existing neutral RadioSession/PanadapterModel/SliceModel surfaces; workspace
+  owns the new universal RadioStation. Manifest regenerated and tagged, no
+  vendor include or raw-wire allowance added.
+
+NEXT bounded increment: review the preview's lifetime/control routing and
+settings isolation; add behavioral tests for per-radio view binding if feasible
+without GUI automation. Then integrate explicit selected-only audio with the
+existing AudioEngine and primary feed, muted by default and tested silently;
+never mix primary and additional feeds accidentally. Add TX designation and
+observed-TX recovery/interruption after route isolation. Icom is Ethernet but
+not online for 1-2 days. UI and real Icom qualification still pending.
+
+### Earlier foundation checkpoint
+
 2026-10-26 16:46 UTC: RadioStation source and socket-free tests implemented.
 It owns multiple existing RadioSession objects, keeps focus/audio independent,
 and fences queued audio across selection/removal. Model destruction is deferred
 when removal originates in a model signal. No desktop integration or TX
- designation exists yet. The core test passed; engine boundary, capability,
+designation existed at this checkpoint. The core test passed; engine boundary, capability,
 command-plane and test-registration checks passed; manifest stayed current.
 
 The silent simultaneous model-level live probe passed: Web-888 361472 audio

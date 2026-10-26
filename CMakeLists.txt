@@ -1364,6 +1364,8 @@ set(GUI_SOURCES
     src/gui/AgcCalibrationDialog.cpp
     src/gui/AudioDeviceChangeDialog.cpp
     src/gui/WfmDeviceDialog.cpp
+    src/gui/StationWorkspace.cpp
+    src/gui/StationReceiverPanel.cpp
     src/gui/ConnectionPanel.cpp
     src/gui/ClientDisconnectDialog.cpp
     src/gui/ConnectedStationsDialog.cpp

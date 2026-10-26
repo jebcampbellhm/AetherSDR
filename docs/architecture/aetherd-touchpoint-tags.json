@@ -1852,5 +1852,11 @@
   "note": "Endpoint-and-username-bound OS-keychain credential handoff. Contains no vendor protocol or radio state; UI forgets credentials and backend loads and saves accepted credentials.",
   "split": "",
   "confidence": "high"
+ },
+ "models/RadioStation.h": {
+  "tag": "universal",
+  "note": "Independent RadioSession ownership and selected PCM routing with session identity and selection-generation fences; no vendor protocol or transmit authority.",
+  "split": "",
+  "confidence": "high"
  }
 }
