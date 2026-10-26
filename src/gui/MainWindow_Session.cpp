@@ -2621,6 +2621,11 @@ void MainWindow::wireMonitorAudio()
     if (!m_monitorRouter) {
         m_monitorRouter = new MonitorAudioRouter(this);
         m_monitorRouter->setMuted(m_rxMutedForPlayback);
+        m_monitorRouter->setSourceAvailable(0, m_radioModel.isConnected());
+        connect(&m_radioModel, &RadioModel::connectionStateChanged, m_monitorRouter,
+                [router = m_monitorRouter](bool connected) { router->setSourceAvailable(0, connected); });
+        connect(m_monitorRouter, &MonitorAudioRouter::playbackAvailabilityChanged,
+                this, [this] { refreshMonitorPlayback(); });
     }
     // The normalized bus chooses exactly one real producer for every backend.
     // Decoder/recorder taps retain their original lifetime, outside this route.
@@ -2628,6 +2633,17 @@ void MainWindow::wireMonitorAudio()
             m_monitorRouter, &MonitorAudioRouter::feedPrimary, Qt::UniqueConnection);
     connect(m_monitorRouter, &MonitorAudioRouter::pcmReady,
             m_audio, &AudioEngine::feedPcmFrame, Qt::UniqueConnection);
+}
+
+void MainWindow::refreshMonitorPlayback(bool restart)
+{
+    if (!m_audio || !m_monitorRouter) { return; }
+    const bool enabled = AppSettings::instance().value("PcAudioEnabled", "True").toString() == "True";
+    const auto request = m_monitorRouter->requestPlayback(enabled, restart, m_shuttingDown);
+    QMetaObject::invokeMethod(m_audio, [audio = m_audio, request] {
+        request.dispatch(audio->isRxStreaming(), [audio] { audio->startRxStream(); },
+                         [audio] { audio->stopRxStream(); });
+    });
 }
 
 // The RX-audio taps that listen ALONGSIDE the speaker: the QSO recorder and the
@@ -3462,6 +3478,8 @@ void MainWindow::showStationWorkspace()
         wireMonitorAudio();
         connect(workspace, &StationWorkspace::monitorSelectionChanged,
                 m_monitorRouter, &MonitorAudioRouter::selectSource);
+        connect(workspace, &StationWorkspace::monitorAvailabilityChanged,
+                m_monitorRouter, &MonitorAudioRouter::setSourceAvailable);
         connect(workspace, &StationWorkspace::monitorFrameReady,
                 m_monitorRouter, &MonitorAudioRouter::feed);
         connect(workspace, &QObject::destroyed, m_monitorRouter, [router = m_monitorRouter] {

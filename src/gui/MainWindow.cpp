@@ -1879,19 +1879,14 @@ MainWindow::MainWindow(QWidget* parent)
         if (on) {
             // Restart the local audio sink to recover from stale WASAPI sessions
             // (e.g. after Teams/Zoom reconfigures the audio endpoint). (#1569)
-            QMetaObject::invokeMethod(m_audio, [this]() {
-                m_audio->stopRxStream();
-                m_audio->startRxStream();
-            });
+            refreshMonitorPlayback(true);
             m_radioModel.createRxAudioStream();
         } else {
             // Stop the local sink so audio isn't played locally, then drop
             // the remote_audio_rx stream. TCI clients get RX audio via DAX
             // (#1331), not this stream, so there's no client to keep it
             // alive for.
-            QMetaObject::invokeMethod(m_audio, [this]() {
-                m_audio->stopRxStream();
-            });
+            refreshMonitorPlayback();
             m_radioModel.removeRxAudioStream();
         }
 
@@ -5163,11 +5158,12 @@ void MainWindow::updatePcAudioTooltip()
 
 void MainWindow::audioStartRx()
 {
-    QMetaObject::invokeMethod(m_audio, &AudioEngine::startRxStream);
+    refreshMonitorPlayback();
 }
 
 void MainWindow::audioStopRx()
 {
+    if (m_monitorRouter) { m_monitorRouter->requestPlayback(false, false, true); }
     QMetaObject::invokeMethod(m_audio, &AudioEngine::stopRxStream);
 }
 
@@ -7118,7 +7114,7 @@ void MainWindow::onConnectionStateChanged(bool connected)
 #if defined(Q_OS_MACOS) || defined(HAVE_PIPEWIRE)
         stopDax();
 #endif
-        audioStopRx();
+        refreshMonitorPlayback();
         audioStopTx();
         // Clear the cached DAX-TX stream id on connection loss. RadioModel already
         // resets its own dax_tx state on disconnect, but AudioEngine::m_txStreamId

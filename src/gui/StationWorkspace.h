@@ -21,6 +21,7 @@ public:
 signals:
     void primaryTransmitPermissionChanged(bool allowed);
     void monitorSelectionChanged(int source);
+    void monitorAvailabilityChanged(int source, bool available);
     void monitorFrameReady(int source, const AetherSDR::PcmFrame& frame);
 private:
     void showConnect();

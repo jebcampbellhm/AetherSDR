@@ -70,6 +70,7 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
     m_receivers->addStretch(); scroll->setWidget(content); layout->addWidget(scroll, 1);
     connect(add, &QPushButton::clicked, this, &StationWorkspace::showConnect);
     connect(&m_station, &RadioStation::sessionRemoved, this, [this](int id) {
+        emit monitorAvailabilityChanged(id + 1, false);
         if (m_monitor->currentData().toInt() == id + 1) { selectMonitor(-1); }
         const QSignalBlocker blocker(m_monitor);
         m_monitor->removeItem(m_monitor->findData(id + 1));
@@ -130,6 +131,9 @@ void StationWorkspace::addReceiver(const RadioInfo& info, const QVariantMap& opt
     const int id = m_station.addSession(info.model + QStringLiteral(" · ") + info.address.toString());
     auto* session = m_station.session(id);
     if (!session) { return; }
+    connect(&session->radioModel(), &RadioModel::connectionStateChanged, this, [this, id](bool connected) {
+        if (m_station.session(id)) { emit monitorAvailabilityChanged(id + 1, connected); }
+    });
     m_monitor->addItem(session->label(), id + 1);
     auto* panel = new StationReceiverPanel(session, this);
     m_panels.insert(id, panel); m_receivers->insertWidget(m_receivers->count() - 1, panel, 1);

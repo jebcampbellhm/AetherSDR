@@ -160,9 +160,12 @@ Use **Listen to:** to choose **Primary radio**, one additional receiver, or
 discards queued audio from the previous choice. Removing the selected receiver
 sets the selector to **Off**. Adding a receiver does not change the selection.
 The existing **PC Audio** switch must also be on; choosing a radio does not turn
-it on. Decoder/recording feeds keep their own radio source. The speaker DSP
-controls remain shared, and the preview still needs its primary connection for
-the existing PC Audio device lifecycle.
+it on. Decoder/recording feeds keep their own radio source. A selected additional
+receiver can play while the primary radio is disconnected; primary reconnects
+do not restart that receiver's speaker output. Losing the selected receiver or
+choosing Off releases the live receiver's speaker output. The speaker DSP
+controls remain shared. An intentional local recording/preview playback can
+still use the shared output while live reception is Off.
 
 For the Icom/Web-888/nRSP-ST station, connect the **Icom as the primary radio**,
 then add the two SDRs here. Opening Additional receivers initially disables
@@ -186,6 +189,8 @@ releasing a button or losing the connection does not confirm that transmission
 has stopped. The dock displays this waiting state. A resumed decoder stream
 starts a fresh segment; timed Web-888 jobs also need a fresh verified clock
 anchor. This does not enable timed decoding on unqualified firmware.
+This waiting state still applies if the primary disconnects during transmission;
+the independent speaker lifecycle does not bypass it.
 
 This is local audio/data muting, not RF protection, and cannot mute samples
 already sent to a speaker device or another program. Keep the hardware receive

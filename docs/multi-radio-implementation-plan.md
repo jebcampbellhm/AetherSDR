@@ -56,6 +56,59 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 20:00 UTC independent speaker lifecycle increment:
+
+- MonitorAudioRouter now tracks source availability separately from selection.
+  The desktop's receive-output lifecycle follows the selected connected radio
+  and the existing PC Audio setting. An additional receiver can request output
+  while the primary is offline; primary connect/disconnect does not restart or
+  stop an already selected additional receiver. TX capture remains primary-only.
+  Source loss/removal and Off release live receiver output. Independent local
+  playback owners retain their shared-sink demand; PC Audio OFF still wins.
+- Device requests are revocable across queued delivery, newer toggles, source
+  loss, shutdown and router destruction. Restart rechecks after stop callbacks.
+  OFF runs full cleanup even if the main sink is already missing, covering
+  remaining local tones/buffers. PC Audio OFF also revokes queued speaker PCM
+  and drops new routed speaker frames, without retiring decoder producers.
+  ON begins fresh speaker PCM. Prior observed-TX receive holds still apply.
+- StationWorkspace forwards each additional model's connection availability
+  with its source ID and rejects callbacks for removed sessions. Existing
+  primary disconnect cleanup now refreshes selected receive playback instead
+  of unconditionally closing it. Forced application shutdown still stops RX.
+  No new settings keys, receiver commands, credentials or TX paths were added.
+- Ten selected regressions passed after the final cleanup/PCM changes:
+  monitor_audio_router_test, station_receive_interruption_test,
+  radio_station_test, audio_engine_pcm_lifetime_test, tx_audio_context_test,
+  hl2_pc_audio_lock_test, spectrum_confirmed_geometry_test,
+  spectrum_pan_pixels_retina_test, station_display_isolation_test and
+  station_transmit_permission_test. Device-intent tests use callback counters,
+  and AudioEngine tests use memory output; no real audio device is opened.
+  Removing the stale-request guard caused the queued-stop regression to fail;
+  the restored guard passed. No mutations remain.
+- Experimental desktop rebuilt; minimal-PATH startup self-test returned
+  0 / 26.10.4. Docs build and whitespace checks passed. Boundary scan still
+  has 0 blockers / 101 baseline warnings; capability, command-plane and
+  manifest checks passed. Evidence: station-playback-final-build.log,
+  station-playback-final-tests.log, station-playback-mutant-test.log,
+  station-playback-restored-test.log, station-playback-boundary.log,
+  station-playback-docs.log and station-playback-startup-marker.txt under
+  build-web888-evidence. Earlier policy-build logs are superseded by the final
+  ten-test run. No commands or receiver leases remain active this increment.
+- Daily executable remains 163880448 bytes, 2026-10-26 10:48:50 local. PC audio
+  remained off, no normal GUI was launched, and no radio was contacted in this
+  increment. The preceding live receive evidence remains separate. Actual
+  audible output, ordinary rendered desktop and Icom hardware remain
+  unqualified. Speaker DSP controls are still shared, not per-radio processors.
+
+NEXT: extend the bounded silent simultaneous receive probe to exercise one SDR
+disconnecting/reconnecting while the other continues, including availability,
+old PCM lease invalidation and selected-only routing. Keep devices closed and
+always release both receivers. Then review remaining per-radio controls and
+panel teardown. Work remains local on feature/multi-radio-station; stop and
+pause automation at 21:30 UTC. Icom is still unavailable; never key hardware.
+
+### Earlier receive interruption checkpoint
+
 2026-10-26 19:33 UTC station receive interruption increment:
 
 - RadioStation watches the primary's normalized TX status. An observed TX holds

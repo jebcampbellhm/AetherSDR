@@ -670,6 +670,7 @@ private:
     void rewirePanStreamAfterBackendSwap();   // MainWindow_Session.cpp
     // Idempotent normalized RX subscriptions survive backend replacement.
     void wireMonitorAudio();                 // MainWindow_Session.cpp
+    void refreshMonitorPlayback(bool restart = false); // MainWindow_Session.cpp
     void wireRxDemodAudioSinks();             // MainWindow_Session.cpp
     // Live RX is muted while something plays audio back through the same sink:
     // the QSO recorder, the PUDU monitor, or a voice keyer preview.
