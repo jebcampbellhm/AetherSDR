@@ -25,7 +25,7 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
     auto* title = new QLabel(session->label(), bodyWidget());
     title->setTextFormat(Qt::PlainText);
     header->addWidget(title);
-    m_status = new QLabel(tr("Connecting — PC audio off"), bodyWidget());
+    m_status = new QLabel(tr("Connecting"), bodyWidget());
     m_status->setTextFormat(Qt::PlainText);
     m_status->setWordWrap(true);
     header->addWidget(m_status, 1);
@@ -89,7 +89,7 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
         }
     });
     connect(m_model, &RadioModel::connectionStateChanged, this, [this](bool on) {
-        m_status->setText(on ? tr("Receiving — PC audio off") : tr("Disconnected — PC audio off"));
+        m_status->setText(on ? tr("Receiving") : tr("Disconnected"));
         if (!on) { for (const auto& view : std::as_const(m_pans)) { view.spectrum->clearDisplay(); } }
         refreshControls();
     });

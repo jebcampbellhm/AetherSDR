@@ -37,17 +37,17 @@ int main(int argc, char** argv)
         }, Qt::QueuedConnection);
     station.selectAudioSession(web);
     const auto firstRevision = station.audioRevision();
-    emit station.session(web)->radioModel().backendAudioFrameReady(*frame);
+    emit station.session(web)->radioModel().rxDemodAudioReady(*frame);
     station.selectAudioSession(nrsp);
     station.selectAudioSession(web);
     QCoreApplication::processEvents();
     check(deliveries == 0 && !station.acceptsAudio(web, firstRevision, *frame),
         "queued audio cannot survive switching away and back");
-    emit station.session(web)->radioModel().backendAudioFrameReady(*frame);
-    emit station.session(nrsp)->radioModel().backendAudioFrameReady(*frame);
+    emit station.session(web)->radioModel().rxDemodAudioReady(*frame);
+    emit station.session(nrsp)->radioModel().rxDemodAudioReady(*frame);
     QCoreApplication::processEvents();
     check(deliveries == 1, "only explicitly selected session feeds audio");
-    emit station.session(web)->radioModel().backendAudioFrameReady(*frame);
+    emit station.session(web)->radioModel().rxDemodAudioReady(*frame);
     check(station.removeSession(web), "selected session retires");
     QCoreApplication::processEvents();
     check(deliveries == 1 && station.audioSessionId() == -1

@@ -3128,9 +3128,8 @@ void RadioModel::wireRxDemodAudioBus()
         return;
     }
     if (m_panStream) {
-        // Flex: the VITA-49 slice audio, unchanged and still feeding the engine
-        // by its own existing connection. This is an ADDITIONAL subscriber to
-        // the same signal, so the audible path is untouched.
+        // Flex: publish the VITA-49 speaker stream through the same bus as
+        // seam-native audio. Speaker selection and decoder taps subscribe here.
         m_rxDemodBusConn = connect(m_panStream, &PanadapterStream::pcmFrameReady,
                                    this, [this](const PcmFrame& frame) {
             if (!m_demodPcmGate.accept(frame)) {

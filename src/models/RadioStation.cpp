@@ -13,7 +13,7 @@ int RadioStation::addSession(const QString& label)
     auto value = std::make_unique<RadioSession>();
     value->setSessionId(id);
     value->setLabel(label);
-    connect(&value->radioModel(), &RadioModel::backendAudioFrameReady, this,
+    connect(&value->radioModel(), &RadioModel::rxDemodAudioReady, this,
         [this, id](const PcmFrame& frame) {
             const quint64 revision = m_audioRevision;
             if (acceptsAudio(id, revision, frame)) { emit audioFrameReady(id, revision, frame); }

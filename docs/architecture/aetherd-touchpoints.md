@@ -4,7 +4,7 @@
 
 Burndown manifest for the engine/UI decoupling ([RFC](../aetherd-headless-engine-design.md) §2, §10). One row per engine header the UI includes; converting a touchpoint means the UI reaches that surface through the versioned protocol instead of the header.
 
-**Totals:** 277 touchpoint headers (224 core, 53 models) — 277/277 tagged, 0/277 converted.
+**Totals:** 278 touchpoint headers (224 core, 54 models) — 278/278 tagged, 0/278 converted.
 
 | Header | Includers | Tag | Status |
 |---|---:|---|---|
@@ -264,6 +264,7 @@ Burndown manifest for the engine/UI decoupling ([RFC](../aetherd-headless-engine
 | `models/MeterModel.h` | 7 | mixed(flex) — Meter registry+values are core-profile; VITA-49 raw scaling, TGXL/PGXL amp routing, COMPPEAK quirks are Flex | unconverted |
 | `models/ModeVocabulary.h` | 1 | universal — Canonical mode vocabulary: which slice modes count as voice (SSB, AM/SAM, the FM family) and which as CW (CW/CWU/CWL). Radio-family-neutral state and validation data - every backend reports these spellings - split out of gui/VoiceModeGate.h so the engine can answer the question without reaching into the UI. Same precedent as core/CtcssTones.h. The panel-policy half (shouldAutoHideCopyAssist) stayed in gui. | unconverted |
 | `models/ModelCapabilities.h` | 1 | mixed(flex) — Per-model capability table mirroring FlexLib ModelInfo.cs (RadioPlatform, has2Meters/has4Meters, loop A/B). This is the universal question 'what can this radio do', answered exclusively from a vendor table — and its band-availability half is precisely the band truth RFC §4.1 assigns to the capability descriptor. Consumed above the seam by SpectrumOverlayMenu, XvtrPolicy, WaveformInstallGate and MainWindow_Wiring. | unconverted |
+| `models/MonitorAudioRouter.h` | 2 | universal — Selected speaker source model; revokes queued and converted PCM without retiring original decoder epochs. No device, vendor protocol or transmit authority. | unconverted |
 | `models/NetEntry.h` | 2 | ui-support — Net scheduler entry: RRULE/timezone/reminder metadata, operator-scoped local JSON; radio state only via embedded MemoryEntry | unconverted |
 | `models/Nr2SettingsModel.h` | 5 | universal — Process-wide owner of client-side NR2 configuration as one versioned object (Principle V), so every editing surface shares state. Engine DSP configuration; radio-agnostic. | unconverted |
 | `models/PanadapterModel.h` | 6 | mixed(flex) — Per-pan display state is core-profile; DAX IQ ch, client_handle, VITA stream IDs, SmartSDR kv parsing are flex. | unconverted |

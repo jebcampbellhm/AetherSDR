@@ -19,6 +19,7 @@
 
 #include "models/Ctr2ProxyModel.h"
 #include "models/CwDecodeSettings.h"
+#include "models/MonitorAudioRouter.h"
 #include "DisplaySettings.h"
 #ifdef HAVE_MQTT
 #include "MqttApplet.h"
@@ -885,25 +886,14 @@ void MainWindow::requestWanReconnect()
 // The mute holds while ANY owner wants it: the QSO recorder, the PUDU monitor
 // and a voice keyer preview are independent and can overlap, and the one that
 // finishes first must not unmute under the others.
-//
-// Flex mutes by dropping PanadapterStream::pcmFrameReady; a seam backend has no
-// such connection, so m_rxMutedForPlayback is what its relay consults. The
-// reconnect is skipped for a backend that supplies its own seam audio (the
-// demo, RFC #4288 Route A): it never had this connection, and Qt permits
-// duplicates, so re-adding it would stack another copy of the feed
-// wirePanStreamRxAudioSinks() deliberately skips.
 void MainWindow::setRxPlaybackMute(const QString& owner, bool mute)
 {
     const RxPlaybackMuteOwners::Edge edge = m_rxPlaybackMuters.set(owner, mute);
     if (edge == RxPlaybackMuteOwners::Edge::None)
         return;
     m_rxMutedForPlayback = m_rxPlaybackMuters.muted();
-    if (edge == RxPlaybackMuteOwners::Edge::Mute) {
-        disconnect(m_radioModel.panStream(), &PanadapterStream::pcmFrameReady,
-                   m_audio, &AudioEngine::feedPcmFrame);
-    } else if (!backendFeedsEngineDirectly()) {
-        connect(m_radioModel.panStream(), &PanadapterStream::pcmFrameReady,
-                m_audio, &AudioEngine::feedPcmFrame, Qt::UniqueConnection);
+    if (m_monitorRouter) {
+        m_monitorRouter->setMuted(m_rxMutedForPlayback);
     }
 }
 
@@ -1524,20 +1514,14 @@ MainWindow::MainWindow(QWidget* parent)
 
     // Display overlay connections are now per-pan in wirePanadapter().
 
-    // ── Panadapter stream → audio engine ──────────────────────────────────
-    // All VITA-49 traffic arrives on the single client udpport socket owned by
-    // PanadapterStream, which strips IF-Data headers and emits pcmFrameReady().
-    // The QAudioSink feed is wired in one helper so a Flex-backend swap can
-    // rebind it (the stream is destroyed/rebuilt on a family change;
-    // pcmFrameReady carries Flex RX audio itself, so a missed rebind is
-    // silence rather than a degraded feature).
-    wirePanStreamRxAudioSinks();
+    // Speaker selection consumes the normalized bus, independent of backend
+    // transport. Only the selected route reaches the shared audio engine.
+    wireMonitorAudio();
     // The taps that listen alongside the speaker — QSO recorder RX, CW and RTTY
-    // — ride RadioModel's normalized bus instead, so they are wired ONCE here
+    // — ride the original normalized bus, so they are wired ONCE here
     // and are never part of the rebind. RadioModel outlives the swap.
     wireRxDemodAudioSinks();
-    // Wire the backend-owned seam signals (RX audio + spectrum, used by the sim
-    // backend; Flex never emits them). Re-run on backendRebuilt(), the same
+    // Wire backend setup progress and source DSP policy. Re-run on backendRebuilt(), the same
     // signal that rebinds the PanadapterStream sinks: a backend swap (RFC #4288)
     // needs both rewirings, so they share one signal.
     wireBackendSeam(m_radioModel.backend());
@@ -7523,27 +7507,6 @@ void MainWindow::wireBackendSeam(IRadioBackend* backend)
 {
     if (!backend)
         return;
-    // Connections to a PRIOR backend are already gone — Qt drops a connection when
-    // either endpoint is destroyed, and RadioModel destroys the old backend before
-    // building the new one (teardownBackend/setupBackend on a family switch).
-    //
-    // We still disconnect explicitly before each connect below, so this helper is
-    // idempotent even if called twice for the SAME live backend. That matters
-    // because doubling audioFrameReady → feedAudioData makes the engine consume at
-    // double rate — the audible scratchy buzz this branch already had to fix once —
-    // and Qt::UniqueConnection cannot protect the lambda connects at all.
-    disconnect(backend, &IRadioBackend::audioFrameReady, m_audio, nullptr);
-
-    // Sim only: the sim delivers RX audio over the seam (24 kHz stereo
-    // float32). Other in-process backends (HL2) already reach the engine via
-    // RadioModel::backendAudioFrameReady (MainWindow_Session.cpp), so wiring
-    // them here too would double-feed the engine. Gate on "backend owns its RX
-    // audio", not on families that happen not to emit the signal.
-    if (dynamic_cast<SimBackend*>(backend) != nullptr) {
-        connect(backend, &IRadioBackend::audioFrameReady,
-                m_audio, &AudioEngine::feedPcmFrame);
-    }
-
     // HL2 only: opening its client-side WDSP chains measures FFTW plans, ~20 s
     // without cached wisdom, so the operator needs a visible explanation. The
     // panadapter animation is hidden behind ConnectionPanel (parented

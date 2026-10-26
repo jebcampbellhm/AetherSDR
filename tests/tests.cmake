@@ -4458,6 +4458,13 @@ add_test(NAME adaptive_engine_test COMMAND adaptive_engine_test)
 add_executable(radio_station_live_probe EXCLUDE_FROM_ALL tests/radio_station_live_probe.cpp)
 target_link_libraries(radio_station_live_probe PRIVATE aethercore)
 
+# Socket-free monitor selection; no AudioEngine or audio device.
+add_executable(monitor_audio_router_test tests/monitor_audio_router_test.cpp src/models/MonitorAudioRouter.cpp)
+target_include_directories(monitor_audio_router_test PRIVATE src)
+target_link_libraries(monitor_audio_router_test PRIVATE Qt6::Core)
+add_test(NAME monitor_audio_router_test COMMAND monitor_audio_router_test)
+set_tests_properties(monitor_audio_router_test PROPERTIES TIMEOUT 15)
+
 # Socket-free independent model ownership and queued audio selection fencing.
 add_executable(radio_station_test tests/radio_station_test.cpp)
 target_link_libraries(radio_station_test PRIVATE aethercore)

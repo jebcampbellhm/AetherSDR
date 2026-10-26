@@ -150,8 +150,16 @@ edges. Selecting a slice or clicking its spectrum affects that receiver only.
 Use the panel's close button to disconnect and remove it. Closing the dock only
 hides it; its receivers continue running until removed or AetherSDR exits.
 
-This initial station preview keeps additional receivers' **PC audio off**.
-Their panels provide no transmit controls. The main radio retains its existing
+Use **Listen to:** to choose **Primary radio**, one additional receiver, or
+**Off**. Only that radio feeds the main speaker route; changing the selection
+discards queued audio from the previous choice. Removing the selected receiver
+sets the selector to **Off**. Adding a receiver does not change the selection.
+The existing **PC Audio** switch must also be on; choosing a radio does not turn
+it on. Decoder/recording feeds keep their own radio source. The speaker DSP
+controls remain shared, and the preview still needs its primary connection for
+the existing PC Audio device lifecycle.
+
+Additional panels provide no transmit controls. The main radio retains its existing
 controls; selecting an additional receiver does not assign it transmit authority.
 Icom Ethernet operation in a three-radio station has not yet been hardware
 validated. This preview does not provide RF protection or coordinated TX muting.

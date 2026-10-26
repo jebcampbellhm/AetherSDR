@@ -69,13 +69,16 @@ public:
     }
     bool current() const
     {
-        return m_epoch && m_epoch->active.load(std::memory_order_acquire);
+        return m_epoch && m_epoch->active.load(std::memory_order_acquire)
+            && (!m_routeLease || m_routeLease->load(std::memory_order_acquire));
     }
 private:
     friend class PcmFrame;
-    explicit PcmEpochLease(std::shared_ptr<const detail::PcmEpoch> epoch)
-        : m_epoch(std::move(epoch)) {}
+    explicit PcmEpochLease(std::shared_ptr<const detail::PcmEpoch> epoch,
+                           std::shared_ptr<const std::atomic<bool>> routeLease = {})
+        : m_epoch(std::move(epoch)), m_routeLease(std::move(routeLease)) {}
     std::shared_ptr<const detail::PcmEpoch> m_epoch;
+    std::shared_ptr<const std::atomic<bool>> m_routeLease;
 };
 
 // Owning native-endian, interleaved IEEE float32 PCM. Metadata and samples are
@@ -96,9 +99,10 @@ public:
     bool discontinuity() const { return m_discontinuity; }
     bool current() const
     {
-        return m_epoch && m_epoch->active.load(std::memory_order_acquire);
+        return m_epoch && m_epoch->active.load(std::memory_order_acquire)
+            && (!m_routeLease || m_routeLease->load(std::memory_order_acquire));
     }
-    PcmEpochLease epochLease() const { return PcmEpochLease(m_epoch); }
+    PcmEpochLease epochLease() const { return PcmEpochLease(m_epoch, m_routeLease); }
 
     // Compatibility boundary ONLY. Refuse formats the existing 24 kHz stereo
     // consumers cannot interpret; never resample, downmix, clip or relabel.
@@ -113,9 +117,11 @@ public:
     }
 
 private:
+    friend class MonitorAudioRouter;
     friend class PcmProducer;
     friend class PcmFrameGate;
     std::shared_ptr<const detail::PcmEpoch> m_epoch;
+    std::shared_ptr<const std::atomic<bool>> m_routeLease;
     QVector<float> m_samples;
     quint64 m_firstSample = 0;
     bool m_discontinuity = false;

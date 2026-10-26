@@ -56,6 +56,60 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 17:50 UTC selected monitor audio increment:
+
+- Added the `MonitorAudioRouter` model and **Listen to:** selector in Additional
+  receivers. Primary radio is the initial selection; adding a receiver does not
+  change it. Selecting an additional receiver chooses that receiver's active
+  speaker stream, and removing it selects Off. The PC Audio switch remains
+  separate and is never enabled by selecting a monitor source. No device was
+  opened during development.
+- All primary speaker producers now use `RadioModel::rxDemodAudioReady` through
+  the router. Removed direct Flex/seam/sim speaker bypasses, preserving the
+  normalized bus's single-producer choice. RadioStation also consumes that bus,
+  including transports whose audio is not emitted through backendAudioFrameReady.
+- Routed PCM carries an additional revocable selection lease, retained by
+  converted-buffer leases. Switching, muting or destroying the route invalidates
+  queued speaker copies while leaving original producer/decoder frames alive.
+  First blocks after a selection change are discontinuous so the audio engine
+  clears old DSP/jitter state. Playback owners mute the selected route without
+  disconnect/reconnect duplication. Existing primary decoder taps remain outside
+  the speaker router; this does not add extra-receiver decoder controls.
+- Five socket-free tests passed: pcm_frame_test, pcm_compatibility_test,
+  monitor_audio_router_test, radio_station_test and audio_engine_pcm_lifetime_test.
+  The real AudioEngine test uses QBuffer rather than a device: queued old-source
+  rejection, 24 kHz stereo / 48 kHz mono changes, switching back, Off buffer
+  clearance, and independent decoder epoch lifetime. No sanitizer claim.
+- Bounded silent live probe passed with both user receivers: Web-888 361472
+  normalized audio frames / 301 spectrum frames, nRSP-ST 232960 / 99. Selected
+  monitor frames: Web 120832, nRSP-ST 119808. Switching revoked the old monitor
+  lease; removing nRSP-ST revoked its lease and left the selector silent. Web
+  delivered another 120832 frames after removal. Both sessions were released.
+  No AudioEngine/device, TX, shared settings changes or GUI automation. Probe
+  output suppresses Qt wire logs and uses fixed connection-error diagnostics.
+- Experimental desktop rebuilt successfully. Minimal-PATH startup self-test
+  returned 0 / 26.10.4. Docs build, engine-boundary (0 blockers; 101 existing
+  warnings), capability (70), command-plane (125/16), registration, manifest and
+  whitespace checks passed. New model include is tagged universal and consumed
+  only for speaker selection; no vendor allowance or command baseline grew.
+  Working daily executable remains unchanged at 2026-10-26 10:48:50 local.
+- Evidence: build-web888-evidence/station-monitor-build.log,
+  station-monitor-final-build.log, station-monitor-tests.log,
+  station-monitor-live.json, station-monitor-startup-marker.txt,
+  station-monitor-docs.log and station-monitor-boundary.log. All commands ended.
+
+NEXT: isolate additional SpectrumWidget display preferences from primary pan
+slot 0 (currently a confirmed shared-settings risk). Use a scoped feature object
+or an explicit transient preview policy; do not allocate magic flat-key pan
+indices. Then verify session-bound view controls without GUI polling. Speaker
+DSP/device lifecycle still follows primary controls: additional reception without
+an online primary and per-radio speaker DSP profiles need separate treatment.
+Normal rendered UI and audible output are not validated. Icom TX designation,
+all-entry-point keying gate, observed-TX receive interruption/recovery and actual
+Icom Ethernet operation remain pending. Hardware is expected in 1-2 days.
+
+### Earlier desktop preview checkpoint
+
 2026-10-26 17:20 UTC desktop preview increment:
 
 - `StationWorkspace` is a CanonCanvas in a dock reached through **File →

@@ -1,4 +1,5 @@
 #include "gui/StationWorkspace.h"
+#include "models/MonitorAudioRouter.h"
 #include <QDockWidget>
 // MainWindow_Session.cpp — radio-session wiring: wireDiscovery() (LAN,
 // heartbeat/TCP-ping disconnect detection, SmartLink), wireRadioModel()
@@ -25,7 +26,7 @@
 #include "RfGainPresentation.h"
 #include "RfGainRestore.h"
 #include "core/backends/ConnectionSharingPolicy.h"  // in-use share gate (#4448), shared with ConnectionPanel
-#include "core/backends/sim/SimBackend.h"   // demo owns its audio — see wirePanStreamRxAudioSinks
+#include "core/backends/sim/SimBackend.h"   // demo serial in the connection history
 #include "core/CwSidetoneGenerator.h"
 #include "core/CwTrace.h"
 #include "models/CwDecodeSettings.h"   // rxEnabled() gate for the RX-audio CW feed
@@ -329,23 +330,6 @@ void MainWindow::wireDiscovery()
     // through the IRadioBackend seam instead of the Flex RadioConnection.
     connect(&m_radioModel, &RadioModel::backendRebuilt,
             this, &MainWindow::rewirePanStreamAfterBackendSwap);
-
-    // RX audio from in-process demodulating backends (HL2); Flex audio uses
-    // PanadapterStream. Bound to m_radioModel so it survives backend swaps.
-    // The sim also emits audioFrameReady and wireBackendSeam() feeds it to the
-    // engine directly, hence the backendFeedsEngineDirectly() gate (two
-    // different signals, so Qt::UniqueConnection cannot dedupe).
-    connect(&m_radioModel, &RadioModel::backendAudioFrameReady,
-            m_audio, [this](const PcmFrame& pcm) {
-        if (backendFeedsEngineDirectly()) return;   // demo feeds the engine directly
-        // Playback mute. The Flex path mutes by disconnecting the stream's
-        // pcmFrameReady from feedPcmFrame; against a null PanadapterStream
-        // that disconnect is a silent no-op, so a seam backend would keep
-        // feeding live receive UNDER the playback. Reachable in practice only
-        // now that the recorder captures RX on such a radio at all. (#4537.)
-        if (m_rxMutedForPlayback) return;
-        m_audio->feedPcmFrame(pcm);
-    });
 
     connect(&m_hl2Discovery, &hl2::Hl2Discovery::radioDiscovered,
             m_connPanel, &ConnectionPanel::onRadioDiscovered);
@@ -2632,49 +2616,18 @@ void MainWindow::wireCatPorts()
 
 }
 
-// The RX-audio sinks fed by PanadapterStream::pcmFrameReady, listed once so
-// buildUI() and rewirePanStreamAfterBackendSwap() bind the same set (the
-// stream is rebuilt on a family swap, and a missed sink is silence).
-// Not IRadioBackend::ownsRxAudio(), which differs for HL2:
-//   ownsRxAudio()                "audio arrives over the seam": HL2 true, sim true, Flex false
-//   backendFeedsEngineDirectly() "no relay needed":            HL2 false, sim true, Flex false
-// HL2 audio reaches the engine via RadioModel::backendAudioFrameReady, so
-// substituting ownsRxAudio() would silence the HL2.
-bool MainWindow::backendFeedsEngineDirectly()
+void MainWindow::wireMonitorAudio()
 {
-    // The demo (RFC #4288 Route A) is the one backend that BOTH vends a
-    // PanadapterStream and emits its own seam audio: SimBackend::onAudioTick →
-    // audioFrameReady carries the real demodulated demo audio, while the stream
-    // still carries the old shim's synthetic scene. Wiring both into
-    // feedAudioData() sums two independent streams at the sink — audible as
-    // wobble plus distortion, and recognisably "the waterfall you can hear".
-    // Backends with no PanadapterStream at all (HL2) never reach these sites.
-    return dynamic_cast<SimBackend*>(m_radioModel.backend()) != nullptr;
-}
-
-void MainWindow::wirePanStreamRxAudioSinks()
-{
-    auto* ps = m_radioModel.panStream();
-    if (!ps)
-        return;   // RX-only/in-process backend (HL2/KiwiSDR): no VITA-49 stream
-
-    // The demo (RFC #4288 Route A) is the one backend that BOTH vends a
-    // PanadapterStream and emits its own seam audio: SimBackend::onAudioTick →
-    // audioFrameReady carries the real demodulated demo audio, while the stream
-    // still carries the old shim's synthetic scene. Wiring both into
-    // feedAudioData() sums two independent streams at the sink — audible as
-    // wobble plus distortion, and recognisably "the waterfall you can hear".
-    // The backend's own audio wins; the stream's other RX taps below stay wired.
-    // Primary RX audio → QAudioSink (skipped when the backend owns its audio).
-    if (!backendFeedsEngineDirectly()) {
-        connect(ps, &PanadapterStream::pcmFrameReady,
-                m_audio, &AudioEngine::feedPcmFrame,
-                Qt::UniqueConnection);
+    if (!m_monitorRouter) {
+        m_monitorRouter = new MonitorAudioRouter(this);
+        m_monitorRouter->setMuted(m_rxMutedForPlayback);
     }
-
-    // The QSO recorder and CW/RTTY decoder feeds ride
-    // RadioModel::rxDemodAudioReady (wireRxDemodAudioSinks()), not this stream,
-    // so they work without a PanadapterStream and survive family swaps.
+    // The normalized bus chooses exactly one real producer for every backend.
+    // Decoder/recorder taps retain their original lifetime, outside this route.
+    connect(&m_radioModel, &RadioModel::rxDemodAudioReady,
+            m_monitorRouter, &MonitorAudioRouter::feedPrimary, Qt::UniqueConnection);
+    connect(m_monitorRouter, &MonitorAudioRouter::pcmReady,
+            m_audio, &AudioEngine::feedPcmFrame, Qt::UniqueConnection);
 }
 
 // The RX-audio taps that listen ALONGSIDE the speaker: the QSO recorder and the
@@ -2794,7 +2747,7 @@ void MainWindow::rewirePanStreamAfterBackendSwap()
     if (!m_radioModel.panStream())
         return;   // non-Flex backend: nothing owns these paths
 
-    wirePanStreamRxAudioSinks();
+    wireMonitorAudio();
     wirePanStreamTxSink();
     wirePanStreamTciSinks();
     wirePanStreamDaxIqSink();
@@ -3495,7 +3448,16 @@ void MainWindow::showStationWorkspace()
         dock->setObjectName(QStringLiteral("additionalReceiversDock"));
         dock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::RightDockWidgetArea);
         dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
-        dock->setWidget(new StationWorkspace(dock));
+        auto* workspace = new StationWorkspace(dock);
+        wireMonitorAudio();
+        connect(workspace, &StationWorkspace::monitorSelectionChanged,
+                m_monitorRouter, &MonitorAudioRouter::selectSource);
+        connect(workspace, &StationWorkspace::monitorFrameReady,
+                m_monitorRouter, &MonitorAudioRouter::feed);
+        connect(workspace, &QObject::destroyed, m_monitorRouter, [router = m_monitorRouter] {
+            router->selectSource(-1);
+        });
+        dock->setWidget(workspace);
         addDockWidget(Qt::BottomDockWidgetArea, dock);
     }
     dock->show(); dock->raise();

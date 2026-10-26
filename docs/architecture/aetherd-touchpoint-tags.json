@@ -1853,6 +1853,12 @@
   "split": "",
   "confidence": "high"
  },
+ "models/MonitorAudioRouter.h": {
+  "tag": "universal",
+  "note": "Selected speaker source model; revokes queued and converted PCM without retiring original decoder epochs. No device, vendor protocol or transmit authority.",
+  "split": "",
+  "confidence": "high"
+ },
  "models/RadioStation.h": {
   "tag": "universal",
   "note": "Independent RadioSession ownership and selected PCM routing with session identity and selection-generation fences; no vendor protocol or transmit authority.",
