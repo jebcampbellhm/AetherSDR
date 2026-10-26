@@ -4454,6 +4454,16 @@ target_link_libraries(adaptive_engine_test PRIVATE Qt6::Core)
 set_target_properties(adaptive_engine_test PROPERTIES AUTOMOC ON)
 add_test(NAME adaptive_engine_test COMMAND adaptive_engine_test)
 
+# not registered: manual operator-selected receive-only station diagnostic.
+add_executable(radio_station_live_probe EXCLUDE_FROM_ALL tests/radio_station_live_probe.cpp)
+target_link_libraries(radio_station_live_probe PRIVATE aethercore)
+
+# Socket-free independent model ownership and queued audio selection fencing.
+add_executable(radio_station_test tests/radio_station_test.cpp)
+target_link_libraries(radio_station_test PRIVATE aethercore)
+add_test(NAME radio_station_test COMMAND radio_station_test)
+set_tests_properties(radio_station_test PROPERTIES TIMEOUT 30)
+
 # not registered: manual positive live-radio diagnostic; requires --host and --output.
 add_executable(nrsp_live_probe EXCLUDE_FROM_ALL tests/nrsp_live_probe.cpp)
 target_link_libraries(nrsp_live_probe PRIVATE aethercore)
@@ -9929,6 +9939,8 @@ if(NOT WIN32)
 endif()
 
 set(AETHER_SETTINGS_CONSUMERS
+    radio_station_test
+    radio_station_live_probe
     update_installer_test
     update_stager_test
     flex_readonly_metadata_test

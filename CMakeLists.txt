@@ -1280,6 +1280,7 @@ set(MODEL_SOURCES
     src/models/RadioModel_TxCoordinator.cpp
     src/models/TxController.cpp
     src/models/DeclaredBands.cpp
+    src/models/RadioStation.cpp
     src/models/RadioSession.cpp
     src/models/ReceiverSlotCount.cpp
     src/models/ModelCapabilities.cpp
