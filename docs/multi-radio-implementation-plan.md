@@ -56,6 +56,47 @@ to each radio and must be paired with the owning session in the desktop.
 
 ## Latest checkpoint
 
+2026-10-26 20:51 UTC additional-receiver reconnect controls checkpoint:
+
+- Added Reconnect to each receiver panel. It is unavailable while connected
+  or while a connection attempt is active, and becomes available after failure
+  or disconnect. Recovery uses a fresh ConnectionPanel prefilled with that
+  receiver's address/type and saved route; the operator confirms the original
+  endpoint and supplies fresh options through the existing credential flow.
+  Recovery keeps the same session/panel and does not change listening selection
+  or consume another receiver slot. A changed endpoint is refused with guidance.
+- The station accepts replies only from its current, visible connection form.
+  This fences superseded/canceled forms and duplicate replies after submission.
+  Connection acknowledgment/error is bound to the submitting form and session,
+  so another receiver cannot acknowledge its staged credentials. No credential
+  options are retained in station/panel members or evidence.
+- Added station_reconnect_test to the opt-in offscreen GUI harness. It uses two
+  built-in demo sessions (no firmware peer, socket or audio device), exercising
+  disabled/enabled controls, duplicate and queued stale submissions, fresh-form
+  recovery in place, changed-endpoint refusal, unrelated status, removal, and
+  preservation of the other receiver/listening selection/RX-only authority.
+  The initial harness needed to await the asynchronous disconnected UI edge;
+  the final test waits for that state. Removing the active-form guard failed
+  the duplicate-session assertion; restored production code passed.
+- All five selected GUI regressions passed: reconnect, display isolation,
+  transmit permission, confirmed geometry and Retina pan pixels. Experimental
+  desktop rebuilt and minimal-PATH startup returned 0 / 26.10.4. Docs build,
+  boundary (0 blockers / 101 baseline warnings), capability, command-plane,
+  registration, manifest and whitespace checks passed. Evidence files use the
+  station-reconnect-ui prefix under build-web888-evidence, including the
+  mutation-test log and startup marker. No mutations remain.
+- This increment used no real radios, audio devices or normal running GUI.
+  Earlier live transport reconnect evidence remains separate from these UI
+  control tests. Daily executable remains 163880448 bytes / 10:48:50 local.
+
+NEXT: final review and handoff of the experimental build, with normal desktop,
+audible playback and Icom hardware limitations explicit. Keep PC audio off;
+do not begin a large new feature near the deadline. Stop at 21:30 UTC and pause
+the automation. Optional future work: richer additional-receiver DSP/decoder
+controls, per-receiver saved display preferences and Icom hardware validation.
+
+### Earlier queued model-update teardown checkpoint
+
 2026-10-26 20:34 UTC queued model-update teardown checkpoint:
 
 - Demonstrated that disconnecting a receiver panel's signals did not cancel

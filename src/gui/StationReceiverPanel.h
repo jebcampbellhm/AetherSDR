@@ -27,6 +27,7 @@ public:
     void detach();
 signals:
     void removeRequested(int sessionId);
+    void reconnectRequested(int sessionId);
 private:
     void addPan(PanadapterModel* pan);
     void removePan(const QString& id);
@@ -47,6 +48,7 @@ private:
     QPushButton* m_addSlice;
     QPushButton* m_removeSlice;
     QPushButton* m_addPan;
+    QPushButton* m_reconnect;
     QVBoxLayout* m_pansLayout;
     struct PanView { QPointer<PanadapterModel> model; SpectrumWidget* spectrum; };
     QMap<QString, PanView> m_pans;

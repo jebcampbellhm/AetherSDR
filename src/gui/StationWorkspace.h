@@ -24,8 +24,11 @@ signals:
     void monitorAvailabilityChanged(int source, bool available);
     void monitorFrameReady(int source, const AetherSDR::PcmFrame& frame);
 private:
-    void showConnect();
+    friend struct StationWorkspaceTestAccess;
+    void showConnect(int receiverId = -1);
     void addReceiver(const RadioInfo& info, const QVariantMap& options);
+    void reconnectReceiver(int id, const RadioInfo& info, const QVariantMap& options);
+    void connectReceiver(int id, const RadioInfo& info, const QVariantMap& options);
     void selectMonitor(int source);
     void refreshTransmitPermission();
     QPointer<RadioModel> m_primary;
@@ -33,6 +36,7 @@ private:
     RadioStation m_station;
     QMap<int, StationReceiverPanel*> m_panels;
     QPointer<ConnectionPanel> m_connection;
+    int m_connectionSession = -1;
     QVBoxLayout* m_receivers;
     QLabel* m_hint;
     QComboBox* m_monitor;

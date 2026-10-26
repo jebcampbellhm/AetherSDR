@@ -1634,6 +1634,16 @@ void ConnectionPanel::selectManualConnection()
     setCurrentMode(ManualMode);
 }
 
+void ConnectionPanel::selectManualConnection(const RadioInfo& radio)
+{
+    selectManualConnection();
+    const QString address = radio.address.toString();
+    m_manualIpEdit->setText(address);
+    applySavedSourceSelection(address, true);
+    setManualFamily(radio.family);
+    updateActionState();
+}
+
 bool ConnectionPanel::canRenameRadio(const QString& serial) const
 {
     for (const RadioInfo& radio : m_radios) {

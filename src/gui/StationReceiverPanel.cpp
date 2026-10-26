@@ -29,6 +29,15 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
     m_status->setTextFormat(Qt::PlainText);
     m_status->setWordWrap(true);
     header->addWidget(m_status, 1);
+    m_reconnect = new QPushButton(tr("Reconnect…"), bodyWidget());
+    m_reconnect->setObjectName(QStringLiteral("stationReconnectReceiver"));
+    m_reconnect->setAccessibleName(tr("Reconnect this receiver"));
+    header->addWidget(m_reconnect);
+    connect(m_reconnect, &QPushButton::clicked, this, [this] {
+        if (m_model && !m_model->isConnected() && !m_model->isConnectAttemptInFlight()) {
+            emit reconnectRequested(m_sessionId);
+        }
+    });
     placeCloseButtonIn(header);
     layout->addLayout(header);
     connect(this, &CanonSurface::closeRequested, this, [this] { emit removeRequested(m_sessionId); });
@@ -95,9 +104,10 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
         refreshControls();
     });
     connect(m_model, &RadioModel::connectionError, this, [this](const QString& error) {
-        if (m_model) { m_status->setText(error); }
+        if (m_model) { m_status->setText(error); refreshControls(); }
     });
     connect(m_model, &RadioModel::capabilitiesChanged, this, &StationReceiverPanel::applyCapabilities);
+    connect(m_model, &RadioModel::infoChanged, this, &StationReceiverPanel::refreshControls);
     connect(m_model, &RadioModel::panadapterAdded, this, &StationReceiverPanel::addPan);
     connect(m_model, &RadioModel::panadapterRemoved, this, &StationReceiverPanel::removePan);
     connect(m_model, &RadioModel::sliceAdded, this, &StationReceiverPanel::addSlice);
@@ -176,6 +186,10 @@ void StationReceiverPanel::refreshControls()
         control->setAccessibleDescription(slice ? QString() : tr("Connect a receiver and select a receive slice."));
     }
     const bool connected = m_model && m_model->isConnected();
+    m_reconnect->setEnabled(!connected && !m_model->isConnectAttemptInFlight());
+    m_reconnect->setAccessibleDescription(!m_reconnect->isEnabled()
+        ? tr("This receiver is already connected or a connection attempt is in progress.")
+        : tr("Open a fresh connection form for this receiver. Other receivers keep running."));
     m_addSlice->setEnabled(connected && m_model->slices().size() < m_model->maxSlices());
     m_addSlice->setAccessibleDescription(m_addSlice->isEnabled() ? QString() : tr("Connect a receiver with a free receive slot."));
     m_removeSlice->setEnabled(connected && slice);

@@ -153,6 +153,14 @@ discards its pending display updates.
 Use the panel's close button to disconnect and remove it. Closing the dock only
 hides it; its receivers continue running until removed or AetherSDR exits.
 
+If a receiver disconnects or its connection fails, click **Reconnect…** in that
+panel. Confirm its original radio type, address and port in the fresh connection
+form, then connect. Saved credentials remain available through the normal
+password store; you can enter a corrected password if needed. This keeps the
+same panel and listening selection, and other receivers keep running. To change
+to a different receiver, remove the panel and use **Add receiver…**. Reconnect is
+unavailable while connected or while an attempt is in progress.
+
 Extra waterfalls start with the primary display's current appearance. Their
 display adjustments stay local for the life of each waterfall and do not change
 the primary display or another receiver. These extra display preferences are

@@ -68,7 +68,7 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
     auto* scroll = new QScrollArea(bodyWidget()); scroll->setWidgetResizable(true);
     auto* content = new QWidget(scroll); m_receivers = new QVBoxLayout(content);
     m_receivers->addStretch(); scroll->setWidget(content); layout->addWidget(scroll, 1);
-    connect(add, &QPushButton::clicked, this, &StationWorkspace::showConnect);
+    connect(add, &QPushButton::clicked, this, [this] { showConnect(); });
     connect(&m_station, &RadioStation::sessionRemoved, this, [this](int id) {
         emit monitorAvailabilityChanged(id + 1, false);
         if (m_monitor->currentData().toInt() == id + 1) { selectMonitor(-1); }
@@ -108,16 +108,34 @@ void StationWorkspace::selectMonitor(int source)
     m_monitor->setCurrentIndex(m_monitor->findData(source));
     emit monitorSelectionChanged(source);
 }
-void StationWorkspace::showConnect()
+void StationWorkspace::showConnect(int receiverId)
 {
+    auto* receiver = receiverId >= 0 ? m_station.session(receiverId) : nullptr;
+    if (receiverId >= 0 && (!receiver || receiver->radioModel().isConnected()
+        || receiver->radioModel().isConnectAttemptInFlight())) { return; }
+    if (m_connection && (!m_connection->isVisible() || m_connectionSession != receiverId)) {
+        m_connection->hide();
+        m_connection->deleteLater();
+        m_connection.clear();
+    }
     if (!m_connection) {
         m_connection = new ConnectionPanel(this);
-        m_connection->setWindowTitle(tr("Add independent receiver"));
-        m_connection->selectManualConnection();
+        m_connectionSession = receiverId;
+        m_connection->setAttribute(Qt::WA_DeleteOnClose);
+        m_connection->setWindowTitle(receiver
+            ? tr("Reconnect %1").arg(receiver->label()) : tr("Add independent receiver"));
+        if (receiver) { m_connection->selectManualConnection(receiver->radioModel().lastRadioInfo()); }
+        else { m_connection->selectManualConnection(); }
+        const QPointer<ConnectionPanel> form(m_connection);
+        const auto submit = [this, form, receiverId](const RadioInfo& info, const QVariantMap& options) {
+            if (!form || m_connection != form || !form->isVisible()) { return; }
+            if (receiverId >= 0) { reconnectReceiver(receiverId, info, options); }
+            else { addReceiver(info, options); }
+        };
         connect(m_connection, &ConnectionPanel::connectRequested, this,
-            [this](const RadioInfo& info) { addReceiver(info, {}); });
+            [submit](const RadioInfo& info) { submit(info, {}); });
         connect(m_connection, &ConnectionPanel::connectWithOptionsRequested, this,
-            &StationWorkspace::addReceiver);
+            submit);
     }
     m_connection->fitAndClampToScreen(screen());
     m_connection->show(); m_connection->raise(); m_connection->activateWindow();
@@ -125,7 +143,7 @@ void StationWorkspace::showConnect()
 void StationWorkspace::addReceiver(const RadioInfo& info, const QVariantMap& options)
 {
     if (m_panels.size() >= 2) {
-        m_connection->setStatusText(tr("Two additional receivers are already open. Remove one before adding another."));
+        if (m_connection) { m_connection->setStatusText(tr("Two additional receivers are already open. Remove one before adding another.")); }
         return;
     }
     const int id = m_station.addSession(info.model + QStringLiteral(" · ") + info.address.toString());
@@ -139,6 +157,39 @@ void StationWorkspace::addReceiver(const RadioInfo& info, const QVariantMap& opt
     m_panels.insert(id, panel); m_receivers->insertWidget(m_receivers->count() - 1, panel, 1);
     panel->setMinimumHeight(340);
     connect(panel, &StationReceiverPanel::removeRequested, this, [this](int removeId) { m_station.removeSession(removeId); });
+    connect(panel, &StationReceiverPanel::reconnectRequested, this, &StationWorkspace::showConnect);
+    connectReceiver(id, info, options);
+}
+void StationWorkspace::reconnectReceiver(int id, const RadioInfo& info, const QVariantMap& options)
+{
+    auto* session = m_station.session(id);
+    if (!session || session->radioModel().isConnected() || session->radioModel().isConnectAttemptInFlight()) { return; }
+    const RadioInfo previous = session->radioModel().lastRadioInfo();
+    if (info.family != previous.family || info.address != previous.address || info.port != previous.port) {
+        if (m_connection) { m_connection->setStatusText(tr("Reconnect uses this receiver's original type, address and port. To change receivers, remove this panel and use Add receiver.")); }
+        return;
+    }
+    connectReceiver(id, info, options);
+}
+void StationWorkspace::connectReceiver(int id, const RadioInfo& info, const QVariantMap& options)
+{
+    auto* session = m_station.session(id);
+    if (!session) { return; }
+    const QPointer<ConnectionPanel> form(m_connection);
+    if (form) {
+        // The form owns staged credentials for exactly this attempt. A late
+        // response cannot acknowledge a different receiver's newer form.
+        connect(&session->radioModel(), &RadioModel::connectionStateChanged, form,
+            [this, form, id](bool connected) {
+                if (form && form == m_connection && m_station.session(id)) { form->setConnected(connected); }
+            });
+        connect(&session->radioModel(), &RadioModel::connectionError, form,
+            [this, form, id](const QString& error) {
+                if (form && form == m_connection && m_station.session(id)) {
+                    form->setConnected(false); form->setStatusText(error);
+                }
+            });
+    }
     if (m_connection) { m_connection->hide(); }
     session->radioModel().connectToRadioWithOptions(info, options);
 }

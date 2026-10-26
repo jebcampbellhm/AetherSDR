@@ -8,6 +8,7 @@
 #include "gui/DisplaySettings.h"
 #include "gui/StationReceiverPanel.h"
 #include "gui/StationWorkspace.h"
+#include "gui/ConnectionPanel.h"
 #include "core/AppSettings.h"
 #include "core/SpectrumDecodeScale.h"
 #include "models/RadioSession.h"
@@ -29,6 +30,8 @@
 #include <QComboBox>
 #include <QPointer>
 #include <QEvent>
+#include <QLineEdit>
+#include <QElapsedTimer>
 
 #include <QApplication>
 #include <QMouseEvent>
@@ -44,6 +47,12 @@
 using namespace AetherSDR;
 
 namespace AetherSDR {
+struct StationWorkspaceTestAccess {
+    static void open(StationWorkspace& workspace, int id) { workspace.showConnect(id); }
+    static RadioStation& station(StationWorkspace& workspace) { return workspace.m_station; }
+    static ConnectionPanel* form(StationWorkspace& workspace) { return workspace.m_connection; }
+    static StationReceiverPanel* panel(StationWorkspace& workspace, int id) { return workspace.m_panels.value(id); }
+};
 struct SpectrumOffscreenTestAccess {
     static QImage sqlImage(SpectrumWidget& widget) {
         QImage image(800, 300, QImage::Format_ARGB32);
@@ -398,6 +407,95 @@ static int runStationDisplayIsolation()
     return failures ? 1 : 0;
 }
 
+static int runStationReconnect()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", text); failures += !ok;
+    };
+    const auto waitFor = [](const auto& predicate) {
+        QElapsedTimer timer; timer.start();
+        while (!predicate() && timer.elapsed() < 2000) {
+            QCoreApplication::processEvents(); QThread::msleep(1);
+        }
+        return predicate();
+    };
+    // The built-in demo is the subject, not a peer emulating radio firmware.
+    // No sockets, AudioEngine or device output is opened by these sessions.
+    ConnectionPanel discovery;
+    discovery.addDemoRadio();
+    const auto radios = discovery.automationLocalRadios();
+    if (radios.isEmpty()) { return 1; }
+    RadioInfo firstInfo = radios.first();
+    RadioInfo secondInfo = firstInfo;
+    secondInfo.address = QHostAddress(QStringLiteral("127.0.0.2"));
+    RadioModel primary;
+    StationWorkspace workspace(&primary);
+    auto& station = StationWorkspaceTestAccess::station(workspace);
+    StationWorkspaceTestAccess::open(workspace, -1);
+    auto* firstForm = StationWorkspaceTestAccess::form(workspace);
+    if (!firstForm) { return 1; }
+    emit firstForm->connectRequested(firstInfo);
+    emit firstForm->connectRequested(firstInfo);
+    check(station.sessionIds().size() == 1, "a submitted form cannot create a duplicate receiver from a late reply");
+    if (station.sessionIds().size() != 1) { return 1; }
+    const int firstId = station.sessionIds().first();
+    auto* first = station.session(firstId);
+    if (!waitFor([&] { return first->radioModel().isConnected(); })) { return 1; }
+    auto* panel = StationWorkspaceTestAccess::panel(workspace, firstId);
+    auto* reconnect = panel->findChild<QPushButton*>(QStringLiteral("stationReconnectReceiver"));
+    check(reconnect && !reconnect->isEnabled(), "connected receiver disables Reconnect");
+    if (!reconnect) { return 1; }
+    first->radioModel().disconnectFromRadio();
+    const bool recoverable = waitFor([&] { return !first->radioModel().isConnected() && reconnect->isEnabled(); });
+    check(recoverable, "disconnected receiver exposes manual recovery");
+    if (!recoverable) { return 1; }
+    reconnect->click();
+    QPointer<ConnectionPanel> retiredForm(StationWorkspaceTestAccess::form(workspace));
+    if (!retiredForm) { return 1; }
+    QMetaObject::invokeMethod(retiredForm, [retiredForm, firstInfo] {
+        if (retiredForm) { emit retiredForm->connectRequested(firstInfo); }
+    }, Qt::QueuedConnection);
+    StationWorkspaceTestAccess::open(workspace, -1);
+    auto* addForm = StationWorkspaceTestAccess::form(workspace);
+    QCoreApplication::processEvents();
+    check(!first->radioModel().isConnected(), "superseded form cannot reconnect a receiver through a queued reply");
+    if (!addForm) { return 1; }
+    emit addForm->connectRequested(secondInfo);
+    if (station.sessionIds().size() != 2) { return 1; }
+    const int secondId = station.sessionIds().last();
+    auto* second = station.session(secondId);
+    if (!waitFor([&] { return second->radioModel().isConnected(); })) { return 1; }
+    auto* monitor = workspace.findChild<QComboBox*>(QStringLiteral("stationMonitorSource"));
+    monitor->setCurrentIndex(monitor->findData(secondId + 1));
+    emit monitor->activated(monitor->currentIndex());
+    reconnect->click();
+    auto* form = StationWorkspaceTestAccess::form(workspace);
+    if (!form || form == addForm) { return 1; }
+    const auto* host = form->findChild<QLineEdit*>(QStringLiteral("connectionManualIp"));
+    check(host && host->text() == firstInfo.address.toString(), "reconnect form restores its own receiver address");
+    auto* connectButton = form->findChild<QPushButton*>(QStringLiteral("connectionManualConnectButton"));
+    emit second->radioModel().connectionStateChanged(true);
+    check(connectButton && connectButton->isEnabled(), "another receiver's status cannot acknowledge the current connection form");
+    emit form->connectRequested(secondInfo);
+    check(!first->radioModel().isConnected() && second->radioModel().isConnected(),
+          "reconnect refuses a changed endpoint without disturbing either receiver");
+    emit form->connectWithOptionsRequested(firstInfo, QVariantMap{});
+    check(waitFor([&] { return first->radioModel().isConnected(); }) && station.sessionIds().size() == 2
+          && StationWorkspaceTestAccess::panel(workspace, firstId) == panel,
+          "fresh form reconnects the existing session and panel without consuming another slot");
+    check(second->radioModel().isConnected() && monitor->currentData().toInt() == secondId + 1
+          && !first->radioModel().stationTransmitAllowed(),
+          "other receiver, listening selection and receive-only permission survive reconnect");
+    station.removeSession(firstId);
+    emit form->connectRequested(firstInfo);
+    check(station.sessionIds().size() == 1 && second->radioModel().isConnected(),
+          "late reply for a removed receiver cannot recreate it or disturb the other session");
+    station.removeSession(secondId);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    return failures ? 1 : 0;
+}
+
 static int runStationTransmitPermission()
 {
     // State/terminal recorder only: no protocol parser, peer, socket or device.
@@ -478,6 +576,9 @@ int main(int argc, char** argv)
     TestSettingsProfile profile("spectrum-confirmed-geometry");
     if (!profile.isValid()) { return 2; }
     QApplication app(argc, argv);
+    if (app.arguments().contains(QStringLiteral("--station-reconnect"))) {
+        return runStationReconnect();
+    }
     if (app.arguments().contains(QStringLiteral("--station-transmit-permission"))) {
         return runStationTransmitPermission();
     }
