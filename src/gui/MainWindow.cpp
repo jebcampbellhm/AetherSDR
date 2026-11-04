@@ -10,6 +10,7 @@
 
 #include "MainWindow.h"
 #include <utility>
+#include "TabletUi.h"
 #include "core/AppActivity.h"
 #include "core/backends/AutoRfGainControl.h"
 
@@ -1126,7 +1127,7 @@ MainWindow::MainWindow(QWidget* parent)
 
     setWindowTitle(QString("AetherSDR v%1").arg(QCoreApplication::applicationVersion()));
     setWindowIcon(QIcon(":/icon.png"));
-    setMinimumSize(1024, 400);
+    setMinimumSize(tabletUiEnabled() ? 320 : 1024, 400);
     resize(1400, 800);
 
     // Apply frameless flag before first show() so the window is created
@@ -2655,6 +2656,7 @@ MainWindow::MainWindow(QWidget* parent)
             settings.save();
         }
     }
+    setupTabletUi();
 }
 
 MainWindow::~MainWindow()
@@ -4113,6 +4115,9 @@ void MainWindow::resizeEvent(QResizeEvent* event)
 
 void MainWindow::updateStatusBarMinimumWidth()
 {
+    if (tabletUiEnabled()) {
+        return;
+    }
     if (m_minimalMode || !m_statusBarContainer || statusBar()->isHidden()
         || !statusBar()->currentMessage().isEmpty()) {
         return;
@@ -9817,6 +9822,7 @@ void MainWindow::applyUiScale(int pct)
     AppSettings::instance().setValue("UiScalePercent", QString::number(pct));
     AppSettings::instance().save();
 
+#if QT_CONFIG(process)
     auto answer = FramelessMessageBox::question(this, "UI Scale",
         QString("UI scale changed to %1%. Restart AetherSDR now to apply?").arg(pct),
         QMessageBox::Yes | QMessageBox::No, QMessageBox::Yes);
@@ -9851,6 +9857,10 @@ void MainWindow::applyUiScale(int pct)
 #endif
         QCoreApplication::quit();
     }
+#else
+    FramelessMessageBox::information(this, tr("UI Scale"),
+        tr("Close and reopen AetherSDR to apply the new UI scale."));
+#endif
 }
 
 void MainWindow::stepUiScale(int direction)

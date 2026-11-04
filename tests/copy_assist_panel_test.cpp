@@ -3,6 +3,8 @@
 // ggmorse-style feature), tier selection, the enable signal, and clear.
 
 #include "gui/CopyAssistPanel.h"
+#include "TestSettingsProfile.h"
+#include <QLabel>
 
 #include <QApplication>
 #include <QPushButton>
@@ -42,6 +44,7 @@ QString transcriptText(CopyAssistPanel& panel)
 
 int main(int argc, char** argv)
 {
+    TestSettingsProfile settingsProfile(QStringLiteral("aether-copy-assist-panel-test"));
     QApplication app(argc, argv);
 
     CopyAssistPanel panel;
@@ -112,6 +115,30 @@ int main(int argc, char** argv)
         panel.setFontPx(1);
         expect(panel.fontPx() == 8, "font size clamps to 8 px min");
     }
+
+    // Maximum formatted values must fit even when the touch toolbar scrolls.
+    const QByteArray previousTablet = qgetenv("AETHER_TABLET_UI");
+    qputenv("AETHER_TABLET_UI", "1");
+    {
+        CopyAssistPanel tablet;
+        tablet.setBufferMs(20000);
+        tablet.setSensitivity(100);
+        tablet.setSilenceMs(2000);
+        for (const int width : {820, 1180}) {
+            tablet.resize(width, 320);
+            tablet.show();
+            app.processEvents();
+            for (const QString& text : {QStringLiteral("20 s"), QStringLiteral("100%"), QStringLiteral("2000 ms")}) {
+                QLabel* value = nullptr;
+                for (auto* label : tablet.findChildren<QLabel*>())
+                    if (label->text() == text) value = label;
+                expect(value && value->width() >= value->sizeHint().width(),
+                       "tablet tuning value and unit fit in portrait and landscape");
+            }
+        }
+    }
+    if (previousTablet.isNull()) qunsetenv("AETHER_TABLET_UI");
+    else qputenv("AETHER_TABLET_UI", previousTablet);
 
     std::printf(g_failures == 0 ? "\nCopy Assist panel: ALL PASS\n"
                                 : "\nCopy Assist panel: %d FAILURE(S)\n",

@@ -395,6 +395,11 @@ protected:
     bool eventFilter(QObject* obj, QEvent* event) override;
 
 private slots:
+    void setupTabletUi();
+    void showTabletFrequencyEntry();
+    void showTabletReceiver();
+    void showTabletNoiseReduction();
+
     // Radio/connection events
     void onConnectionStateChanged(bool connected);
     void adjustCatPortCounts(bool connected);  // called from onConnectionStateChanged

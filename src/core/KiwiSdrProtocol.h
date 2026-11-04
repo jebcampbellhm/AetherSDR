@@ -85,6 +85,8 @@ enum class KiwiSdrReceiverFamily {
 
 QString kiwiSdrReceiverFamilyId(KiwiSdrReceiverFamily family);
 QString kiwiSdrReceiverFamilyName(KiwiSdrReceiverFamily family);
+// Authority for HTTP/WebSocket URLs, including brackets around IPv6 hosts.
+QString formatEndpointBaseUrl(const QString& scheme, const QString& host, quint16 port);
 KiwiSdrReceiverFamily kiwiSdrReceiverFamilyFromString(const QString& value);
 
 enum class InboundFrameTag {
@@ -130,6 +132,7 @@ enum class StreamMode {
 enum class FrameLayout {
     Unknown,
     SndPcm16,
+    SndIq16,
     SndObservedPcm16WithMeter,
     SndCompressed,
     WaterfallDirectBins,

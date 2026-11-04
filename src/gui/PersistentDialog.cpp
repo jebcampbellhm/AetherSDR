@@ -1,4 +1,5 @@
 #include "PersistentDialog.h"
+#include "TabletUi.h"
 #include "FramelessResizer.h"
 #include "FramelessWindowTitleBar.h"
 #include "core/AppSettings.h"
@@ -19,6 +20,7 @@ PersistentDialog::PersistentDialog(const QString& title,
       m_windowType(toolWindow ? Qt::Tool : Qt::Dialog)
 {
     setWindowTitle(title);
+    keepTabletWindowOnScreen(this);
 
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(0, 0, 0, 0);
@@ -90,7 +92,7 @@ void PersistentDialog::showEvent(QShowEvent* event)
     // just-restored geometry being clipped by a later minimum.
     if (!m_geometryRestored) {
         m_geometryRestored = true;
-        restoreGeometryFromSettings();
+        if (!tabletUiEnabled()) restoreGeometryFromSettings();
         // The base-ctor setFramelessMode() ran before the subclass installed
         // its body layout, so the frameless top-margin nudge was a no-op.
         // Re-apply now that the layout exists.

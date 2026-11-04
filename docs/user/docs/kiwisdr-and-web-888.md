@@ -1,10 +1,13 @@
 ---
 title: "KiwiSDR and Web-888"
 slug: "/kiwisdr-and-web-888"
-description: "AetherSDR can use a remote KiwiSDR or Web-888 web receiver as a receive-only \"virtual RX antenna\" for a slice."
+description: "Connect directly to a Web-888, or use a KiwiSDR or Web-888 as an external receive-only antenna for a slice."
 ---
 
 AetherSDR can use a remote **KiwiSDR** or **Web-888** web receiver as a receive-only "virtual RX antenna" for a slice. While a slice uses one, its audio, S-meter and (optionally) its spectrum and waterfall come from that receiver instead of your radio. Public KiwiSDRs around the world can be browsed from inside AetherSDR.
+
+You can also connect directly to a **Web-888** from **Connect to Radio →
+Connect by IP → Radio type: Web-888**, without connecting another radio first.
 
 These receivers never transmit, and AetherSDR inhibits transmit on a panadapter that is showing one.
 
@@ -16,6 +19,42 @@ These receivers never transmit, and AetherSDR inhibits transmit on a panadapter 
 - [Support and Logging](./support-and-logging.md): KiwiSDR log categories for problem reports.
 
 ## Setup
+
+### Connecting directly to a Web-888
+
+Open **Connect to Radio → Connect by IP** and choose **Web-888** under
+**Radio type**. Enter the receiver's IP address, its HTTP port (usually
+**8073**), and its **user password** if required. Press **Connect by IP**, or
+press Enter in the password field.
+
+<img src="/img/screens/web888-connect-by-ip.png" width="760" alt="Connect to Radio with Connect by IP selected and Radio type set to Web-888. The form provides a separate port field showing 8073, a masked user-password field and a Forget button. The receiver address is empty." />
+
+*The standalone Web-888 connection form. Enter the address and port separately.*
+
+This opens a standalone, receive-only Web-888 session. You can open two
+independent panadapters, each with its own waterfall. Adding a slice requests
+another hardware RX slot with independent tuning, mode, filter and AGC; it does
+not share a fixed 24 kHz capture. Extra slices use sound-only connections and
+appear on the chosen waterfall. AetherSDR checks receiver occupancy before each
+connection; the server makes the final admission decision. A full receiver leaves
+existing slices running. Closing an added slice releases its RX slot.
+
+Use the receiver's **12 kHz** configuration for ordinary listening. This is a
+receiver-wide admin setting: adding a slice does not change it. The client also
+accepts an existing 24 kHz configuration. Digital monitoring must use the actual
+configured rate. Its budget reserves the two waterfall listeners plus every
+additional pending or connected listening slice. Only the selected slice feeds
+the speakers. No Demo session or second radio is required. Accepted
+passwords are saved in the operating system keychain when the build supports
+it; passwords never go in the settings database. Leave the password blank to
+reuse the saved password or connect to a passwordless receiver. Recent
+addresses retain the Web-888 type and port.
+Use **Forget** beside the password to remove the saved password for the entered
+address and port. An active connection stays open. See [Manual Connection](./manual-connection.md#connecting-to-web-888-or-nrsp-st)
+for source-path guidance and password recovery.
+
+The separate KiwiSDR receiver setup below remains available for using an
+external receiver alongside another radio.
 
 ### Adding a receiver
 
@@ -77,6 +116,11 @@ A small **Flex** / **Kiwi** button at the bottom-left of a panadapter with a Kiw
 
 The 3D stacked-trace spectrum works on KiwiSDR sources too.
 
+If a Web-888 returns constant spectrum rows at narrow zoom, AetherSDR uses a
+wider receiver span while keeping your selected display span. Detail is limited
+to the receiver data available at that wider span. Reconnecting the receiver
+retries its advertised zoom range.
+
 ## Receive Sync and Diversity
 
 A remote receiver's audio and waterfall arrive later than your own radio's. **Settings → Receive Sync ▸** time-aligns them:
@@ -103,7 +147,23 @@ The **Kiwi DX** toggle in **SpotHub → Display** overlays the KiwiSDR DX Commun
 
 ## Troubleshooting
 
-### The receiver shows Busy or Waiting
+### The spectrum trace is below the display
+
+The receiver's spectrum level can change with its span, leaving it outside a
+fixed vertical range.
+
+1. Open the panadapter's **Display** panel and enable **Auto** beside **FFT Floor**.
+2. For a dark or saturated waterfall, click **Auto** beside **Black Level** to
+   recalculate the receiver's waterfall floor and ceiling.
+
+### A standalone Web-888 connection is refused
+
+Read the connection error and check the receiver's address, port and user
+password. If the receiver is full, wait for a free slot and retry. Standalone
+Web-888 sessions do not offer camping on another user's channel. See
+[Manual Connection](./manual-connection.md#a-web-888-connection-fails).
+
+### An external receiver shows Busy or Waiting
 
 Every channel on the receiver is in use.
 
@@ -111,7 +171,7 @@ Every channel on the receiver is in use.
 2. Accept a monitor (camp) session if one is offered.
 3. Or choose another receiver with **Browse Public…**.
 
-### The receiver shows Error
+### An external receiver shows Error
 
 The receiver refused the connection. Error messages name their source: the receiver's own refusal codes and messages.
 
@@ -126,6 +186,9 @@ AetherSDR's directory mirror is unreachable, so the browser shows the list it al
 2. Click **Refresh list** again later.
 
 ### Transmit is disabled on a panadapter
+
+Standalone Web-888 sessions are receive-only and have no transmit operation.
+For an external receiver assigned to another radio's slice:
 
 The panadapter is showing the KiwiSDR's spectrum and waterfall.
 
@@ -154,3 +217,49 @@ A remote receiver's audio and waterfall arrive later than your own radio's.
 - [`docs/kiwisdr-public-directory.md`](https://github.com/aethersdr/AetherSDR/blob/main/docs/kiwisdr-public-directory.md)
 - [`docs/kiwisdr-cleanroom-design.md`](https://github.com/aethersdr/AetherSDR/blob/main/docs/kiwisdr-cleanroom-design.md)
 - [`docs/web888-cleanroom-design.md`](https://github.com/aethersdr/AetherSDR/blob/main/docs/web888-cleanroom-design.md)
+
+## Digital monitoring (experimental Web-888)
+
+Open **Tools → Digital Monitoring** after connecting. Choose bands and FT8,
+WSPR or FT4, set the IQ rate to match the receiver (24 kHz is the current tested
+working setting), and review the capture count. The window does not change the
+receiver's rate. Two slots remain reserved for interactive listening and waterfalls.
+Reduce **Total RX budget** for receiver slots used by other clients or onboard
+decoders. Admission can still fail if another client takes a slot.
+
+**Start monitoring** opens shared IQ captures and splits them into digital audio
+outputs. Live status shows active and pending captures and cumulative output
+samples. **Stop** releases monitoring captures without closing the listening
+panadapters. Closing the monitoring window leaves captures running; disconnecting
+releases them. A replacement profile may need spare slots while it starts.
+
+Timed decoding and reporting are not enabled by these controls. Receiver timestamp
+mapping to UTC and filter-delay compensation still need qualification. Output
+sample counts confirm audio delivery, not successful FT8/WSPR/FT4 decodes.
+
+## Shared SSB listening (experimental Web-888)
+
+At the receiver's 24 kHz setting, select USB or LSB on a listening panadapter,
+then right-click a nearby frequency and choose **Add Slice at … MHz**. The two
+listeners share that pan's existing hardware RX slot. Each has its own tuning,
+filter, and local fast/medium/slow/off AGC. Up to two listeners per pan and two
+panadapters are supported. Only the active slice feeds the speakers; each slice
+continues to provide its own audio feed independently of speaker mute.
+
+While sharing, both filter passbands must remain within the IQ capture. The
+capture is centered on the original listener's frequency when the second slice
+is added, with a 1 kHz guard at each edge (about 22 kHz usable at a 24 kHz rate).
+Out-of-window tuning is refused; the capture does not move the other listener.
+Close the added slice to restore normal single-listener tuning and AM/SAM/CW/FM modes.
+The original slice owns the hardware lease and is removed by closing its pan.
+Receiver-wide level readings are not updated as per-slice meters while sharing.
+
+Waterfall width is separate from IQ width. Aether initially requests 100 kHz;
+zooming can show the whole band. The receiver supplies discrete zoom spans and
+Aether uses each received row's actual frequency bounds. Seeing a signal on the
+waterfall does not mean it lies inside the shared listening capture.
+
+Shared listening disables AGC only on that RX lease and applies independent AGC
+after each local filter. It does not change the receiver's persistent sample
+rate or onboard decoder settings. Digital monitoring retains its separate
+captures and its reservation of two interactive hardware slots.

@@ -1,4 +1,5 @@
 #include "DspParamPopup.h"
+#include "TabletUi.h"
 #include "GuardedSlider.h"
 #include "Theme.h"
 
@@ -31,9 +32,15 @@ DspParamPopup::DspParamPopup(QWidget* parent)
     : QWidget(parent, Qt::Popup | Qt::FramelessWindowHint)
 {
     setObjectName("DspParamPopup");
-    setStyleSheet(kPopupStyle);
+    if (tabletUiEnabled()) {
+        styleTabletSurface(this);
+    } else {
+        setStyleSheet(kPopupStyle);
+    }
     setAttribute(Qt::WA_DeleteOnClose);
-    setMinimumWidth(220);
+    const int availableWidth = parent ? parent->window()->width()
+        : QGuiApplication::primaryScreen()->availableGeometry().width();
+    setMinimumWidth(tabletUiEnabled() ? qBound(280, availableWidth - 24, 440) : 220);
 
     m_layout = new QVBoxLayout(this);
     m_layout->setContentsMargins(10, 8, 10, 8);
@@ -93,7 +100,7 @@ DspParamPopup::SliderControl DspParamPopup::addSlider(
     auto* row = new QHBoxLayout;
 
     auto* lbl = new QLabel(label);
-    lbl->setFixedWidth(90);
+    lbl->setFixedWidth(tabletUiEnabled() ? 150 : 90);
     row->addWidget(lbl);
 
     auto* slider = new GuardedSlider(Qt::Horizontal);
@@ -101,6 +108,10 @@ DspParamPopup::SliderControl DspParamPopup::addSlider(
     slider->setValue(defaultVal);
     slider->setDragValueFormatter(format);
     applyPrimarySliderStyle(slider);
+    slider->setAccessibleName(label);
+    if (tabletUiEnabled()) {
+        styleTabletSurface(slider);
+    }
     row->addWidget(slider);
 
     auto* val = new QLabel(format ? format(defaultVal) : QString::number(defaultVal));
@@ -168,6 +179,12 @@ void DspParamPopup::finalize(std::function<void()> onMore, std::function<void()>
     btnRow->addWidget(resetBtn);
 
     m_layout->addLayout(btnRow);
+    if (tabletUiEnabled()) {
+        auto* done = new QPushButton(tr("Done"), this);
+        connect(done, &QPushButton::clicked, this, &QWidget::close);
+        m_layout->addWidget(done);
+        prepareTabletControls(this);
+    }
 }
 
 void DspParamPopup::showAt(const QPoint& globalPos)
@@ -180,6 +197,10 @@ void DspParamPopup::showAt(const QPoint& globalPos)
         pos.setX(screen.right() - width());
     if (pos.y() + height() > screen.bottom())
         pos.setY(globalPos.y() - height());
+    if (tabletUiEnabled()) {
+        pos.setX(qBound(screen.left(), pos.x(), qMax(screen.left(), screen.right() - width())));
+        pos.setY(qBound(screen.top(), pos.y(), qMax(screen.top(), screen.bottom() - height())));
+    }
     move(pos);
     show();
 }

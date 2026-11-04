@@ -6,6 +6,7 @@
 #include "core/IConnectionAutomation.h"
 
 #include <QWidget>
+#include <QVariantMap>
 #include <QMargins>
 #include <QPoint>
 #include <QRect>
@@ -20,6 +21,7 @@
 #include <QCommandLinkButton>
 #include <QStackedWidget>
 #include <QToolButton>
+#include <QVariantMap>
 
 class QVBoxLayout;
 class QScreen;
@@ -72,6 +74,7 @@ public:
     // UDP/1024 (HPSDR Protocol 1), so the operator picks the wire protocol and
     // we probe exactly that one. Values match RadioInfo::family.
     static constexpr const char* kFamilyFlex = "flex";
+    static constexpr const char* kFamilyWeb888 = "web888";
     static constexpr const char* kFamilyHl2  = "hl2";
     // ANAN-G2 (openHPSDR Protocol 2, UDP/1024 discovery — same port number
     // as HL2's Protocol 1, different wire format entirely). Probeable
@@ -82,12 +85,14 @@ public:
     // handshake needs a username and password before the radio will answer with
     // anything useful, which is why the manual page grows credential fields.
     static constexpr const char* kFamilyIcom = "icom";
+    static constexpr const char* kFamilyNrsp = "nrsp";
     // RTL-SDR USB dongles (RTL2832U / R820T). USB-addressed (device index +
     // serial), not network. Receive-only (Principle VI).
     static constexpr const char* kFamilyRtl  = "rtl";
 
     // IConnectionAutomation — engine-facing connect/disconnect/dialog hook.
     QList<RadioInfo> automationLocalRadios() const override;
+    QStringList automationManualFamilies() const override;
     bool automationConnectLocalSerial(const QString& serial, QString* error = nullptr) override;
     bool automationConnectByIp(const QString& hostOrIp,
                                const QString& family = QString(),
@@ -131,6 +136,9 @@ public slots:
 
 signals:
     void connectRequested(const RadioInfo& radio);
+    // Explicit manual attempt; options may contain a session-only credential.
+    // They must not be added to discovery records or saved route profiles.
+    void connectWithOptionsRequested(const RadioInfo& radio, const QVariantMap& options);
     void wanConnectRequested(const WanRadioInfo& radio);
     void wanDisconnectClientsRequested(const WanRadioInfo& radio);
     void disconnectRequested();
@@ -233,7 +241,7 @@ private:
     // Interactive/automation attempts are silent once the startup probe ends.
     void reportStartupProbeFailure(const QString& reason);
     void handleHl2ProbeResult(Hl2ProbeResult probe, const QString& ip);
-    void finishManualProbe(const RadioInfo& info, bool routedOnly = false);
+    void finishManualProbe(const RadioInfo& info, bool routedOnly = false, const QVariantMap& params = {});
     friend struct ConnectionPanelStartupTestAccess;
     void resetManualConnectButton();
     // Re-activate the body layout after a page change. The overlap this used to
@@ -301,6 +309,10 @@ private:
 
     // Manual (VPN / routed) connection
     QComboBox*   m_manualRadioTypeCombo{nullptr};
+    QWidget*    m_web888PasswordRow{nullptr};
+    QLineEdit*  m_web888PasswordEdit{nullptr};
+    QWidget*    m_web888PortRow{nullptr};
+    QSpinBox*   m_web888PortSpin{nullptr};
     QLabel*      m_manualHintLabel{nullptr};
     QComboBox*   m_manualIpCombo{nullptr};
     // Icom credentials. The row CONTAINERS are held so the pair can be hidden
@@ -318,6 +330,10 @@ private:
     QWidget*     m_manualIcomCivCustomRow{nullptr};
     QLineEdit*   m_manualIcomUserEdit{nullptr};
     QLineEdit*   m_manualIcomPassEdit{nullptr};
+    QWidget*    m_manualNrspUserRow{nullptr};
+    QWidget*    m_manualNrspPassRow{nullptr};
+    QLineEdit*  m_manualNrspUserEdit{nullptr};
+    QLineEdit*  m_manualNrspPassEdit{nullptr};
     QComboBox*   m_manualIcomPortCombo{nullptr};
     QSpinBox*    m_manualIcomBasePortSpin{nullptr};
     // The model chooser. Non-editable: it enumerates a known set with an escape

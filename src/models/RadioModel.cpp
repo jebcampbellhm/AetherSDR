@@ -1,3 +1,4 @@
+#include "core/backends/RadioBackendFactory.h"
 #include "RadioModel.h"
 #include "core/backends/TuneOutputPolicy.h"
 #include <QScopedValueRollback>
@@ -787,40 +788,7 @@ static void populateFamilyParams(RadioConnectRequest& req, const QString& family
 
 std::unique_ptr<IRadioBackend> RadioModel::makeBackend(const QString& family)
 {
-    if (family.compare(QLatin1String("hl2"), Qt::CaseInsensitive) == 0)
-        return std::make_unique<hl2::Hl2Backend>();
-    // ANAN-G2 (openHPSDR Protocol 2). Like HL2 this is a pure seam backend —
-    // it owns no RadioConnection and no PanadapterStream, so the
-    // dynamic_cast chain in setupBackend() correctly skips it too. RX-only
-    // in this phase (aetherd ANAN P2 Phase 1b); canTransmit is false.
-    if (family.compare(QLatin1String("anan"), Qt::CaseInsensitive) == 0)
-        return std::make_unique<anan::AnanBackend>();
-    // Icom networked radios (IC-705, IC-7300MK2, …). Like HL2 this is a pure
-    // seam backend — it owns no RadioConnection and no PanadapterStream, so the
-    // dynamic_cast chain in setupBackend() correctly skips it and every model
-    // update arrives as a normalized delta.
-    //
-    // The radio here is authoritative about its own operating state, so unlike
-    // HL2 it declares NO ClientSettingsDomains and must never be pushed a
-    // restored state (Constitution II/III).
-    if (family.compare(QLatin1String("icom"), Qt::CaseInsensitive) == 0)
-        return std::make_unique<icom::IcomCivBackend>();
-    // RFC #4288 demo mode: the synthetic radio is selected here like any other
-    // family, which is what completes the "wire it through the real SimBackend
-    // factory" ask. Unlike HL2 it is a Route A hybrid — it owns a RadioConnection
-    // and a PanadapterStream and vends them, so setupBackend() harvests those the
-    // same way it does for Flex (see the dynamic_cast below).
-    if (family.compare(QLatin1String("sim"), Qt::CaseInsensitive) == 0)
-        return std::make_unique<SimBackend>();
-    if (family.compare(QLatin1String("rtl"), Qt::CaseInsensitive) == 0) {
-#ifdef AETHER_BACKEND_RTL
-        return std::make_unique<rtl::RtlSdrBackend>();
-#else
-        qWarning() << "RadioModel: RTL-SDR backend requested but RTL support is disabled";
-        return nullptr;
-#endif
-    }
-    return std::make_unique<FlexBackend>();
+    return createRadioBackend(family);
 }
 
 bool RadioModel::dispatchAdministrationCommand(const QString& command,
@@ -938,8 +906,7 @@ void RadioModel::setupBackend(const QString& family)
         m_backend = makeBackend(m_family);
         if (!m_backend) {
             emit connectionError(
-                tr("This build has no RTL-SDR support — librtlsdr or fftw3f "
-                   "was unavailable when AetherSDR was compiled."));
+                tr("This build does not include support for the selected radio type."));
             return;
         }
         connect(m_backend.get(), &IRadioBackend::independentTxStopped, this,
@@ -2795,7 +2762,8 @@ RadioModel::RadioModel(QObject* parent)
     connect(&m_operatingStateMaxWaitTimer, &QTimer::timeout, this,
             [this] { persistOperatingState(false); });
     connect(&m_reconnectTimer, &QTimer::timeout, this, [this]() {
-        if (!m_intentionalDisconnect && !m_lastInfo.address.isNull()) {
+        if (!m_intentionalDisconnect && !m_lastInfo.address.isNull()
+            && backendCapabilities().automaticReconnectAllowed()) {
             qCDebug(lcProtocol) << "RadioModel: auto-reconnecting to" << m_lastInfo.address.toString();
             // A retry is an attempt too (#4912). This path does NOT go through
             // connectToRadio() — it re-drives the connection/backend directly —
@@ -3846,6 +3814,11 @@ void RadioModel::emitInterlockNotification(const QString& message,
 
 void RadioModel::connectToRadio(const RadioInfo& info)
 {
+    connectToRadioWithOptions(info, {});
+}
+
+void RadioModel::connectToRadioWithOptions(const RadioInfo& info, const QVariantMap& options)
+{
     if (!m_rebootRadioSerial.isEmpty() && m_rebootRadioSerial != info.serial) {
         ++m_rebootRevision;
         m_rebootInProgress = false;
@@ -3977,6 +3950,7 @@ void RadioModel::connectToRadio(const RadioInfo& info)
         req.port   = info.port;
         req.serial = info.serial;
         req.serialIdentity = info.serialIdentity;
+        req.params = options;
         populateFamilyParams(req, info.family, info.sessionBindAddress);
         handRestoredStateToBackend();
         m_backend->connectRadio(req);
@@ -6164,8 +6138,13 @@ bool RadioModel::requestConfirmedReceiveTune(int sliceId, double mhz, IRadioBack
     if (!receiver || receiver->isLocked() || !sliceMayBelongToUs(sliceId)
         || !receiveControlPanId(receiver->panId())) { return false; }
     const auto control = backendCapabilities().sliceFrequencyControl;
-    if (control.authority == SliceFrequencyControl::Authority::Unknown
-        || mhz * 1e6 < control.minimumHz || mhz * 1e6 > control.maximumHz) { return false; }
+    if (control.authority == SliceFrequencyControl::Authority::Unknown) { return false; }
+    if (mhz * 1e6 < control.minimumHz || mhz * 1e6 > control.maximumHz) {
+        emit configurationWarning(tr("Tuning refused. This receiver currently allows %1 to %2 MHz.")
+            .arg(control.minimumHz / 1e6, 0, 'f', 6)
+            .arg(control.maximumHz / 1e6, 0, 'f', 6));
+        return false;
+    }
     return m_backend->requestReceiveTune(sliceId, mhz * 1e6, view);
 }
 
@@ -8630,12 +8609,17 @@ void RadioModel::onDisconnected()
         }
     }
     m_forcedDisconnectInProgress = false;
+    if (!backendCapabilities().automaticReconnectAllowed()) {
+        m_connectAttemptActive = false;
+        m_reconnectTimer.stop();
+    }
 
     if (m_wanConn) {
         qCDebug(lcProtocol) << "RadioModel: WAN disconnected";
         m_wanConn->disconnect(this);
         m_wanConn = nullptr;
-    } else if (!m_intentionalDisconnect && !m_radioWakeActive && !m_lastInfo.address.isNull()) {
+    } else if (!m_intentionalDisconnect && !m_radioWakeActive && !m_lastInfo.address.isNull()
+               && backendCapabilities().automaticReconnectAllowed()) {
         qCDebug(lcProtocol) << "RadioModel: unexpected disconnect — reconnecting in 3s";
         m_reconnectTimer.start();
     }
@@ -8680,7 +8664,7 @@ void RadioModel::onConnectionError(const QString& msg)
     // A refused connect may never emit disconnected, but the radio can recover
     // after expiring a stale session. Keep retrying the same discovered radio.
     if (!m_wanConn && !m_intentionalDisconnect && !m_lastInfo.address.isNull()
-            && !m_reconnectTimer.isActive()) {
+            && backendCapabilities().automaticReconnectAllowed() && !m_reconnectTimer.isActive()) {
         qCDebug(lcProtocol) << "RadioModel: connection error — reconnecting in 5s";
         m_reconnectTimer.start();
     }
@@ -12554,6 +12538,10 @@ void RadioModel::publishRadioReportedCapacity()
 void RadioModel::applyRadioChanges(const RadioDelta& d)
 {
     bool changed = false;
+    if (d.version && m_version != *d.version) {
+        m_version = *d.version;
+        changed = true;
+    }
     if (d.model) {
         m_model = *d.model;
         // #5594 item 3: the table is the fallback, never an override. A radio

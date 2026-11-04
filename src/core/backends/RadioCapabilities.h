@@ -29,6 +29,14 @@ struct TuneOutputSuppressionControl {
     int maximumBandId = 255;
 };
 
+struct ConnectionRecovery {
+    enum class Mode { HostRetry, Manual };
+    Mode mode{Mode::HostRetry};
+};
+struct ReceiveAudioBuffering {
+    int jitterTargetMs = 0;
+};
+
 struct TxPowerBand {
     double lowHz = 0.0;
     double highHz = 0.0;
@@ -101,7 +109,9 @@ struct ReceiveCwPitchControl {
     int stepHz = 10;
 };
 struct ReceiveAudioControl {
+    enum class SpeakerPan { Host, Backend };
     SliceFrequencyControl::Authority authority{SliceFrequencyControl::Authority::Unknown};
+    SpeakerPan speakerPan{SpeakerPan::Host};
     // Both gain (0..100) and mute must act on the shared slice's RX audio.
 };
 // Typed pre-monitor sliceAudioFrameReady export; grants no TX, IQ or control verb.
@@ -348,6 +358,11 @@ enum class FmTonePresentation {
 // to the legacy shape (e.g. PROC's 0..2). Set every field explicitly in every
 // backend and record it in docs/architecture/radio-capabilities-map.md.
 struct RadioCapabilities {
+    std::optional<ConnectionRecovery> connectionRecovery;
+    bool automaticReconnectAllowed() const
+    {
+        return !connectionRecovery || connectionRecovery->mode == ConnectionRecovery::Mode::HostRetry;
+    }
     // Identity
     QString family;   // backend id: "flex", "kiwi", … (stable, lowercase)
     QString model;    // radio model string as reported by the hardware
@@ -453,6 +468,7 @@ struct RadioCapabilities {
     std::optional<ReceiveAudioControl> receiveAudioControl;
     std::optional<ReceiveCwPitchControl> receiveCwPitchControl;
     std::optional<ReceiveDspControl> receiveDspControl;
+    std::optional<ReceiveAudioBuffering> receiveAudioBuffering;
     std::optional<ReceiveAudioExport> receiveAudioExport;
     std::optional<BroadcastFmReceive> broadcastFmReceive;
     std::optional<ReceivePanRangeControl> receivePanCenterControl;

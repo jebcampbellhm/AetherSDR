@@ -439,7 +439,8 @@ void testCredentialExodus()
            "a credential field re-added to a document is stripped at the seam");
     expect(SettingsSanitizer::isSecretKey(QStringLiteral("MqttPass")),
            "the sanitizer redacts the exact exodus names (MqttPass drift hole)");
-    for (const QString& key : {QStringLiteral("tgxl_auth_code"),
+    for (const QString& key : {QStringLiteral("Web888Password"),
+                               QStringLiteral("tgxl_auth_code"),
                                QStringLiteral("TGXL_AuthCode"),
                                QStringLiteral("pgxl_auth_code"),
                                QStringLiteral("PGXL_AuthCode"),
@@ -448,7 +449,7 @@ void testCredentialExodus()
         settings.setValue(key, QStringLiteral("test-secret"));
         settings.save();
         expect(!dbHas(key) && SettingsSanitizer::isSecretKey(key),
-               "peripheral authorization codes cannot enter or leave settings");
+               "unbound receiver passwords and authorization codes cannot enter or leave settings");
     }
 }
 

@@ -23,6 +23,12 @@ same fix (#4535, PR #4553), one in the ggml CPU backend, a MinGW build fix
    top-level `CMakeLists.txt`; this file only consumes
    `GGML_METAL_EMBED_LIBRARY_COMPILED`, `GGML_METAL_MACOSX_VERSION_MIN`,
    `GGML_METAL_STD` and `GGML_METAL_EMBED_LIBRARY_NO_BF16`.
+
+   The iPad target also supplies `GGML_METAL_SDK` and
+   `GGML_METAL_IOS_VERSION_MIN`. The command uses the selected iPhoneOS or
+   iPhoneSimulator SDK and its deployment flag, so an iOS app cannot embed a
+   macOS metallib. The SDK defaults to `macosx` for existing callers. Check
+   both device and simulator Xcode builds when refreshing this part.
 2. `ggml/src/ggml-metal/ggml-metal-device.m`: loads that embedded binary via
    `dispatch_data_create` + `newLibraryWithData:` (a no-op destructor block
    suppresses the copy — the payload is static `__DATA`), and clamps the device

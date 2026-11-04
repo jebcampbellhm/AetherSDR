@@ -357,6 +357,12 @@ public:
     virtual void disconnectRadio() = 0;
     virtual bool isConnected() const = 0;
 
+    // Some receive protocols report an administrator eviction as plain EOF.
+    // Such a backend requires a new operator connect intent instead of the
+    // model's generic retry timer. Existing families retain automatic recovery.
+    enum class ReconnectPolicy { Automatic, OperatorInitiated };
+    virtual ReconnectPolicy reconnectPolicy() const { return ReconnectPolicy::Automatic; }
+
     // A session with the radio is up, WHATEVER TRANSPORT CARRIED IT.
     //
     // Exists because "connected" is not observable inside a backend on every
@@ -1141,10 +1147,9 @@ signals:
     void disconnected();
     void connectionError(const QString& reason);
 
-    // A RADIO-CONFIGURATION problem the operator should fix that does not end the
-    // session. connectionError is fatal (RadioModel always starts its reconnect timer
-    // on it), so advice sent there becomes a reconnect loop. If it does not stop the
-    // radio working, it belongs here.
+    // A nonfatal radio-configuration problem the operator should fix.
+    // connectionError ends the session and may trigger host retry unless the
+    // backend declares manual recovery; advice about a working session belongs here.
     void configurationWarning(const QString& message);
 
     void capabilitiesChanged();

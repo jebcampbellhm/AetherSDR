@@ -1,7 +1,7 @@
 # Web-888 Clean-Room Design Note
 
-Status: receive-only Web-888 support implemented as a **receiver family on the
-existing KiwiSDR path** — no new protocol client, no new backend. The wire
+Status: receive-only Web-888 support uses the **shared KiwiSDR protocol client**,
+with an external RX source and a standalone `IRadioBackend` session. The wire
 authority is the open-source Web-888 server plus black-box observations against
 a live receiver made in this thread.
 
@@ -105,6 +105,24 @@ profile-keyed and family-agnostic and needs no change.
   "Web-888" badge next to the receiver name and the family in the accessible
   text. `MainWindow_KiwiSdr.cpp` populates it.
 
+## Constant-row recovery
+
+On a live Web888_v2026.919 receiver, direct 1024-bin rows at zoom 11 contained
+only byte 55. Changing interpolation (13, 10, 0) or the FFT window (0, 1, 3)
+did not restore variation. Zoom 10 repeated byte 83 apart from the DC edge;
+zoom 9 and wider returned varying bins. The server advertised zoom_max=14
+and echoed the requested start and zoom correctly.
+
+The client excludes 16 edge bins on each side and waits for 20 consecutive
+constant rows before lowering its session-only request ceiling by one. Such
+rows do not seed trace stabilization or waterfall autoscale. The advertised
+zoom maximum still determines header decoding and the fixed-point frequency
+scale. Old rows above the learned ceiling are discarded. The viewport stays
+unchanged and the existing frequency-aware row mapping crops the wider data.
+Disconnect resets recovery; ordinary Kiwi profiles do not use it. The
+socket-free waterfall setup test covers the threshold, varying-row reset,
+stale frames, repeated recovery, unchanged viewport and reconnect reset.
+
 ## Non-Goals
 
 - No TX of any kind (Principle VI) — the Kiwi path is already control-
@@ -112,5 +130,54 @@ profile-keyed and family-agnostic and needs no change.
 - No `/EXT`, `/admin`, or `/MON` streams; no IQ/DRM 20-byte-header streams.
 - No public receiver directory for Web-888 endpoints (out of scope per the
   user's scoping; Kiwi's directory feature is Kiwi-only).
-- No new `IRadioBackend` family and no new vendor header (EB3 ratchet stays
-  green; the touchpoint tags remain `vendor(kiwi)`).
+
+## Standalone connection (local fork, October 2026)
+
+The native speaker path declares a 360 ms host startup/refill reserve through
+`ReceiveAudioBuffering`. Qualification observed occasional incoming-frame gaps
+longer than the ordinary 100 ms native queue cap, including a 215 ms gap, and
+brief sink-idle periods. The common audio engine holds initial audio, then
+consumes the reserve across delivery gaps; it refills only after exhaustion.
+Capacity is bounded and accommodates the reserve. No wire command, family
+branch in the audio engine, or additional decoder-export delay is introduced.
+
+The operator explicitly requested a separate Web-888 connection option on
+2026-10-16, superseding the earlier external-source-only scope for this fork.
+`Web888Backend` owns a shared `KiwiSdrClient` configured for Web888. It emits
+normalized slice/pan deltas, stereo 24 kHz PCM, and viewport spectrum frames
+through `IRadioBackend`. It owns no Flex connection or simulator. Network I/O
+is asynchronous on the backend owner thread; teardown closes both sockets
+and fences pending credential callbacks by session generation.
+
+The connection page has its own Web-888 choice, port, and user-password
+field. Endpoint-bound passwords are read asynchronously from QtKeychain and
+saved only after an accepted connection. Recent-address route documents hold
+family and port only. The existing external RX source is unchanged.
+
+This first standalone contract admits one demodulated receiver and one pan,
+with no TX, IQ, admin, public-directory, or daemon discovery claim. Wider
+rows used for narrow-zoom recovery are mapped by RF frequency into the
+selected viewport before publication.
+
+### Windows background receive
+
+A long receive run exposed a separate Windows desktop-lock issue: Qt's
+QRhi-backed widget compositor repeatedly waited about 750 ms in frame startup
+while the session was locked. Those GUI-thread waits delayed seam audio.
+Stack-only samples identified `QRhi::beginFrame` / backing-store flush; a
+read-only session query confirmed the locked state. Minimizing the application
+removed the waits without changing the receiver connection.
+
+The GUI's `DisplaySessionMonitor` registers a hidden message-only window for
+same-session Windows lock/unlock notifications and reads the initial state.
+It suppresses painting, including already-posted widget update requests,
+while preserving event delivery and reception. Unlock restores updates on
+surviving windows that were previously enabled. Windows opened while locked
+are covered too. If notification registration fails, it leaves painting
+enabled rather than creating a state from which it cannot recover.
+
+The injected-state GUI test covers existing and new windows, queued control
+delivery, deleted windows, and restoration of deliberately disabled updates.
+No screen lock, power, or security policy is modified. Native API authority:
+[Microsoft session notifications](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/nf-wtsapi32-wtsregistersessionnotification)
+and [session flags](https://learn.microsoft.com/en-us/windows/win32/api/wtsapi32/ns-wtsapi32-wtsinfoex_level1_w).

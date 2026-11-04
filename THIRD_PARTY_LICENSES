@@ -6,6 +6,13 @@ Each component retains its original license. Full license texts are included
 in the corresponding third_party/ subdirectories where the source is bundled.
 
 
+Zstandard
+---------
+  Source:  https://github.com/facebook/zstd/releases/tag/v1.5.7
+  License: BSD-3-Clause (third_party/zstd/LICENSE)
+  Use:     Bundled decompressor for application updates and nRSP-ST IQ Lite
+           and display frames.
+
 Protocol References
 -------------------
 AetherSDR implements the SmartSDR protocol to communicate with FlexRadio

@@ -9,6 +9,10 @@ endif()
 
 project(AetherSDR VERSION 26.11.1 LANGUAGES C CXX)
 
+if(IOS)
+    include(cmake/AetherIOS.cmake)
+endif()
+
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
@@ -265,7 +269,7 @@ option(AETHER_EMBED_DFNR_MODEL
 
 # macOS: ensure Homebrew lib/include paths are in the search path
 # (universal builds with CMAKE_OSX_ARCHITECTURES may not search /opt/homebrew by default)
-if(APPLE)
+if(APPLE AND NOT IOS)
     execute_process(COMMAND brew --prefix OUTPUT_VARIABLE HOMEBREW_PREFIX OUTPUT_STRIP_TRAILING_WHITESPACE)
     if(HOMEBREW_PREFIX)
         link_directories("${HOMEBREW_PREFIX}/lib")
@@ -367,6 +371,15 @@ elseif(NOT Qt6_FOUND)
         ${_aether_qt_way_out})
 endif()
 
+# Qt's iOS FFmpeg finder treats a cached static archive as an xcframework
+# directory on the next configure. Let it rediscover native static libraries.
+if(IOS)
+    foreach(_ffmpeg_component AVCODEC AVFORMAT AVUTIL SWSCALE SWRESAMPLE)
+        if("${${_ffmpeg_component}_LIBRARY}" MATCHES "\\.a$")
+            unset(${_ffmpeg_component}_LIBRARY CACHE)
+        endif()
+    endforeach()
+endif()
 find_package(Qt6 6.12 REQUIRED COMPONENTS
     Core
     Concurrent
@@ -924,6 +937,13 @@ set(CORE_SOURCES
     src/core/backends/flex/SmartLinkClient.cpp  # SmartLink WAN auth + radio list
     src/core/backends/flex/WanConnection.cpp    # SmartLink TLS transport (#5554 §2.6)
     src/core/backends/sim/SimBackend.cpp     # demo mode — 2nd IRadioBackend (RFC #4288)
+    src/core/backends/nrsp/NrspProtocol.cpp
+    src/core/backends/nrsp/NrspAuthentication.cpp
+    src/core/backends/nrsp/NrspData.cpp
+    src/core/backends/nrsp/NrspSession.cpp
+    src/core/backends/nrsp/NrspDemodulator.cpp
+    src/core/backends/nrsp/NrspWorker.cpp
+    src/core/backends/nrsp/NrspBackend.cpp
     src/core/backends/sim/SimSignalSource.cpp  # demo RX engine, worker thread (#4878)
     src/core/backends/sim/SpectrumPatternGenerator.cpp  # demo mode — signal engine (RFC #4288 Phase 2)
     src/core/backends/sim/NoiseMixer.cpp                 # demo mode — audio engine (RFC #4288 Phase 2b)
@@ -1063,8 +1083,21 @@ set(CORE_SOURCES
     src/core/CatPort.cpp
     src/core/KiwiSdrProtocol.cpp
     src/core/KiwiSdrRedirectPolicy.cpp
+    src/core/NrspCredentials.cpp
     src/core/KiwiSdrCredentialStore.cpp
     src/core/KiwiSdrClient.cpp
+    src/core/NetworkReceiverCredentials.cpp
+    src/core/backends/web888/Web888Backend.cpp
+    src/core/backends/web888/Web888IqSplitter.cpp
+    src/core/backends/web888/Web888IqCapture.cpp
+    src/core/backends/web888/Web888CapturePlan.cpp
+    src/core/backends/web888/Web888CapturePool.cpp
+    src/core/backends/web888/Web888IqProcessor.cpp
+    src/core/backends/web888/Web888DecoderPeriod.cpp
+    src/core/backends/web888/Web888DecoderRouter.cpp
+    src/core/backends/web888/Web888DecoderWav.cpp
+    src/core/backends/web888/Web888DecoderProcess.cpp
+    src/core/backends/RadioBackendFactory.cpp
     src/core/KiwiSdrManager.cpp
     src/core/ReceivePresentationSync.cpp
     src/core/KiwiPublicDirectory.cpp
@@ -1233,9 +1266,11 @@ set(CORE_SOURCES
     src/core/aprs/AprsFillInDigipeater.cpp
 )
 
-if(APPLE)
+if(APPLE AND NOT IOS)
     list(APPEND CORE_SOURCES src/core/VirtualAudioBridge.cpp src/core/MacMicPermission.mm
                              src/core/AppActivity.mm)
+elseif(IOS)
+    list(APPEND CORE_SOURCES src/platform/ios/IOSPlatform.mm)
 elseif(UNIX)
     # Linux DAX uses PulseAudio pipe modules via pactl (works with PipeWire too).
     # When libpipewire-0.3 dev headers are present we additionally compile a
@@ -1260,6 +1295,7 @@ set(MODEL_SOURCES
     src/models/Ax25ReceiveModel.cpp
     src/models/AprsDigipeaterModel.cpp
     src/models/Nr2SettingsModel.cpp
+    src/models/DigitalMonitoringModel.cpp
     src/models/Rn2SettingsModel.cpp
     src/models/RadioModel.cpp
     src/models/RadioModel_Setup.cpp
@@ -1330,6 +1366,8 @@ set(GUI_SOURCES
     src/gui/MainWindow_Wiring.cpp
     src/gui/MainWindow_Workspace.cpp
     src/gui/MainWindow_Nets.cpp
+    src/gui/MainWindow_Tablet.cpp
+    src/gui/TabletUi.cpp
     src/gui/MainWindow_Callsign.cpp
     src/gui/MainWindow_ReceiveSync.cpp
     src/gui/MainWindow_KiwiSdr.cpp
@@ -1452,6 +1490,7 @@ set(GUI_SOURCES
     src/gui/HealthApplet.cpp
     src/gui/PersistentDialog.cpp
     src/gui/AetherLabWidget.cpp
+    src/gui/DisplaySessionMonitor.cpp
     src/gui/CanonWindow.cpp
     src/gui/CanonMessageBox.cpp
     src/gui/CanonSurface.cpp
@@ -1581,6 +1620,7 @@ set(GUI_SOURCES
     src/gui/SupportDialog.cpp
     src/gui/ResetSettingsPrompts.cpp
     src/gui/SliceTroubleshootingDialog.cpp
+    src/gui/DigitalMonitoringDialog.cpp
     src/gui/RadioHealthDialog.cpp
     src/gui/KeyboardMapWidget.cpp
     src/gui/ShortcutDialog.cpp
@@ -1710,6 +1750,22 @@ if(MSVC)
 else()
     target_compile_options(aether_esp_flasher PRIVATE -w)
 endif()
+
+# RSA server signatures use operating-system providers on Windows/macOS and
+# OpenSSL on Linux. libssl-dev is already present in the Linux CI image.
+function(aether_nrsp_crypto_dependency)
+    if(WIN32)
+        set(AETHER_NRSP_CRYPTO bcrypt PARENT_SCOPE)
+    elseif(APPLE)
+        find_library(AETHER_NRSP_SECURITY_FRAMEWORK Security REQUIRED)
+        find_library(AETHER_NRSP_CF_FRAMEWORK CoreFoundation REQUIRED)
+        set(AETHER_NRSP_CRYPTO ${AETHER_NRSP_SECURITY_FRAMEWORK} ${AETHER_NRSP_CF_FRAMEWORK} PARENT_SCOPE)
+    else()
+        find_package(OpenSSL REQUIRED COMPONENTS Crypto)
+        set(AETHER_NRSP_CRYPTO OpenSSL::Crypto PARENT_SCOPE)
+    endif()
+endfunction()
+aether_nrsp_crypto_dependency()
 
 # Bundled Monocypher (CC0-1.0 OR BSD-2-Clause): Ed25519 signature checks on
 # downloaded firmware manifests, without depending on OpenSSL being present.
@@ -1897,6 +1953,7 @@ add_library(aethercore ${_aether_core_library_type}
 target_link_libraries(aethercore PRIVATE aether::wdsp)
 target_link_libraries(aethercore PRIVATE aether_monocypher)   # core: EspFirmwareCatalog, UpdateStager
 target_link_libraries(aethercore PRIVATE aether_zstd)         # core: UpdateStager
+target_link_libraries(aethercore PRIVATE ${AETHER_NRSP_CRYPTO})
 target_compile_definitions(aethercore PRIVATE
     AETHER_FIRMWARE_DEV_OVERRIDES=$<BOOL:${AETHER_FIRMWARE_DEV_OVERRIDES}>
     AETHER_UPDATE_DEV_OVERRIDES=$<BOOL:${AETHER_UPDATE_DEV_OVERRIDES}>)
@@ -1920,13 +1977,18 @@ target_link_libraries(aetherdesktop_support PUBLIC
     Qt6::Widgets
 )
 
-add_executable(AetherSDR
+set(AETHER_APP_SOURCES
     src/main.cpp
     src/QtPlatformChoice.cpp  # start-up log lines: the Qt platform plugin and any fallback
     ${GUI_SOURCES}
     ${RESOURCES}
     ${DFNR_RESOURCES}
 )
+if(IOS)
+    qt_add_executable(AetherSDR MANUAL_FINALIZATION ${AETHER_APP_SOURCES})
+else()
+    add_executable(AetherSDR ${AETHER_APP_SOURCES})
+endif()
 target_link_libraries(AetherSDR PRIVATE
     aetherdesktop_support
     aether_qrcodegen   # QrCodeImage: the Remote Access sign-in QR code
@@ -1937,6 +1999,9 @@ add_executable(aetherd
     src/aetherd/CredentialStartup.cpp
     src/aetherd/GrantAdminClient.cpp
 )
+if(IOS)
+    set_target_properties(aetherd PROPERTIES EXCLUDE_FROM_ALL TRUE)
+endif()
 target_link_libraries(aetherd PRIVATE
     aethercore
     Qt6::Core
@@ -1981,7 +2046,7 @@ if (ENABLE_ASR)
     if (APPLE)
         # Metal uses the Metal framework + the `metal` shader compiler from full
         # Xcode (present on macOS CI); no external SDK to install.
-        option(ENABLE_ASR_METAL "Enable Metal GPU acceleration for ASR (macOS)" ON)
+        option(ENABLE_ASR_METAL "Enable Metal GPU acceleration for ASR (Apple platforms)" ON)
     else()
         option(ENABLE_ASR_VULKAN "Enable Vulkan GPU acceleration for ASR (auto-detected)" ON)
     endif()
@@ -2099,25 +2164,30 @@ if (ENABLE_ASR)
         # file only consumes the result.
         option(ENABLE_ASR_METAL_PRECOMPILE
             "Compile the ASR Metal kernels at build time (needs the offline Metal toolchain)" ON)
+        if(IOS)
+            set(GGML_METAL_SDK "${CMAKE_OSX_SYSROOT}" CACHE STRING "Metal target SDK" FORCE)
+        else()
+            set(GGML_METAL_SDK "macosx" CACHE STRING "Metal target SDK" FORCE)
+        endif()
         if (_asr_metal AND ENABLE_ASR_METAL_PRECOMPILE)
             # Probe the offline compiler at configure time so a missing toolchain is
             # caught here rather than as a mid-build pipe error. Fatal only under
             # REQUIRE_ASR_GPU (the fail-rather-than-ship-degraded flag); otherwise
             # warn — never silently — and fall back to the source embed.
-            execute_process(COMMAND xcrun -sdk macosx metal --version
+            execute_process(COMMAND xcrun -sdk ${GGML_METAL_SDK} metal --version
                             RESULT_VARIABLE _asr_metal_cc_rc
                             OUTPUT_QUIET ERROR_QUIET)
             if (_asr_metal_cc_rc EQUAL 0)
                 set(_asr_metal_precompile ON)
             elseif (REQUIRE_ASR_GPU)
                 message(FATAL_ERROR "ENABLE_ASR_METAL_PRECOMPILE is ON but the offline Metal "
-                    "compiler is not runnable ('xcrun -sdk macosx metal --version' failed). "
+                    "compiler is not runnable ('xcrun -sdk ${GGML_METAL_SDK} metal --version' failed). "
                     "Install it with: xcodebuild -downloadComponent MetalToolchain, or "
                     "configure with -DENABLE_ASR_METAL_PRECOMPILE=OFF to embed shader source "
                     "and compile at runtime instead.")
             else()
                 message(WARNING "The offline Metal compiler is not runnable "
-                    "('xcrun -sdk macosx metal --version' failed) — embedding shader source "
+                    "('xcrun -sdk ${GGML_METAL_SDK} metal --version' failed) — embedding shader source "
                     "and compiling it at runtime instead of embedding a compiled .metallib. "
                     "This build carries the #4535 runtime-compile hazard, so ASR stays "
                     "CPU-only on Intel-GPU Macs (see asrMetalUsableHost() in "
@@ -2138,7 +2208,11 @@ if (ENABLE_ASR)
             #    CMakeLists appends the flag when this is set. FORCEd both ways, so a
             #    reconfigure with a different deployment target cannot inherit the
             #    previous one out of the cache.
-            if (CMAKE_OSX_DEPLOYMENT_TARGET)
+            set(GGML_METAL_IOS_VERSION_MIN "" CACHE STRING "" FORCE)
+            if(IOS)
+                set(GGML_METAL_MACOSX_VERSION_MIN "" CACHE STRING "" FORCE)
+                set(GGML_METAL_IOS_VERSION_MIN "${CMAKE_OSX_DEPLOYMENT_TARGET}" CACHE STRING "" FORCE)
+            elseif (CMAKE_OSX_DEPLOYMENT_TARGET)
                 set(GGML_METAL_MACOSX_VERSION_MIN "${CMAKE_OSX_DEPLOYMENT_TARGET}" CACHE STRING "" FORCE)
             else()
                 set(GGML_METAL_MACOSX_VERSION_MIN "" CACHE STRING "" FORCE)
@@ -2176,7 +2250,11 @@ if (ENABLE_ASR)
             #    and lists ios-metal2.4 / macos-metal2.4 / metal3.0 / metal3.1 /
             #    metal3.2 as the accepted set. That killed the first Intel DMG
             #    build to reach this tier, at 32%, in run 30764239938.
-            if (CMAKE_OSX_DEPLOYMENT_TARGET AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS 13.0)
+            if(IOS)
+                set(GGML_METAL_STD "metal3.1" CACHE STRING "" FORCE)
+                set(GGML_METAL_EMBED_LIBRARY_NO_BF16 OFF CACHE BOOL "" FORCE)
+                message(STATUS "ASR: Metal kernels precompiled for ${GGML_METAL_SDK}, iOS ${CMAKE_OSX_DEPLOYMENT_TARGET}")
+            elseif (CMAKE_OSX_DEPLOYMENT_TARGET AND CMAKE_OSX_DEPLOYMENT_TARGET VERSION_LESS 13.0)
                 set(GGML_METAL_STD "macos-metal2.4" CACHE STRING "" FORCE)
                 set(GGML_METAL_EMBED_LIBRARY_NO_BF16 ON CACHE BOOL "" FORCE)
                 message(STATUS "ASR: Metal kernels precompiled for macOS ${CMAKE_OSX_DEPLOYMENT_TARGET} "
@@ -2619,11 +2697,41 @@ endif()
 if(WIN32)
     set_target_properties(AetherSDR PROPERTIES WIN32_EXECUTABLE TRUE)
     # MainWindow::applyWindowsFrameColor (DwmSetWindowAttribute).
-    target_link_libraries(AetherSDR PRIVATE dwmapi)
+    # DisplaySessionMonitor uses same-session lock/unlock notifications.
+    target_link_libraries(AetherSDR PRIVATE dwmapi Wtsapi32)
 endif()
 
 # macOS app bundle
-if(APPLE)
+if(IOS)
+    set_target_properties(AetherSDR PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${AETHER_IOS_BUNDLE_ID}"
+        MACOSX_BUNDLE_BUNDLE_NAME "AetherSDR"
+        MACOSX_BUNDLE_BUNDLE_VERSION "1"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_INFO_PLIST "${CMAKE_SOURCE_DIR}/packaging/ios/Info.plist.in"
+        XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2"
+        XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
+    )
+    target_link_libraries(aethercore PRIVATE
+        "-framework AVFoundation" "-framework Accelerate"
+        "-framework Foundation" "-framework UIKit")
+    target_sources(aethercore PRIVATE src/core/MacNRFilter.cpp)
+    find_package(Qt6 REQUIRED COMPONENTS GuiPrivate)
+    target_sources(AetherSDR PRIVATE src/gui/ios/IOSAccessibility.cpp)
+    target_link_libraries(AetherSDR PRIVATE Qt6::GuiPrivate)
+    option(AETHER_IOS_MULTICAST_DISCOVERY
+        "Sign with the Apple-approved multicast entitlement for radio discovery" OFF)
+    if(AETHER_IOS_MULTICAST_DISCOVERY)
+        set_target_properties(AetherSDR PROPERTIES XCODE_ATTRIBUTE_CODE_SIGN_ENTITLEMENTS
+            "${CMAKE_SOURCE_DIR}/packaging/ios/Discovery.entitlements")
+    endif()
+    # Source-built simulator kits link FFmpeg statically through Qt's targets.
+    # The prebuilt device kit ships dynamic XCFrameworks that need embedding.
+    if(NOT AVCODEC_LIBRARY MATCHES "\\.a$")
+        qt_add_ios_ffmpeg_libraries(AetherSDR)
+    endif()
+elseif(APPLE)
     set(AETHER_MACOS_BUNDLE_IDENTIFIER "com.aethersdr.AetherSDR" CACHE STRING
         "macOS app identity; use a distinct reverse-DNS identifier for a local development build")
     if(NOT AETHER_MACOS_BUNDLE_IDENTIFIER MATCHES "^[A-Za-z0-9][A-Za-z0-9.-]*$")
@@ -2968,7 +3076,10 @@ if(APPLE)
     # RtMidi backend selectors — PUBLIC because MidiControlManager.h includes
     # RtMidi.h (its class layout is backend-conditional in places).
     target_compile_definitions(aethercore PUBLIC __MACOSX_CORE__)
-    target_link_libraries(aethercore PRIVATE "-framework CoreMIDI" "-framework CoreAudio" "-framework CoreFoundation" "-framework IOKit")
+    target_link_libraries(aethercore PRIVATE "-framework CoreMIDI" "-framework CoreAudio" "-framework CoreFoundation")
+    if(NOT IOS)
+        target_link_libraries(aethercore PRIVATE "-framework IOKit")
+    endif()
 elseif(WIN32)
     target_compile_definitions(aethercore PUBLIC __WINDOWS_MM__)
     target_link_libraries(aethercore PRIVATE winmm)
@@ -3118,7 +3229,7 @@ if(WIN32)
         src/core/UlanziDialWindowsManager.cpp
         src/core/UlanziDialWindowsManager.h)
 endif()
-if(APPLE)
+if(APPLE AND NOT IOS)
     target_sources(aethercore PRIVATE
         src/core/UlanziDialMacOSManager.cpp
         src/core/UlanziDialMacOSManager.h)
@@ -3195,7 +3306,7 @@ endif()
 #   Linux/macOS: scripts/setup/setup-onnxruntime.sh   (or: brew install onnxruntime / apt)
 #   Windows:     scripts/setup/setup-onnxruntime.ps1
 set(ORT_ROOT "${CMAKE_SOURCE_DIR}/third_party/onnxruntime")
-if(EXISTS "${ORT_ROOT}/include/onnxruntime_cxx_api.h")
+if(NOT IOS AND EXISTS "${ORT_ROOT}/include/onnxruntime_cxx_api.h")
     # Prebuilt drop from the setup scripts — used by the release builds.
     set(ORT_FOUND TRUE)
     set(ORT_INCLUDE_DIRS "${ORT_ROOT}/include")
@@ -3212,7 +3323,7 @@ if(EXISTS "${ORT_ROOT}/include/onnxruntime_cxx_api.h")
             set(ORT_LIBRARIES "${ORT_ROOT}/lib/libonnxruntime.so")
         endif()
     endif()
-elseif(NOT WIN32)
+elseif(NOT WIN32 AND NOT IOS)
     if(PkgConfig_FOUND)
         pkg_check_modules(ORT libonnxruntime)
     endif()
@@ -3373,7 +3484,7 @@ endif()
 # transducer / Moonshine / Paraformer / CTC …). Staged under third_party/sherpa-onnx
 # by scripts/setup/setup-sherpa-onnx.sh (Linux/macOS). Ships its own ONNX Runtime.
 set(SHERPA_ROOT "${CMAKE_SOURCE_DIR}/third_party/sherpa-onnx")
-if(EXISTS "${SHERPA_ROOT}/include/sherpa-onnx/c-api/c-api.h")
+if(NOT IOS AND EXISTS "${SHERPA_ROOT}/include/sherpa-onnx/c-api/c-api.h")
     set(SHERPA_FOUND TRUE)
     set(SHERPA_INCLUDE_DIRS "${SHERPA_ROOT}/include")
     if(WIN32)
@@ -3709,6 +3820,8 @@ endif()
 # It is include()d rather than add_subdirectory()'d so that relative paths inside
 # it keep resolving against the repository root. The header of that file explains
 # why that matters and why it should not be "tidied up" into a subdirectory.
+option(AETHER_BUILD_TESTS "Build the AetherSDR test harnesses" ON)
+if(AETHER_BUILD_TESTS)
 enable_testing()
 # DeepCW offline replay harness (RFC #4817 regression take): not built by default.
 if(ORT_FOUND)
@@ -3721,6 +3834,11 @@ if(ORT_FOUND)
     target_link_libraries(deepcw_replay PRIVATE Qt6::Widgets ${ORT_LIBRARIES})
 endif()
 include(tests/tests.cmake)
+endif()
+
+if(IOS)
+    qt_finalize_executable(AetherSDR)
+endif()
 
 
 # ── Install rules ────────────────────────────────────────────────────────────

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/PcmFrame.h"
+#include "core/backends/kiwi/KiwiIqBlock.h"
 
 #include "KiwiSdrProtocol.h"
 
@@ -19,6 +20,7 @@ class QTimer;
 #ifdef HAVE_WEBSOCKETS
 class QNetworkAccessManager;
 class QNetworkReply;
+class QNetworkRequest;
 class QUrl;
 class QWebSocket;
 #endif
@@ -62,6 +64,12 @@ class KiwiSdrClient : public QObject {
     Q_OBJECT
 
 public:
+    // Fixed for the lifetime of the client: closing a paired W/F transport
+    // independently can cause the server to close its surviving SND partner.
+    enum class Streams { SoundAndWaterfall, SoundOnly };
+    // A native slice must own its receiver and retain the configured endpoint.
+    enum class Admission { AllowMonitor, IndependentReceiver };
+
     enum class State {
         Disconnected,
         Connecting,
@@ -75,6 +83,15 @@ public:
     Q_ENUM(State)
 
     explicit KiwiSdrClient(QObject* parent = nullptr);
+    explicit KiwiSdrClient(Streams streams, QObject* parent = nullptr);
+    KiwiSdrClient(Streams streams, Admission admission, QObject* parent = nullptr);
+    enum class SoundFormat { DemodulatedAudio, FilteredIq };
+    // Format transitions for shared Web-888 listening on the existing lease.
+    void enableFilteredIq();
+    void disableFilteredIq();
+    double filteredIqSampleRate() const { return m_iqSampleRateHz; }
+    KiwiSdrClient(Streams streams, Admission admission, SoundFormat format,
+                  QObject* parent = nullptr);
     ~KiwiSdrClient() override;
 
     State state() const { return m_state; }
@@ -144,6 +161,7 @@ signals:
                              const QString& mode, int filterLowHz,
                              int filterHighHz, const QString& panId);
     void decodedAudioReady(const QByteArray& pcm24kStereoFloat);
+    void filteredIqReady(const AetherSDR::KiwiIqBlock& block);
     void pcmFrameReady(const AetherSDR::PcmFrame& frame);
     void waterfallRowReady(const QString& panId, const QVector<float>& binsDbm,
                            double lowFreqMhz, double highFreqMhz,
@@ -160,9 +178,12 @@ protected:
     // Transport seam for socket-free validation of waterfall command ordering.
     virtual bool waterfallTransportConnected() const;
     virtual void sendWaterfallCommand(const QString& command);
+    virtual void sendSoundCommand(const QString& command);
 #ifdef HAVE_WEBSOCKETS
     // Keep connection-state tests off the HTTP worker as well as WebSockets.
     virtual void startStatusPreflight(const QUrl& url);
+    virtual void openSoundTransport(const QNetworkRequest& request);
+    virtual void openWaterfallTransport(const QNetworkRequest& request);
 #endif
 
 private:
@@ -170,6 +191,7 @@ private:
     void publishDecodedAudio(const QByteArray& pcm);
     friend class KiwiSdrWaterfallSetupTest;
     friend class KiwiSdrWaterfallZoomCapTest;
+    friend class KiwiSdrSessionTest;
     enum class StreamKind {
         Sound,
         Waterfall,
@@ -217,6 +239,7 @@ private:
     bool isSupportedSoundFrame(
         const KiwiSdrProtocol::FrameObservation& observation) const;
     int effectiveWaterfallZoomCap() const;
+    bool recoverFlatWaterfallRow(const QVector<float>& bins, quint32 start, int zoom);
     bool parseWaterfallFrameHeader(const QByteArray& frame, quint32* start,
                                    int* zoom) const;
     QByteArray resampleSoundSamples(const QVector<float>& monoSamples);
@@ -268,7 +291,7 @@ private:
         return m_monitorMode || m_state == State::Camping;
     }
     void sendKeepalive();
-    void sendSoundCommand(const QString& command);
+
     void resetProtocolTrace();
     qint64 protocolTraceElapsedMs() const;
     void traceProtocolEvent(const QString& event);
@@ -293,6 +316,13 @@ private:
     bool retryWithSecureWebSocket(bool transportEstablished);
 #endif
 
+    const Streams m_streams;
+    const Admission m_admission;
+    SoundFormat m_soundFormat;
+    bool m_iqSequenceValid{false};
+    quint32 m_iqSequence{0};
+    double m_iqSampleRateHz{0};
+    quint64 m_transportGeneration{0};
     State m_state{State::Disconnected};
     QString m_stateDetail;
     QString m_endpoint;
@@ -383,6 +413,8 @@ private:
     // from kDefaultWaterfallZoomMax in connectToEndpoint().
     int m_waterfallZoomMax{14};
     int m_waterfallZoomCap{14};
+    int m_waterfallRecoveryZoomCap{20};
+    int m_waterfallFlatRows{0};
     bool m_waterfallZoomMaxFromServer{false};
     bool m_waterfallZoomCapFromServer{false};
     int m_waterfallFftBins{1024};

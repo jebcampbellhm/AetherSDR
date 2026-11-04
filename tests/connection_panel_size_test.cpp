@@ -24,6 +24,7 @@
 #include <QSpacerItem>
 #include <QStyle>
 #include <QToolButton>
+#include <QVariantMap>
 
 #include <cstdio>
 #include <string>
@@ -449,6 +450,42 @@ void checkIcomUsesRoutedRetention()
     settings.save();
 }
 
+void checkNrspTransientCredentials()
+{
+    ConnectionPanel panel;
+    panel.selectManualConnection();
+    auto* type = panel.findChild<QComboBox*>(QStringLiteral("connectionManualRadioType"));
+    auto* address = panel.findChild<QLineEdit*>(QStringLiteral("connectionManualIp"));
+    auto* user = panel.findChild<QLineEdit*>(QStringLiteral("connectionManualNrspUser"));
+    auto* password = panel.findChild<QLineEdit*>(QStringLiteral("connectionManualNrspPassword"));
+    auto* button = panel.findChild<QPushButton*>(QStringLiteral("connectionManualConnectButton"));
+    report("nRSP credential fields exist", type && address && user && password && button);
+    if (!type || !address || !user || !password || !button) { return; }
+    const int nrsp = type->findData(QStringLiteral("nrsp"));
+    report("nRSP family is available", nrsp >= 0);
+    if (nrsp < 0) { return; }
+    type->setCurrentIndex(nrsp);
+    address->setText(QStringLiteral("127.0.0.1"));
+    user->setText(QStringLiteral("test-listener"));
+    password->setText(QStringLiteral("dummy-session-secret"));
+    report("nRSP password is masked", password->echoMode() == QLineEdit::Password);
+    bool emitted = false;
+    QVariantMap supplied;
+    QObject::connect(&panel, &ConnectionPanel::connectWithOptionsRequested,
+                     [&](const RadioInfo& info, const QVariantMap& params) {
+        emitted = info.family == QStringLiteral("nrsp") && info.port == 50000;
+        supplied = params;
+    });
+    button->click();
+    report("nRSP routes transient credentials with the selected endpoint",
+           emitted && supplied.value("nrsp.username").toString() == QStringLiteral("test-listener")
+                   && supplied.value("nrsp.password").toString() == QStringLiteral("dummy-session-secret"));
+    report("nRSP clears password after submission", password->text().isEmpty());
+    password->setText(QStringLiteral("another-dummy-secret"));
+    type->setCurrentIndex(type->findData(QStringLiteral("flex")));
+    report("changing family clears nRSP password", password->text().isEmpty());
+}
+
 } // namespace
 
 int main(int argc, char** argv)
@@ -810,9 +847,59 @@ int main(int argc, char** argv)
     }
 
     app.setFont(originalFont);
+    {
+        ConnectionPanel panel;
+        auto* types = panel.findChild<QComboBox*>(QStringLiteral("connectionManualRadioType"));
+        auto* manual = panel.findChild<QAbstractButton*>(QStringLiteral("connectionManualModeButton"));
+        auto* address = panel.findChild<QLineEdit*>(QStringLiteral("connectionManualIp"));
+        auto* port = panel.findChild<QSpinBox*>(QStringLiteral("connectionWeb888Port"));
+        auto* password = panel.findChild<QLineEdit*>(QStringLiteral("connectionWeb888Password"));
+        auto* forgetPassword = panel.findChild<QPushButton*>(QStringLiteral("connectionWeb888ForgetPassword"));
+        auto* connectButton = panel.findChild<QPushButton*>(QStringLiteral("connectionManualConnectButton"));
+        const bool controls = types && manual && address && port && password && forgetPassword && connectButton;
+        report("Web-888 has its own connection form", controls && types->findData(QStringLiteral("web888")) >= 0);
+        if (controls) {
+            panel.show(); manual->click();
+            types->setCurrentIndex(types->findData(QStringLiteral("web888")));
+            QApplication::processEvents();
+            report("Web-888 fields are visible and password is masked",
+                   port->isVisible() && password->isVisible() && password->echoMode() == QLineEdit::Password);
+            const auto* portEditor = port->findChild<QLineEdit*>();
+            report("Web-888 port editor has room to display all five digits",
+                   portEditor && portEditor->width() > portEditor->fontMetrics().horizontalAdvance(QStringLiteral("65535")));
+            QList<RadioInfo> requested;
+            QObject::connect(&panel, &ConnectionPanel::connectRequested, &panel,
+                [&requested](const RadioInfo& info) { requested.push_back(info); });
+            address->setText(QStringLiteral("127.0.0.1"));
+            port->setValue(18073);
+            password->setText(QStringLiteral("test-password-never-persisted"));
+            connectButton->click();
+            report("Web-888 connects directly with its own family, endpoint, and capacity",
+                   requested.size() == 1 && requested.front().family == QStringLiteral("web888")
+                   && requested.front().port == 18073 && requested.front().maxSlices == 4 && requested.front().maxPanadapters == 2
+                   && requested.front().model == QStringLiteral("Web-888"));
+            const QString routes = AppSettings::instance().value("RoutedProfilesJson").toString();
+            report("Web-888 route retention excludes the password",
+                   !routes.contains(QStringLiteral("test-password-never-persisted")) && password->text().isEmpty());
+            types->setCurrentIndex(types->findData(QStringLiteral("flex")));
+            port->setValue(8073);
+            panel.probeRadio(QStringLiteral("127.0.0.1"), true);
+            report("retained address restores Web-888 and its custom port",
+                   types->currentData() == QStringLiteral("web888") && port->value() == 18073
+                   && requested.size() == 2 && requested.back().port == 18073);
+            address->setText(QStringLiteral("not an address"));
+            connectButton->click();
+            report("invalid Web-888 address does not create a session", requested.size() == 2);
+            password->setText(QStringLiteral("unsent-test-password"));
+            forgetPassword->click();
+            report("forget validates the endpoint before clearing a password",
+                   password->text() == QStringLiteral("unsent-test-password") && forgetPassword->isEnabled());
+        }
+    }
     checkIcomManualGuidanceIsModelNeutral();
     checkIcomCustomNatPorts();
     checkIcomUsesRoutedRetention();
+    checkNrspTransientCredentials();
     std::printf("\n%s\n", g_failed == 0 ? "ALL PASS" : "FAILURES PRESENT");
     return g_failed == 0 ? 0 : 1;
 }

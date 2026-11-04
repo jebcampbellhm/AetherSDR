@@ -75,6 +75,7 @@ LogManager::LogManager()
         {"aether.discovery",  "Discovery",    "UDP radio discovery broadcasts"},
         {"aether.connection", "Connection / Commands", "Raw TCP command channel lines: TX commands, RX responses, and socket state"},
         {"aether.protocol",   "Protocol / Status",     "Parsed SmartSDR protocol handling and model status updates"},
+        {"aether.nrsp",       "SDRplay nRSP-ST", "Direct nRSP-ST session, source-state readback and receive-worker diagnostics"},
         {"aether.audio",      "Audio",        "RX/TX audio, device negotiation, volume"},
         {"aether.audio.summary", "Audio Summary", "Default support log summaries for audio routing and sink/source negotiation"},
         {"aether.vita49",     "VITA-49",      "UDP packet routing: FFT, waterfall, meters, DAX"},

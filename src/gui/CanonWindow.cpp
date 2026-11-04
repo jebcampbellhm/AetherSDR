@@ -1,4 +1,5 @@
 #include "CanonWindow.h"
+#include "TabletUi.h"
 
 #include "FramelessMoveHelper.h"
 
@@ -46,6 +47,7 @@ CanonWindow::CanonWindow(const QString& title, QWidget* parent, Kind kind)
     , m_returnClicksDefault(kind == Kind::Dialog)
 {
     setWindowTitle(title);
+    keepTabletWindowOnScreen(this);
     setWindowFlags((kind == Kind::Workspace ? Qt::Window : Qt::Dialog)
                    | Qt::FramelessWindowHint);
     // A secondary top-level window: an open workspace must not keep the app
@@ -342,7 +344,8 @@ QToolButton* makeCanonCloseButton(QWidget* parent)
     close->setText(QStringLiteral("✕"));
     close->setAccessibleName(QStringLiteral("Close"));
     close->setToolTip(QStringLiteral("Close"));
-    close->setFixedSize(kCloseSize, kCloseSize);
+    const int closeSize = tabletUiEnabled() ? 48 : kCloseSize;
+    close->setFixedSize(closeSize, closeSize);
     close->setCursor(Qt::PointingHandCursor);
     ThemeManager::instance().applyStyleSheet(close,
         "QToolButton { background: transparent; color: {{color.canon.muted}}; border: 1px solid transparent; "
@@ -355,7 +358,11 @@ QToolButton* makeCanonCloseButton(QWidget* parent)
 void placeCanonCloseButton(QToolButton* close)
 {
     const QWidget* host = close->parentWidget();
-    close->move(host->width() - kCloseSize - kCloseMargin, kCloseMargin);
+    // Qt includes the iOS status bar and home-indicator safe area in the
+    // contents rect. This manually positioned control must respect it too.
+    const QRect area = tabletUiEnabled() ? host->contentsRect() : host->rect();
+    close->move(area.right() + 1 - close->width() - kCloseMargin,
+                area.top() + kCloseMargin);
     close->raise();
 }
 

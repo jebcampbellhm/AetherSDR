@@ -2013,7 +2013,9 @@ QWidget* RadioSetupDialog::buildPeripheralsTab()
         ui->isConnected = [this]() { return m_acom->isConnected(); };
         ui->disconnectNow = [this]() { m_acom->disconnect(); };
         ui->connectNetwork = [this](const QString& h, quint16 p) { m_acom->connectNetwork(h, p); };
+#ifdef HAVE_SERIALPORT
         ui->connectSerial = [this](const QString& port) { m_acom->connectSerial(port); };
+#endif
         ui->description = [this]() { return m_acom->description(); };
         ui->afterRemoval = [this]() { m_acom->disconnect(); };
         buildSerialNetworkDevice(*ui, detailStack, refresh, serialReseeds);
@@ -2066,10 +2068,12 @@ QWidget* RadioSetupDialog::buildPeripheralsTab()
             applySpeVariant();
             m_spe->connectNetwork(h, p);
         };
+#ifdef HAVE_SERIALPORT
         ui->connectSerial = [this, applySpeVariant](const QString& port) {
             applySpeVariant();
             m_spe->connectSerial(port);
         };
+#endif
         ui->description = [this]() { return m_spe->description(); };
         ui->afterRemoval = [this]() { m_spe->disconnect(); };
         buildSerialNetworkDevice(*ui, detailStack, refresh, serialReseeds);
@@ -2208,7 +2212,9 @@ QWidget* RadioSetupDialog::buildPeripheralsTab()
         ui->isConnected = [this]() { return m_lpMeter->isConnected(); };
         ui->disconnectNow = [this]() { m_lpMeter->disconnect(); };
         ui->connectNetwork = [this](const QString& h, quint16 p) { m_lpMeter->connectNetwork(h, p); };
+#ifdef HAVE_SERIALPORT
         ui->connectSerial = [this](const QString& port) { m_lpMeter->connectSerial(port); };
+#endif
         ui->description = [this]() { return m_lpMeter->description(); };
         ui->afterRemoval = [this]() { m_lpMeter->disconnect(); };
         buildSerialNetworkDevice(*ui, detailStack, refresh, serialReseeds);

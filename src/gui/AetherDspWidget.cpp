@@ -262,14 +262,14 @@ AetherDspWidget::AetherDspWidget(AudioEngine* audio, QWidget* parent)
         b->setObjectName(QStringLiteral("dspMethodBtn") + QLatin1String(kLabels[i]));
         b->setAccessibleName(QString::fromLatin1(kLabels[i])
                              + QStringLiteral(" noise-reduction method"));
-        // MNR (MMSE-Wiener spectral NR) is implemented only on macOS —
+        // MNR (MMSE-Wiener spectral NR) uses Apple Accelerate —
         // dim the selector on Windows / Linux so users can see it exists
         // but can't enable a path the engine has no backend for.
-#ifndef Q_OS_MACOS
+#ifndef __APPLE__
         if (i == MNR) {
             b->setEnabled(false);
-            b->setToolTip("MNR is only available on macOS.");
-            b->setAccessibleDescription(tr("MNR is only available on macOS."));
+            b->setToolTip(tr("MNR requires Apple Accelerate (macOS or iPadOS)."));
+            b->setAccessibleDescription(tr("MNR requires Apple Accelerate (macOS or iPadOS)."));
         }
 #endif
         // NR4 (libspecbleach spectral NR) requires clang-cl on Windows to

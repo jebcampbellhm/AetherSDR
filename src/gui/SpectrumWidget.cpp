@@ -1,4 +1,5 @@
 #include "SpectrumWidget.h"
+#include "TabletUi.h"
 #include "SpectrumChromeGeometry.h"
 #include "SpectrumSquelchLogic.h"
 #include "ScopedChildWidget.h"
@@ -1960,6 +1961,9 @@ void SpectrumWidget::applyNativeWindowIsolationPolicy()
 SpectrumWidget::SpectrumWidget(QWidget* parent)
     : SPECTRUM_BASE_CLASS(parent)
 {
+    if (tabletUiEnabled()) {
+        grabGesture(Qt::PinchGesture);
+    }
     // Container declaration — every token lookup made by this widget or
     // any of its children (without their own declaration) resolves
     // through the "spectrum" scope chain.  Token migration into this
@@ -1988,8 +1992,8 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         reportRhiFailure(tr("Qt could not create or present the spectrum renderer."));
     });
 
-    // Explicitly request Metal on macOS.
-#  ifdef Q_OS_MACOS
+    // Explicitly request Metal on Apple platforms.
+#  if defined(Q_OS_MACOS) || defined(Q_OS_IOS)
     setApi(QRhiWidget::Api::Metal);
     // WA_NativeWindow gives this widget its own NSView; without it QRhiWidget
     // can't get a Metal QRhi when the parent's surface is RasterSurface (#714).
@@ -8905,8 +8909,10 @@ void SpectrumWidget::updateWaterfallRow(const QVector<float>& binsIntensity,
             // Use noise floor directly as threshold — noise maps to black,
             // signals above stand out with better contrast.
             const float target = noiseFloor;
-            // Smooth to prevent jitter
-            m_autoBlackThresh = 0.95f * m_autoBlackThresh + 0.05f * target;
+            // Absolute dB rows cannot start from the positive Flex-intensity
+            // seed: that would blank initial rows while smoothing converges.
+            m_autoBlackThresh = m_panBinsAbsolute && !m_hasNativeWaterfall
+                ? target : 0.95f * m_autoBlackThresh + 0.05f * target;
         }
     }
 
@@ -12033,6 +12039,26 @@ void SpectrumWidget::setBackgroundFillColor(const QColor& c)
 
 bool SpectrumWidget::event(QEvent* ev)
 {
+    if (tabletUiEnabled() && ev->type() == QEvent::Gesture) {
+        auto* gestures = static_cast<QGestureEvent*>(ev);
+        if (auto* pinch = static_cast<QPinchGesture*>(gestures->gesture(Qt::PinchGesture))) {
+            if (pinch->state() != Qt::GestureCanceled
+                && pinch->changeFlags().testFlag(QPinchGesture::ScaleFactorChanged)
+                && pinch->lastScaleFactor() > 0.0) {
+                const qreal ratio = pinch->scaleFactor() / pinch->lastScaleFactor();
+                if (std::isfinite(ratio) && ratio > 0.0) {
+                    const QPointF local = pinch->centerPoint();
+                    const QPointF global = mapToGlobal(local.toPoint());
+                    QNativeGestureEvent zoom(Qt::ZoomNativeGesture, nullptr, 2,
+                                             local, mapTo(window(), local.toPoint()),
+                                             global, ratio - 1.0, QPointF());
+                    event(&zoom);
+                }
+            }
+            gestures->accept(pinch);
+            return true;
+        }
+    }
     // Re-assert mouse tracking after native window changes (reparenting into
     // QSplitter, window recreation). Without this, QRhiWidget's native Metal
     // surface loses mouse tracking and mouseMoveEvent stops firing.

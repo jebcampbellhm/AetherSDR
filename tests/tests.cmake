@@ -4683,6 +4683,44 @@ target_link_libraries(adaptive_engine_test PRIVATE Qt6::Core)
 set_target_properties(adaptive_engine_test PROPERTIES AUTOMOC ON)
 add_test(NAME adaptive_engine_test COMMAND adaptive_engine_test)
 
+# not registered: manual positive live-radio diagnostic; requires --host and --output.
+add_executable(nrsp_live_probe EXCLUDE_FROM_ALL tests/nrsp_live_probe.cpp)
+target_link_libraries(nrsp_live_probe PRIVATE aethercore)
+
+# Socket-free acquisition-event injection through production worker relays.
+add_executable(nrsp_backend_test tests/nrsp_backend_test.cpp)
+target_link_libraries(nrsp_backend_test PRIVATE aethercore)
+add_test(NAME nrsp_backend_test COMMAND nrsp_backend_test)
+set_tests_properties(nrsp_backend_test PROPERTIES TIMEOUT 30)
+
+add_executable(nrsp_demodulator_test tests/nrsp_demodulator_test.cpp)
+target_link_libraries(nrsp_demodulator_test PRIVATE aethercore)
+add_test(NAME nrsp_demodulator_test COMMAND nrsp_demodulator_test)
+set_tests_properties(nrsp_demodulator_test PROPERTIES TIMEOUT 90)
+
+add_executable(nrsp_session_test
+    tests/nrsp_session_test.cpp
+    src/core/backends/nrsp/NrspSession.cpp
+    src/core/backends/nrsp/NrspProtocol.cpp
+    src/core/backends/nrsp/NrspAuthentication.cpp
+    src/core/backends/nrsp/NrspData.cpp
+)
+target_include_directories(nrsp_session_test PRIVATE src)
+target_link_libraries(nrsp_session_test PRIVATE Qt6::Core aether_zstd ${AETHER_NRSP_CRYPTO})
+add_test(NAME nrsp_session_test COMMAND nrsp_session_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/nrsp/wire-examples.json)
+
+add_executable(nrsp_protocol_test
+    tests/nrsp_protocol_test.cpp
+    src/core/backends/nrsp/NrspProtocol.cpp
+    src/core/backends/nrsp/NrspAuthentication.cpp
+    src/core/backends/nrsp/NrspData.cpp
+)
+target_include_directories(nrsp_protocol_test PRIVATE src)
+target_link_libraries(nrsp_protocol_test PRIVATE Qt6::Core aether_zstd ${AETHER_NRSP_CRYPTO})
+add_test(NAME nrsp_protocol_test COMMAND nrsp_protocol_test
+    ${CMAKE_CURRENT_SOURCE_DIR}/tests/fixtures/nrsp/wire-examples.json)
+
 add_executable(kiwi_sdr_protocol_test
     tests/kiwi_sdr_protocol_test.cpp
     src/core/KiwiSdrProtocol.cpp
@@ -4690,6 +4728,96 @@ add_executable(kiwi_sdr_protocol_test
 target_include_directories(kiwi_sdr_protocol_test PRIVATE src)
 target_link_libraries(kiwi_sdr_protocol_test PRIVATE Qt6::Core)
 add_test(NAME kiwi_sdr_protocol_test COMMAND kiwi_sdr_protocol_test)
+
+# Socket-free concurrent allocation; no radio or wall clock is involved.
+find_package(Threads REQUIRED)
+add_executable(kiwi_session_id_test tests/kiwi_session_id_test.cpp)
+target_include_directories(kiwi_session_id_test PRIVATE src)
+target_link_libraries(kiwi_session_id_test PRIVATE Threads::Threads)
+set_target_properties(kiwi_session_id_test PROPERTIES AUTOMOC OFF AUTOUIC OFF AUTORCC OFF)
+add_test(NAME kiwi_session_id_test COMMAND kiwi_session_id_test)
+
+# Socket-free startup/teardown with injected HTTP and WebSocket opening.
+add_executable(kiwi_sdr_session_test tests/kiwi_sdr_session_test.cpp)
+target_include_directories(kiwi_sdr_session_test PRIVATE src)
+target_link_libraries(kiwi_sdr_session_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME kiwi_sdr_session_test COMMAND kiwi_sdr_session_test)
+
+add_executable(web888_backend_test tests/web888_backend_test.cpp)
+target_include_directories(web888_backend_test PRIVATE src)
+target_link_libraries(web888_backend_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_backend_test COMMAND web888_backend_test)
+
+add_executable(web888_shared_ssb_test tests/web888_shared_ssb_test.cpp)
+target_include_directories(web888_shared_ssb_test PRIVATE src tests)
+target_link_libraries(web888_shared_ssb_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_shared_ssb_test COMMAND web888_shared_ssb_test)
+
+add_executable(web888_iq_test tests/web888_iq_test.cpp)
+target_include_directories(web888_iq_test PRIVATE src tests)
+target_link_libraries(web888_iq_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_iq_test COMMAND web888_iq_test)
+
+add_executable(web888_capture_pool_test tests/web888_capture_pool_test.cpp)
+target_include_directories(web888_capture_pool_test PRIVATE src tests)
+target_link_libraries(web888_capture_pool_test PRIVATE aethercore Qt6::Core Qt6::Network)
+add_test(NAME web888_capture_pool_test COMMAND web888_capture_pool_test)
+
+add_executable(web888_iq_processor_test tests/web888_iq_processor_test.cpp)
+target_include_directories(web888_iq_processor_test PRIVATE src tests)
+target_link_libraries(web888_iq_processor_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_iq_processor_test COMMAND web888_iq_processor_test)
+
+add_executable(web888_decoder_period_test tests/web888_decoder_period_test.cpp)
+target_include_directories(web888_decoder_period_test PRIVATE src tests)
+target_link_libraries(web888_decoder_period_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_decoder_period_test COMMAND web888_decoder_period_test)
+
+add_executable(web888_decoder_router_test tests/web888_decoder_router_test.cpp)
+target_include_directories(web888_decoder_router_test PRIVATE src tests)
+target_link_libraries(web888_decoder_router_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_decoder_router_test COMMAND web888_decoder_router_test)
+
+add_executable(web888_decoder_pipeline_test tests/web888_decoder_pipeline_test.cpp)
+target_include_directories(web888_decoder_pipeline_test PRIVATE src tests)
+target_link_libraries(web888_decoder_pipeline_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_decoder_pipeline_test COMMAND web888_decoder_pipeline_test)
+
+add_executable(web888_decoder_wav_test tests/web888_decoder_wav_test.cpp)
+target_include_directories(web888_decoder_wav_test PRIVATE src tests)
+target_link_libraries(web888_decoder_wav_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_decoder_wav_test COMMAND web888_decoder_wav_test)
+
+add_executable(web888_decoder_process_test tests/web888_decoder_process_test.cpp)
+target_include_directories(web888_decoder_process_test PRIVATE src tests)
+target_link_libraries(web888_decoder_process_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_decoder_process_test COMMAND web888_decoder_process_test)
+
+add_executable(web888_wspr_signal_test tests/web888_wspr_signal_test.cpp)
+target_include_directories(web888_wspr_signal_test PRIVATE src tests)
+target_link_libraries(web888_wspr_signal_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_wspr_signal_test COMMAND web888_wspr_signal_test)
+add_test(NAME web888_wspr_signal_12k_test COMMAND web888_wspr_signal_test --sample-rate 12000)
+add_test(NAME web888_wspr_signal_fractional_test COMMAND web888_wspr_signal_test --sample-rate 36000.125)
+add_test(NAME web888_wspr_signal_48k_test COMMAND web888_wspr_signal_test --sample-rate 48000)
+
+add_executable(web888_connection_test tests/web888_connection_test.cpp)
+target_include_directories(web888_connection_test PRIVATE src tests)
+target_link_libraries(web888_connection_test PRIVATE aethercore Qt6::Core)
+add_test(NAME web888_connection_test COMMAND web888_connection_test)
+
+add_executable(web888_connection_panel_test
+    tests/web888_connection_panel_test.cpp
+    src/gui/DigitalMonitoringDialog.cpp
+    src/gui/ConnectionPanel.cpp
+    src/gui/CanonWindow.cpp
+    src/gui/PersistentDialog.cpp
+    src/gui/FramelessResizer.cpp
+    src/gui/FramelessWindowTitleBar.cpp)
+target_include_directories(web888_connection_panel_test PRIVATE src tests)
+target_link_libraries(web888_connection_panel_test PRIVATE aethercore Qt6::Core Qt6::Network Qt6::Widgets)
+add_test(NAME web888_connection_panel_test COMMAND web888_connection_panel_test)
+set_tests_properties(web888_connection_panel_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(kiwi_sdr_waterfall_scale_test
     tests/kiwi_sdr_waterfall_scale_test.cpp
@@ -4736,6 +4864,7 @@ add_executable(kiwi_sdr_waterfall_setup_test
 target_include_directories(kiwi_sdr_waterfall_setup_test PRIVATE src)
 target_link_libraries(kiwi_sdr_waterfall_setup_test PRIVATE aethercore Qt6::Core)
 add_test(NAME kiwi_sdr_waterfall_setup_test COMMAND kiwi_sdr_waterfall_setup_test)
+
 
 # Socket-free regression: KiwiSDR zoom_cap (request ceiling) must not replace
 # zoom_max (start fixed-point scale); v1.900 shared waterfalls send both.
@@ -5843,6 +5972,11 @@ if (ENABLE_ASR)
     add_executable(copy_assist_panel_test
         tests/copy_assist_panel_test.cpp
         src/gui/CopyAssistPanel.cpp
+        src/core/ThemeManager.cpp
+        src/core/ThemeSeedGenerated.cpp
+        $<TARGET_OBJECTS:aether_test_settings>
+        $<TARGET_OBJECTS:aether_test_log_manager>
+        $<TARGET_OBJECTS:aether_test_async_log_writer>
     )
     target_include_directories(copy_assist_panel_test PRIVATE src)
     target_link_libraries(copy_assist_panel_test PRIVATE Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
@@ -5971,6 +6105,16 @@ set_target_properties(hgauge_hover_popup_test PROPERTIES AUTOMOC ON)
 add_test(NAME hgauge_hover_popup_test COMMAND hgauge_hover_popup_test)
 set_tests_properties(hgauge_hover_popup_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+if(TARGET Qt6::GuiPrivate AND Qt6_VERSION VERSION_EQUAL "6.12.0")
+    add_executable(ios_accessibility_lifecycle_test
+        tests/ios_accessibility_lifecycle_test.cpp
+        src/gui/ios/IOSAccessibility.cpp)
+    target_include_directories(ios_accessibility_lifecycle_test PRIVATE src)
+    target_link_libraries(ios_accessibility_lifecycle_test PRIVATE Qt6::Widgets Qt6::GuiPrivate)
+    add_test(NAME ios_accessibility_lifecycle_test COMMAND ios_accessibility_lifecycle_test)
+    set_tests_properties(ios_accessibility_lifecycle_test PROPERTIES SKIP_RETURN_CODE 77)
+endif()
 
 # RangeSlider accessibility announcements (#4565): arrow-key bursts debounce to
 # one settled announcement, while discrete handle-focus moves announce
@@ -10518,6 +10662,7 @@ set(AETHER_SETTINGS_CONSUMERS
     cw_rx_model_test
     asr_native_receiver_test
     gps_fix_state_test
+    nrsp_backend_test
     dax_receive_applet_test
     graphic_eq_persistence_test
     hl2_discovery_logging_test
@@ -10687,6 +10832,7 @@ set(AETHER_SETTINGS_CONSUMERS
     digital_voice_waveform_process_test
     dstar_model_test
     ole_compound_file_test
+    copy_assist_panel_test
     copy_assist_settings_dialog_test
     copy_assist_failure_test
     s_meter_geometry_test
@@ -11433,3 +11579,33 @@ if(HAVE_PIPEWIRE)
     target_link_libraries(pipewire_rx_bridge_test PRIVATE aethercore Qt6::Core)
     add_test(NAME pipewire_rx_bridge_test COMMAND pipewire_rx_bridge_test)
 endif()
+
+# Manual live hardware diagnostic: explicit target, never run by CTest/CI.
+# not registered: requires an operator-authorized real receiver and credentials.
+if(Qt6WebSockets_FOUND)
+    add_executable(web888_live_probe EXCLUDE_FROM_ALL tools/web888_live_probe.cpp)
+    target_include_directories(web888_live_probe PRIVATE src tests)
+    target_link_libraries(web888_live_probe PRIVATE aethercore Qt6::Core Qt6::Network)
+endif()
+
+add_executable(display_session_monitor_test
+    tests/display_session_monitor_test.cpp src/gui/DisplaySessionMonitor.cpp)
+target_include_directories(display_session_monitor_test PRIVATE src)
+target_link_libraries(display_session_monitor_test PRIVATE Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(display_session_monitor_test PRIVATE Wtsapi32)
+endif()
+set_target_properties(display_session_monitor_test PROPERTIES AUTOMOC ON)
+add_test(NAME display_session_monitor_test COMMAND display_session_monitor_test)
+set_tests_properties(display_session_monitor_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+
+# Shared dialogs also fit the available tablet screen on rotation. Standalone
+# widget tests compile those dialogs directly, so carry their shared helper.
+get_property(_tablet_widget_targets DIRECTORY PROPERTY BUILDSYSTEM_TARGETS)
+foreach(_target IN LISTS _tablet_widget_targets)
+    get_target_property(_sources ${_target} SOURCES)
+    if("${_sources}" MATCHES "src/gui/(CanonWindow|PersistentDialog|CopyAssistPanel|CopyAssistSettingsDialog|ConnectionPanel|RadioSetupDialog)\\.cpp"
+       AND NOT "${_sources}" MATCHES "src/gui/TabletUi\\.cpp")
+        target_sources(${_target} PRIVATE src/gui/TabletUi.cpp)
+    endif()
+endforeach()

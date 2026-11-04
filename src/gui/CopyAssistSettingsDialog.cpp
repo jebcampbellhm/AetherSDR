@@ -1,4 +1,5 @@
 #include "CopyAssistSettingsDialog.h"
+#include "TabletUi.h"
 
 #include <QCheckBox>
 #include <QComboBox>
@@ -9,6 +10,7 @@
 #include <QPushButton>
 #include <QSignalBlocker>
 #include <QSlider>
+#include <QScrollArea>
 #include <QVBoxLayout>
 
 namespace AetherSDR {
@@ -249,8 +251,30 @@ CopyAssistSettingsDialog::CopyAssistSettingsDialog(QWidget* parent)
     ovRow->addWidget(m_overlapValue);
     form->addRow(tr("Boundary overlap:"), ovRow);
 
-    root->addLayout(form);
-    root->addStretch(1); // headroom for further options added here later
+    if (tabletUiEnabled()) {
+        logHint->setWordWrap(true);
+        m_rawAudio->setText(tr("Use unprocessed audio (before NR and RX effects)"));
+        form->setRowWrapPolicy(QFormLayout::WrapLongRows);
+        auto* content = new QWidget(this);
+        content->setLayout(form);
+        auto* scroll = new QScrollArea(this);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidget(content);
+        root->addWidget(scroll, 1);
+        auto* done = new QPushButton(tr("Done"), this);
+        done->setAccessibleName(tr("Close Copy Assist settings"));
+        connect(done, &QPushButton::clicked, this, &QDialog::hide);
+        root->addWidget(done);
+        m_overlapValue->setMinimumWidth(0);
+        m_overlapValue->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
+        styleTabletSurface(bodyWidget());
+        prepareTabletControls(bodyWidget());
+        resize(720, 600);
+    } else {
+        root->addLayout(form);
+        root->addStretch(1); // headroom for further options added here later
+    }
 }
 
 void CopyAssistSettingsDialog::addTier(const QString& id, const QString& label)

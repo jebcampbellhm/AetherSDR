@@ -107,6 +107,8 @@
 #include <QPlainTextEdit>
 #include <QSplitter>
 #include <QScrollArea>
+#include <QScroller>
+#include "TabletUi.h"
 #include <QScrollBar>
 #include <QPoint>
 #include <QHostAddress>
@@ -485,6 +487,36 @@ private:
     QWidget* m_page;
 };
 
+class TabletSettingsLayout final : public QObject {
+public:
+    TabletSettingsLayout(QWidget* window, QSplitter* splitter, QTreeWidget* navigation)
+        : QObject(window), m_window(window), m_splitter(splitter), m_navigation(navigation)
+    {
+        window->installEventFilter(this);
+    }
+protected:
+    bool eventFilter(QObject*, QEvent* event) override
+    {
+        if (event->type() != QEvent::Resize && event->type() != QEvent::Show)
+            return false;
+        const bool portrait = m_window->height() > m_window->width();
+        const auto orientation = portrait ? Qt::Vertical : Qt::Horizontal;
+        if (m_splitter->orientation() != orientation) {
+            m_navigation->setMinimumWidth(portrait ? 0 : 235);
+            m_navigation->setMaximumWidth(portrait ? QWIDGETSIZE_MAX : 340);
+            m_navigation->setMaximumHeight(portrait ? 200 : QWIDGETSIZE_MAX);
+            m_splitter->setOrientation(orientation);
+            m_splitter->setSizes(portrait ? QList<int>{200, 700} : QList<int>{260, 700});
+            if (m_navigation->currentItem()) m_navigation->scrollToItem(m_navigation->currentItem());
+        }
+        return false;
+    }
+private:
+    QWidget* m_window;
+    QSplitter* m_splitter;
+    QTreeWidget* m_navigation;
+};
+
 static QWidget* wrapTabInScrollArea(QWidget* content)
 {
     new ButtonsFitContent(content);
@@ -492,6 +524,12 @@ static QWidget* wrapTabInScrollArea(QWidget* content)
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
     scroll->setWidget(content);
+    if (tabletUiEnabled()) {
+        // Two-column desktop forms otherwise squeeze editable values to a
+        // few characters beside the category list in portrait orientation.
+        content->setMinimumWidth(qMax(700, content->minimumWidth()));
+        QScroller::grabGesture(scroll->viewport(), QScroller::TouchGesture);
+    }
     return scroll;
 }
 
@@ -1257,6 +1295,7 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
     content->setStretchFactor(0, 0);
     content->setStretchFactor(1, 1);
     content->setSizes({260, 700});
+    if (tabletUiEnabled()) new TabletSettingsLayout(this, content, m_navigation);
 
     auto addCategory = [this](const QString& name) {
         auto* item = new QTreeWidgetItem(m_navigation, {name});

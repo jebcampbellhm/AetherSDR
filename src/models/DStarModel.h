@@ -193,7 +193,9 @@ private:
     quint64 m_nextTrafficId{1};
     QString m_trafficPersistencePath;
     QTimer m_saveTimer;
+#if QT_CONFIG(process)
     QProcess m_serialProbe;
+#endif
     QStringList m_serialProbeQueue;
     QString m_activeSerialProbePath;
     QString m_serialProbeForcedError;

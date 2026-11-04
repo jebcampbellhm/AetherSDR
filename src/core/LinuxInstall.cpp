@@ -535,6 +535,7 @@ bool LinuxInstall::install(const QString& tree, const QString& version, const Pa
 
 bool LinuxInstall::selfTest(const QString& tree, const QString& version)
 {
+#if QT_CONFIG(process)
     QTemporaryDir dir;
     if (!dir.isValid()) {
         return false;
@@ -569,6 +570,11 @@ bool LinuxInstall::selfTest(const QString& tree, const QString& version)
         qCWarning(lcUpdater).noquote() << "self-test of v" + version + " failed, exit code" << p.exitCode();
     }
     return ok;
+#else
+    Q_UNUSED(tree);
+    Q_UNUSED(version);
+    return false;
+#endif
 }
 
 LinuxInstall::Switch LinuxInstall::switchTo(const QString& base, const QString& stagedDir, const QString& version,
@@ -646,6 +652,7 @@ QStringList LinuxInstall::appImageVariables()
 
 bool LinuxInstall::startAfterExit(qint64 pid, const QStringList& command, const QStringList& unset)
 {
+#if QT_CONFIG(process)
     if (command.isEmpty()) {
         return false;
     }
@@ -671,6 +678,12 @@ bool LinuxInstall::startAfterExit(qint64 pid, const QStringList& command, const 
     process.setUnixProcessParameters(QProcess::UnixProcessFlag::CloseFileDescriptors);
 #endif
     return process.startDetached();
+#else
+    Q_UNUSED(pid);
+    Q_UNUSED(command);
+    Q_UNUSED(unset);
+    return false;
+#endif
 }
 
 } // namespace AetherSDR

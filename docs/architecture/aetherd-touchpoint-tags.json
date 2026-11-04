@@ -1786,5 +1786,131 @@
   "note": "FlexLib-authoritative CWX command encoding and bounded queue-reply decoding. Only backend implementations and socket-free wire fixtures consume it.",
   "split": "",
   "confidence": "high"
+ },
+ "core/backends/nrsp/NrspSession.h": {
+  "tag": "vendor(nrsp)",
+  "note": "Private nRSP-ST authentication, receiver lifecycle and shared-source wire state machine.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspWorker.h": {
+  "tag": "vendor(nrsp)",
+  "note": "Private nRSP-ST TCP acquisition and source readback worker below IRadioBackend.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspProtocol.h": {
+  "tag": "vendor(nrsp)",
+  "note": "nRSP-ST TCP framing, integer encoding, session keys and source-state parsing. Private to the direct receiver backend; protocol evidence and provenance are in docs/nrsp-st-protocol.md.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspAuthentication.h": {
+  "tag": "vendor(nrsp)",
+  "note": "nRSP-ST nonce challenge and RSA server verification, private to the receiver session.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/nrsp/NrspData.h": {
+  "tag": "vendor(nrsp)",
+  "note": "Bounded nRSP-ST IQ Lite and display decompression and receiver-id decoding, below the radio seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/NetworkReceiverCredentials.h": {
+  "tag": "ui-support",
+  "note": "Endpoint-bound process-session and OS-keychain credential handoff for standalone network receive connections. Contains no wire commands or radio-state fields; connection UI submits a secret and the backend loads it asynchronously.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888Backend.h": {
+  "tag": "vendor(web888)",
+  "note": "Local experimental native RX backend. Owns the Web-888 session below IRadioBackend; selected through the neutral factory.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/RadioBackendFactory.h": {
+  "tag": "universal",
+  "note": "Backend composition boundary. Accepts a family key and returns IRadioBackend; concrete vendor types stay below the seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/kiwi/KiwiSessionId.h": {
+  "tag": "vendor(kiwi)",
+  "note": "Shared Kiwi/Web-888 wire-session identifier allocator; server timestamp namespace and signed-parser bounds.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/kiwi/KiwiIqBlock.h": {
+  "tag": "vendor(kiwi)",
+  "note": "Bounded filtered SND IQ wire payload, opt-in below the backend seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888IqSplitter.h": {
+  "tag": "vendor(web888)",
+  "note": "Streaming USB decoder channelization of one filtered Web-888 IQ capture.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888IqCapture.h": {
+  "tag": "vendor(web888)",
+  "note": "Sound-only IQ session lifetime and revocable decoder outputs.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888CapturePlan.h": {
+  "tag": "vendor(web888)",
+  "note": "Pure receive-window planning and explicit listening capacity reservation.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888CapturePool.h": {
+  "tag": "vendor(web888)",
+  "note": "Owner-thread capture admission, listening budget, rollback and source lifetime below the backend seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888DecoderPeriod.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded decoder period assembly requiring an explicit verified sample-time anchor.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888DecoderRouter.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded per-mode decoder period routing, aggregate sample budget and revocable jobs below the backend seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888DecoderProcess.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded local decoder process handoff for Web-888 routed audio jobs.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888DecoderWav.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded PCM16 WAV serialization of current complete decoder jobs; no file or device effects.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/web888/Web888IqProcessor.h": {
+  "tag": "vendor(web888)",
+  "note": "Bounded shared IQ DSP worker and owner-thread result delivery below the backend seam.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/DigitalMonitoringModel.h": {
+  "tag": "universal",
+  "note": "Capability-declared digital monitoring extension request correlation and session lifecycle; no vendor transport or sample UTC inference.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/NrspCredentials.h": {
+  "tag": "ui-support",
+  "note": "Endpoint-and-username-bound OS-keychain credential handoff. Contains no vendor protocol or radio state; UI forgets credentials and backend loads and saves accepted credentials.",
+  "split": "",
+  "confidence": "high"
  }
 }

@@ -1,3 +1,4 @@
+#include "gui/DisplaySessionMonitor.h"
 #include "gui/MainWindow.h"
 #include "gui/ConnectionPanel.h"
 #include "gui/FramelessMessageBox.h"
@@ -23,6 +24,10 @@
 #include "core/AppActivity.h"
 #include "core/AutomationServer.h"
 #include "QtPlatformChoice.h"
+
+#ifdef Q_OS_IOS
+#include "gui/ios/IOSAccessibility.h"
+#endif
 
 #ifdef Q_OS_MACOS
 #include "MacStartupAbortGuard.h"
@@ -483,6 +488,9 @@ int main(int argc, char* argv[])
     // disconnected; see Hl2EmergencyStop.h for why it acts inside the handler.
     AetherSDR::hl2::installEmergencyStopSignalHandlers();
 
+#ifdef Q_OS_IOS
+    AetherSDR::installIOSAccessibilityWorkaround();
+#endif
     app.setApplicationName("AetherSDR");
     app.setApplicationVersion(AETHERSDR_VERSION);
 #if AETHER_UPDATE_DEV_OVERRIDES
@@ -799,6 +807,7 @@ int main(int argc, char* argv[])
 
     int exitCode = 0;
     {
+        AetherSDR::DisplaySessionMonitor displaySessionMonitor(&app);
         AetherSDR::MainWindow window;
         window.show();
 

@@ -90,6 +90,11 @@ class FakeConnectionAutomation : public QObject, public IConnectionAutomation
 {
 public:
     QList<RadioInfo> automationLocalRadios() const override { return m_radios; }
+    QStringList automationManualFamilies() const override
+    {
+        return {QStringLiteral("flex"), QStringLiteral("hl2"), QStringLiteral("icom"),
+                QStringLiteral("web888"), QStringLiteral("fixture-family")};
+    }
 
     bool automationConnectLocalSerial(const QString&, QString* = nullptr) override
     {
@@ -274,6 +279,23 @@ int main(int argc, char** argv)
         check(conn.lastFamily.isEmpty(),
               "the connection panel is handed an empty family, i.e. the selector");
     }
+
+    // Explicit families follow the connection provider, not a bridge vendor list.
+    for (const QString& family : {QStringLiteral("web888"), QStringLiteral("fixture-family")}) {
+        conn.byIpCalls = 0;
+        const auto reply = AutomationServerTestAccess::connect(
+            server, QStringLiteral("ip"), QStringLiteral("receiver.invalid ") + family);
+        settle();
+        check(reply.value(QStringLiteral("ok")).toBool(), "provider family accepted");
+        check(conn.byIpCalls == 1 && conn.lastFamily == family,
+              "provider family delivered unchanged");
+    }
+    conn.byIpCalls = 0;
+    const auto refused = AutomationServerTestAccess::connect(
+        server, QStringLiteral("ip"), QStringLiteral("receiver.invalid unsupported"));
+    settle();
+    check(!refused.value(QStringLiteral("ok")).toBool() && conn.byIpCalls == 0,
+          "unknown family refused before deferred connection");
 
     if (failures > 0) {
         std::printf("\n%d check(s) failed\n", failures);

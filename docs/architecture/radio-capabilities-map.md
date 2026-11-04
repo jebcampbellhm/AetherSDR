@@ -33,6 +33,24 @@ traps and why the DAX crash guard is deliberately *not* the DAX capability.
 
 ## Local slice frequency control
 
+### Standalone Web-888
+
+`Web888Backend` declares family `web888`, four receive slices across two
+physical panadapters, and no transmit or microphone path. AM, SAM, USB, LSB, CW and FM
+use the shared protocol client; shared IQ listeners support USB/LSB with local
+filters and AGC. Receiver metadata constrains tuning coverage.
+Pan center and span controls move the receiver's waterfall window without
+retuning audio. Spectrum levels are receiver-reported absolute bins with no
+claim of factory calibration. Monitor gain/mute/pan are applied once by the
+backend, declared by `ReceiveAudioControl::speakerPan`; the 24 kHz slice PCM
+export remains before monitor controls. Other backends retain host pan handling.
+`receiveAudioBuffering` requests a 360 ms host startup/refill reserve for
+bursty WebSocket delivery. The common audio engine consumes it; no additional
+radio command is granted, and absent declarations preserve existing behavior.
+Radio-side DSP, profiles, DAX/IQ, TX drive/keying, and firmware-update sources
+are deliberately undeclared. This initial desktop connection does not add
+daemon discovery or a public receiver directory.
+
 `sliceFrequencyControl` is read by `ModelSliceFrequencyTarget` for admission
 and `RadioResourceAdapter` for explicit command-domain/provenance observations.
 It does not alter the existing GUI tuning range or desktop commands. Unlike

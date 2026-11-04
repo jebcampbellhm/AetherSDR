@@ -11,7 +11,7 @@
 #include <cmath>
 #include <cstring>
 #include <utility>
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
 #include <unistd.h>
 #include <fcntl.h>
 #include <sys/stat.h>   // mkfifo, mkdir, chmod, lstat, S_ISFIFO
@@ -20,7 +20,7 @@
 
 namespace AetherSDR {
 
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
 namespace {
 
 // Per-user FIFO dir ($XDG_RUNTIME_DIR/aethersdr, else /run/user/<uid>/aethersdr,
@@ -147,7 +147,7 @@ void DaxIqModel::relayIqSamples(int channel, const QByteArray& iqBytes, int samp
 
 void DaxIqModel::setPactlRunnerForTest(PactlRunner runner)
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     pactlRunnerForTest() = std::move(runner);
 #else
     Q_UNUSED(runner);
@@ -366,7 +366,7 @@ DaxIqWorker::DaxIqWorker(QObject* parent)
 
 DaxIqWorker::~DaxIqWorker()
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     for (int i = 0; i < DaxIqModel::NUM_CHANNELS; ++i) {
         if (m_pipeFds[i] >= 0) {
             ::close(m_pipeFds[i]);
@@ -378,7 +378,7 @@ DaxIqWorker::~DaxIqWorker()
 
 void DaxIqWorker::createPipe(int channel, int sampleRate)
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     int idx = channel - 1;
     if (idx < 0 || idx >= DaxIqModel::NUM_CHANNELS) return;
     if (m_pipeFds[idx] >= 0) destroyPipe(channel);
@@ -443,7 +443,7 @@ void DaxIqWorker::createPipe(int channel, int sampleRate)
 
 void DaxIqWorker::destroyPipe(int channel)
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     int idx = channel - 1;
     if (idx < 0 || idx >= DaxIqModel::NUM_CHANNELS) return;
     if (m_pipeFds[idx] >= 0) {
@@ -508,7 +508,7 @@ void DaxIqWorker::processIqPacket(int channel, const QByteArray& rawPayload, int
     emit samplesReady(channel, swapped, sampleRate);
 
     // Write to pipe (non-blocking, Linux/macOS only)
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     if (m_pipeFds[idx] >= 0) {
         // Non-blocking FIFO: a block the reader has no room for is dropped.
         [[maybe_unused]] const ssize_t written = ::write(m_pipeFds[idx], swapped.constData(), swapped.size());

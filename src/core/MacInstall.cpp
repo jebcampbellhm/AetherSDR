@@ -127,6 +127,7 @@ bool MacInstall::sameVolume(const QString& a, const QString& b)
 
 bool MacInstall::teamOf(const QString& bundle, QString* team)
 {
+#if QT_CONFIG(process)
     team->clear();
     if (!codesignAvailable()) {
         return false;
@@ -157,10 +158,16 @@ bool MacInstall::teamOf(const QString& bundle, QString* team)
     }
     *team = value;
     return true;
+#else
+    Q_UNUSED(bundle);
+    team->clear();
+    return false;
+#endif
 }
 
 MacInstall::Signature MacInstall::verifySignature(const QString& tree, const QString& team, QString* problem)
 {
+#if QT_CONFIG(process)
     QStringList args{QStringLiteral("--verify"), QStringLiteral("--deep"), QStringLiteral("--strict")};
     if (!team.isEmpty()) {
         // A Developer ID Application certificate (Apple's marker OID) of the
@@ -193,10 +200,17 @@ MacInstall::Signature MacInstall::verifySignature(const QString& tree, const QSt
         return Signature::Invalid;
     }
     return Signature::Valid;
+#else
+    Q_UNUSED(tree);
+    Q_UNUSED(team);
+    *problem = QStringLiteral("Code signature checks require desktop process support.");
+    return Signature::NotChecked;
+#endif
 }
 
 bool MacInstall::selfTest(const QString& tree, const QString& version)
 {
+#if QT_CONFIG(process)
     QTemporaryDir dir;
     if (!dir.isValid()) {
         return false;
@@ -229,6 +243,11 @@ bool MacInstall::selfTest(const QString& tree, const QString& version)
         qCWarning(lcUpdater).noquote() << "self-test of v" + version + " failed, exit code" << p.exitCode();
     }
     return ok;
+#else
+    Q_UNUSED(tree);
+    Q_UNUSED(version);
+    return false;
+#endif
 }
 
 bool MacInstall::otherInstanceRunning(const QString& bundle)

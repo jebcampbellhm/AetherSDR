@@ -1,4 +1,8 @@
+#include <QUrl>
+#include "core/NrspCredentials.h"
+#include "core/NetworkReceiverCredentials.h"
 #include "ConnectionPanel.h"
+#include "TabletUi.h"
 #include "core/AppSettings.h"
 #include "core/backends/ConnectionSharingPolicy.h"  // in-use share gate (#4448), shared with MainWindow_Session
 #include "core/backends/anan/AnanDiscovery.h" // shared nickname + MAC->serial helpers
@@ -261,6 +265,8 @@ QString familyFromProfile(const QJsonObject& profile)
 {
     const QString family =
         profile.value("identity").toObject().value("family").toString().trimmed().toLower();
+    if (family == QLatin1String(ConnectionPanel::kFamilyWeb888))
+        return QString::fromLatin1(ConnectionPanel::kFamilyWeb888);
     if (family == QLatin1String(ConnectionPanel::kFamilyHl2))
         return QString::fromLatin1(ConnectionPanel::kFamilyHl2);
     if (family == QLatin1String(ConnectionPanel::kFamilyAnan))
@@ -269,6 +275,9 @@ QString familyFromProfile(const QJsonObject& profile)
         return QString::fromLatin1(ConnectionPanel::kFamilyIcom);
     if (family == QLatin1String(ConnectionPanel::kFamilyRtl))
         return QString::fromLatin1(ConnectionPanel::kFamilyRtl);
+    if (family == QLatin1String(ConnectionPanel::kFamilyNrsp)) {
+        return QString::fromLatin1(ConnectionPanel::kFamilyNrsp);
+    }
     return QString::fromLatin1(ConnectionPanel::kFamilyFlex);
 }
 
@@ -442,8 +451,8 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     outer->addWidget(bodyContainer, 1);
 
     auto* introLabel = makeWrappedLabel(
-        "Pick the simplest path for your station. Most first-time users should start with "
-        "\"On This Network\" and only use the IP path for VPN or routed connections.",
+        "Choose how to reach your radio. Use \"On This Network\" for discovery, or "
+        "\"Connect by IP\" for a known address, including Web-888 receivers.",
         kHintLabelStyle);
     root->addWidget(introLabel);
 
@@ -486,7 +495,7 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_manualModeBtn->setObjectName(QStringLiteral("connectionManualModeButton"));
     configureModeButton(m_manualModeBtn,
                         "Connect by IP",
-                        "Best for VPN or routed station access when you already know the radio IP.",
+                        "Use a known IP address for Web-888, a local radio, a VPN, or a routed network.",
                         ManualMode);
     modeRow->addWidget(m_manualModeBtn);
 
@@ -501,7 +510,8 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     localLayout->setContentsMargins(0, 0, 0, 0);
     localLayout->setSpacing(8);
     localLayout->addWidget(makeWrappedLabel(
-        "Discovery finds radios automatically on your local network. If nothing appears, "
+        "Discovery finds supported radios automatically on your local network. "
+        "For Web-888, choose Connect by IP and select Web-888. If another radio is missing, "
         "guest Wi-Fi isolation, VPN software, or firewall rules may be blocking discovery.",
         kHintLabelStyle));
 
@@ -774,6 +784,10 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_manualRadioTypeCombo->addItem(tr("Hermes-Lite 2"), QString::fromLatin1(kFamilyHl2));
     m_manualRadioTypeCombo->addItem(tr("ANAN-G2"), QString::fromLatin1(kFamilyAnan));
     m_manualRadioTypeCombo->addItem(tr("Icom (network)"), QString::fromLatin1(kFamilyIcom));
+#ifdef HAVE_WEBSOCKETS
+    m_manualRadioTypeCombo->addItem(tr("Web-888"), QString::fromLatin1(kFamilyWeb888));
+#endif
+    m_manualRadioTypeCombo->addItem(tr("SDRplay nRSP-ST"), QString::fromLatin1(kFamilyNrsp));
 #ifdef AETHER_BACKEND_RTL
     m_manualRadioTypeCombo->addItem(tr("RTL-SDR (USB)"), QString::fromLatin1(kFamilyRtl));
 #endif
@@ -803,6 +817,112 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     // to set (addManualRow does), and the editor fills what it is given.
     addManualRow(QStringLiteral("Radio IP:"), m_manualIpCombo);
 
+    m_web888PortSpin = new QSpinBox(manualGroup);
+    m_web888PortSpin->setObjectName(QStringLiteral("connectionWeb888Port"));
+    m_web888PortSpin->setAccessibleName(tr("Web-888 port"));
+    m_web888PortSpin->setAccessibleDescription(tr("Receiver HTTP port, from 1 to 65535. Usually 8073."));
+    m_web888PortSpin->setRange(1, 65535);
+    m_web888PortSpin->setValue(8073);
+    ThemeManager::instance().applyStyleSheet(m_web888PortSpin,
+        "QSpinBox { border: 1px solid {{color.background.2}}; border-radius: 2px; "
+        "padding: 0; background: {{color.background.1}}; color: {{color.text.primary}}; }"
+        "QSpinBox:focus { border-color: {{color.accent.bright}}; }"
+        "QSpinBox QLineEdit { border: none; padding: 0 8px; margin: 0; "
+        "background: transparent; color: {{color.text.primary}}; }");
+    m_web888PortRow = addManualRow(QStringLiteral("Web-888 port:"), m_web888PortSpin);
+    m_web888PasswordEdit = new QLineEdit(manualGroup);
+    m_web888PasswordEdit->setObjectName(QStringLiteral("connectionWeb888Password"));
+    m_web888PasswordEdit->setAccessibleName(tr("Web-888 user password"));
+    m_web888PasswordEdit->setAccessibleDescription(tr("Receiver user password. Leave blank to use the saved password or connect without a password."));
+    m_web888PasswordEdit->setEchoMode(QLineEdit::Password);
+    m_web888PasswordEdit->setPlaceholderText(tr("Saved password or no password"));
+    ThemeManager::instance().applyStyleSheet(m_web888PasswordEdit, lineEditStyle);
+    auto* web888PasswordField = new QWidget(manualGroup);
+    web888PasswordField->setFocusProxy(m_web888PasswordEdit);
+    auto* web888PasswordLayout = new QHBoxLayout(web888PasswordField);
+    web888PasswordLayout->setContentsMargins(0, 0, 0, 0);
+    web888PasswordLayout->setSpacing(8);
+    m_web888PasswordEdit->setMinimumHeight(kManualFieldHeight);
+    web888PasswordLayout->addWidget(m_web888PasswordEdit, 1);
+    auto* forgetWeb888Password = new QPushButton(tr("Forget"), web888PasswordField);
+    forgetWeb888Password->setObjectName(QStringLiteral("connectionWeb888ForgetPassword"));
+    forgetWeb888Password->setAccessibleName(tr("Forget saved Web-888 password"));
+    forgetWeb888Password->setToolTip(tr("Remove the saved password for this address and port. An active receiver stays connected."));
+    forgetWeb888Password->setAutoDefault(false);
+    web888PasswordLayout->addWidget(forgetWeb888Password);
+    m_web888PasswordRow = addManualRow(QStringLiteral("Web-888 password:"), web888PasswordField);
+    connect(forgetWeb888Password, &QPushButton::clicked, this, [this, forgetWeb888Password] {
+        const QHostAddress address(m_manualIpEdit->text().trimmed());
+        if (address.isNull()) {
+            setManualMessage(tr("Enter the Web-888 IP address before forgetting its password."), true);
+            return;
+        }
+        const auto endpoint = NetworkReceiverCredentials::httpEndpoint(
+            address.toString(), static_cast<quint16>(m_web888PortSpin->value()));
+        m_web888PasswordEdit->clear();
+        forgetWeb888Password->setEnabled(false);
+        NetworkReceiverCredentials::forget(endpoint, this,
+            [this, forgetWeb888Password, endpoint](const QString& error) {
+                forgetWeb888Password->setEnabled(true);
+                setManualMessage(error.isEmpty()
+                        ? tr("Saved password removed for %1. An active receiver stays connected.").arg(endpoint)
+                        : tr("Could not remove the saved password: %1").arg(error),
+                    !error.isEmpty());
+            });
+    });
+
+    m_manualNrspUserEdit = new QLineEdit(manualGroup);
+    m_manualNrspUserEdit->setObjectName(QStringLiteral("connectionManualNrspUser"));
+    m_manualNrspUserEdit->setAccessibleName(tr("nRSP-ST username"));
+    m_manualNrspUserEdit->setAccessibleDescription(tr("Streaming account configured in nRSP Administrator. Optional when authentication is disabled."));
+    m_manualNrspUserEdit->setMaxLength(16);
+    m_manualNrspUserEdit->setPlaceholderText(tr("Optional streaming username"));
+    ThemeManager::instance().applyStyleSheet(m_manualNrspUserEdit, lineEditStyle);
+    m_manualNrspUserRow = addManualRow(tr("Username:"), m_manualNrspUserEdit);
+
+    m_manualNrspPassEdit = new QLineEdit(manualGroup);
+    m_manualNrspPassEdit->setObjectName(QStringLiteral("connectionManualNrspPassword"));
+    m_manualNrspPassEdit->setAccessibleName(tr("nRSP-ST password"));
+    m_manualNrspPassEdit->setAccessibleDescription(tr("Accepted passwords are saved in the OS keychain for this receiver and username. Leave blank to reuse."));
+    m_manualNrspPassEdit->setEchoMode(QLineEdit::Password);
+    m_manualNrspPassEdit->setMaxLength(1024);
+    m_manualNrspPassEdit->setPlaceholderText(tr("Blank uses saved password"));
+    ThemeManager::instance().applyStyleSheet(m_manualNrspPassEdit, lineEditStyle);
+    auto* nrspPasswordField = new QWidget(manualGroup);
+    nrspPasswordField->setFocusProxy(m_manualNrspPassEdit);
+    m_manualNrspPassEdit->setMinimumHeight(kManualFieldHeight);
+    auto* nrspPasswordLayout = new QHBoxLayout(nrspPasswordField);
+    nrspPasswordLayout->setContentsMargins(0, 0, 0, 0);
+    auto* forgetNrsp = new QPushButton(tr("Forget"), nrspPasswordField);
+    forgetNrsp->setObjectName(QStringLiteral("connectionNrspForgetPassword"));
+    forgetNrsp->setAutoDefault(false);
+    forgetNrsp->setAccessibleName(tr("Forget saved nRSP-ST password"));
+    forgetNrsp->setToolTip(tr("Remove the saved password for this receiver and username."));
+    nrspPasswordLayout->addWidget(m_manualNrspPassEdit, 1);
+    nrspPasswordLayout->addWidget(forgetNrsp);
+    m_manualNrspPassRow = addManualRow(tr("Password:"), nrspPasswordField);
+    connect(forgetNrsp, &QPushButton::clicked, this, [this, forgetNrsp] {
+        const QString host = m_manualIpEdit->text().trimmed();
+        const QString username = m_manualNrspUserEdit->text().trimmed();
+        QHostAddress address(host);
+        if (address.isNull() && !host.isEmpty()) {
+            for (const auto& candidate : QHostInfo::fromName(host).addresses()) {
+                if (candidate.protocol() == QAbstractSocket::IPv4Protocol) { address = candidate; break; }
+            }
+        }
+        if (address.isNull() || username.isEmpty()) {
+            setManualMessage(tr("Enter the receiver address and username first."), true);
+            return;
+        }
+        m_manualNrspPassEdit->clear();
+        forgetNrsp->setEnabled(false);
+        NrspCredentials::forget(NrspCredentials::endpoint(address.toString(), 50000, username), this,
+            [this, forgetNrsp](const QString& error) {
+                forgetNrsp->setEnabled(true);
+                setManualMessage(error.isEmpty() ? tr("Saved nRSP-ST password removed.") : error, !error.isEmpty());
+            });
+    });
+
     // Icom credentials. Hidden for every other family — see
     // updateManualFamilyHints(). An Icom will not answer the RS-BA1 handshake
     // without them, so unlike the Flex and HL2 paths this is not optional.
@@ -826,6 +946,7 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     m_manualIcomPassEdit->setPlaceholderText(tr("Radio network password"));
     ThemeManager::instance().applyStyleSheet(m_manualIcomPassEdit, lineEditStyle);
     m_manualIcomPassRow = addManualRow(QStringLiteral("Icom password:"), m_manualIcomPassEdit);
+
 
     // The RS-BA1 transport is always three UDP ports: control, CI-V and audio.
     // NAT deployments commonly forward several radios through one public IP,
@@ -1169,6 +1290,8 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
             this, &ConnectionPanel::onManualConnectClicked);
     connect(m_manualIpEdit, &QLineEdit::returnPressed,
             this, &ConnectionPanel::onManualConnectClicked);
+    connect(m_web888PasswordEdit, &QLineEdit::returnPressed,
+            this, &ConnectionPanel::onManualConnectClicked);
     // Enter connects from the credential fields too. Without this the Icom path
     // was the one family where the keyboard could not finish the job: the
     // operator types the address, tabs to user and password — the two fields
@@ -1179,6 +1302,11 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
             this, &ConnectionPanel::onManualConnectClicked);
     connect(m_manualIcomPassEdit, &QLineEdit::returnPressed,
             this, &ConnectionPanel::onManualConnectClicked);
+    connect(m_manualNrspUserEdit, &QLineEdit::returnPressed,
+            this, &ConnectionPanel::onManualConnectClicked);
+    connect(m_manualNrspPassEdit, &QLineEdit::returnPressed,
+            this, &ConnectionPanel::onManualConnectClicked);
+    connect(m_manualIpEdit, &QLineEdit::textChanged, m_manualNrspPassEdit, &QLineEdit::clear);
     connect(m_manualIpEdit, &QLineEdit::textChanged,
             this, &ConnectionPanel::onManualIpChanged);
     // Editing the route hands control back to the operator, including while
@@ -1243,6 +1371,7 @@ ConnectionPanel::ConnectionPanel(QWidget* parent)
     // first time fitToScreen() asks for one. The height floor this used to set
     // is gone: the manual page is still the tallest of the three, but overflow
     // now belongs to the scroll area rather than to the top-level minimum.
+    prepareTabletControls(this);
     refitToContent();
     setMinimumSize(kSafeMinimumWidth, kSafeMinimumHeight);
     resize(kPreferredWidth, kPreferredHeight);
@@ -1456,7 +1585,12 @@ void ConnectionPanel::setConnected(bool connected)
         m_startupProbe = false;
     }
 
+    const bool wasConnected = m_connected;
     m_connected = connected;
+    if (connected)
+        setManualMessage(tr("Connected."));
+    else if (wasConnected)
+        setManualMessage(QString());
     m_disconnectBtn->setVisible(connected);
     updateActionState();
     // Showing the Disconnect button is the one moment the fixed footer changes
@@ -1596,6 +1730,15 @@ bool ConnectionPanel::automationConnectLocalSerial(const QString& serial, QStrin
     return false;
 }
 
+QStringList ConnectionPanel::automationManualFamilies() const
+{
+    QStringList families;
+    for (int i = 0; i < m_manualRadioTypeCombo->count(); ++i) {
+        families.append(m_manualRadioTypeCombo->itemData(i).toString());
+    }
+    return families;
+}
+
 bool ConnectionPanel::automationConnectByIp(const QString& hostOrIp,
                                             const QString& family,
                                             QString* error)
@@ -1615,14 +1758,20 @@ bool ConnectionPanel::automationConnectByIp(const QString& hostOrIp,
         && wantedFamily != QLatin1String(kFamilyFlex)
         && wantedFamily != QLatin1String(kFamilyHl2)
         && wantedFamily != QLatin1String(kFamilyAnan)
+        && wantedFamily != QLatin1String(kFamilyNrsp)
+        && wantedFamily != QLatin1String(kFamilyWeb888)
         && wantedFamily != QLatin1String(kFamilyIcom)) {
         setAutomationError(
             error,
-            QStringLiteral("unknown radio family '%1' (use flex, hl2, anan or icom)")
+            QStringLiteral("unknown radio family '%1' (use flex, hl2, anan, icom, nrsp or web888)")
                 .arg(family.trimmed()));
         return false;
     }
 
+    if (!wantedFamily.isEmpty() && m_manualRadioTypeCombo->findData(wantedFamily) < 0) {
+        setAutomationError(error, tr("This build does not support the selected radio type."));
+        return false;
+    }
     setCurrentMode(ManualMode);
     m_manualIpCombo->setCurrentText(target);
     m_manualIpEdit->setText(target);
@@ -1806,13 +1955,22 @@ void ConnectionPanel::updateActionState()
 void ConnectionPanel::updateLowBandwidthVisibility()
 {
     const auto mode = static_cast<ConnectionMode>(m_modeStack->currentIndex());
+    const bool web888 = mode == ManualMode && currentManualFamily() == QLatin1String(kFamilyWeb888);
+    const QString reason = web888
+        ? tr("Web-888 uses a separate receive transport. Low-bandwidth mode applies to other radio connections.")
+        : tr("Reduce display traffic on slower network connections.");
+    m_lowBwCheck->setEnabled(!web888);
+    m_lowBwCheck->setAccessibleDescription(reason);
+    m_lowBwCheck->setToolTip(reason);
     const bool slowLinksVisible = mode == SmartLinkMode || mode == ManualMode;
     m_linkOptionsWidget->setVisible(slowLinksVisible);
 
     if (!slowLinksVisible)
         return;
 
-    if (mode == SmartLinkMode) {
+    if (web888) {
+        m_lowBwHintLabel->setText(reason);
+    } else if (mode == SmartLinkMode) {
         m_lowBwHintLabel->setText(
             "Recommended for SmartLink, hotel Wi-Fi, LTE, or other internet paths where "
             "waterfall and FFT traffic may feel heavy.");
@@ -2265,6 +2423,11 @@ void ConnectionPanel::applySavedSourceSelection(const QString& ip, bool restoreF
     // address's VPN source path is a property of the address either way.
     if (restoreFamily)
         setManualFamily(familyFromProfile(profile));
+    if (restoreFamily && familyFromProfile(profile) == QLatin1String(kFamilyWeb888)
+        && m_web888PortSpin) {
+        const int port = profile.value("web888").toObject().value("port").toInt(8073);
+        m_web888PortSpin->setValue(port >= 1 && port <= 65535 ? port : 8073);
+    }
 
     // The external port triplet belongs to the routed endpoint, not to the
     // physical Icom model. Restore it only when the operator chose a saved
@@ -2339,7 +2502,9 @@ void ConnectionPanel::setManualFamily(const QString& family)
         lowered == QLatin1String(kFamilyHl2)  ? QString::fromLatin1(kFamilyHl2)
       : lowered == QLatin1String(kFamilyAnan) ? QString::fromLatin1(kFamilyAnan)
       : lowered == QLatin1String(kFamilyIcom) ? QString::fromLatin1(kFamilyIcom)
+      : lowered == QLatin1String(kFamilyWeb888) ? QString::fromLatin1(kFamilyWeb888)
       : lowered == QLatin1String(kFamilyRtl)  ? QString::fromLatin1(kFamilyRtl)
+      : lowered == QLatin1String(kFamilyNrsp) ? QString::fromLatin1(kFamilyNrsp)
                                               : QString::fromLatin1(kFamilyFlex);
     const int index = m_manualRadioTypeCombo->findData(wanted);
     if (index < 0 || index == m_manualRadioTypeCombo->currentIndex()) {
@@ -2468,6 +2633,15 @@ void ConnectionPanel::updateManualFamilyHints()
     const bool hl2  = family == QLatin1String(kFamilyHl2);
     const bool anan = family == QLatin1String(kFamilyAnan);
     const bool icom = family == QLatin1String(kFamilyIcom);
+    const bool web888 = family == QLatin1String(kFamilyWeb888);
+    if (m_web888PasswordRow) m_web888PasswordRow->setVisible(web888);
+    if (m_web888PortRow) m_web888PortRow->setVisible(web888);
+    if (!web888 && m_web888PasswordEdit) { m_web888PasswordEdit->clear(); }
+    const bool nrsp = family == QLatin1String(kFamilyNrsp);
+
+    m_manualNrspUserRow->setVisible(nrsp);
+    m_manualNrspPassRow->setVisible(nrsp);
+    if (!nrsp) { m_manualNrspPassEdit->clear(); }
 
     // The credentials and network selectors belong to Icom alone. Hiding the
     // row CONTAINERS rather than the fields keeps their labels from being left
@@ -2528,7 +2702,17 @@ void ConnectionPanel::updateManualFamilyHints()
                   "This build has no QtKeychain support, so the password is kept for this "
                   "session only.");
         m_manualHintLabel->setText(
-            icom
+            web888
+                ? tr("Connect directly to your Web-888 for receive audio, spectrum, and waterfall. "
+                     "Enter its IP address and user password; the usual port is 8073. %1")
+                      .arg(NetworkReceiverCredentials::persistentStoreAvailable()
+                          ? tr("Accepted passwords are remembered in your operating system keychain.")
+                          : tr("Passwords are available for this session only; this build has no keychain support."))
+            : nrsp
+                ? tr("Connect directly to an nRSP-ST on TCP port 50000 for IQ Lite audio and waterfall. "
+                     "Enter a streaming username and password if authentication is required. Leave the password blank to reuse the saved credential for this username. "
+                     "Without control, reception and tuning within the current capture remain available.")
+                : icom
                 ? QStringLiteral(
                       "Enter the radio address and the network user name and password "
                       "configured for network control. Standard UDP ports are used unless "
@@ -2551,11 +2735,13 @@ void ConnectionPanel::updateManualFamilyHints()
     }
     if (m_manualIpEdit) {
         m_manualIpEdit->setPlaceholderText(
-            icom ? QStringLiteral("Example: radio.local or 192.168.1.90")
+            web888 ? tr("Example: 192.168.1.21")
+          : icom ? QStringLiteral("Example: radio.local or 192.168.1.90")
           : hl2  ? QStringLiteral("Example: 192.168.1.21")
           : anan ? QStringLiteral("Example: 172.16.10.14")
                  : QStringLiteral("Example: 10.0.0.25"));
     }
+    updateLowBandwidthVisibility();
 }
 
 void ConnectionPanel::loadRecentManualIps()
@@ -2617,6 +2803,12 @@ void ConnectionPanel::saveManualProfile(const QString& targetIp,
     bind["interface_name"] = settings.interfaceName;
     bind["last_successful_ipv4"] = lastSuccessfulLocalIp.toString();
     profile["bind"] = bind;
+
+    if (currentManualFamily() == QLatin1String(kFamilyWeb888)) {
+        QJsonObject receiver;
+        receiver["port"] = m_web888PortSpin->value();
+        profile["web888"] = receiver;
+    }
 
     if (currentManualFamily() == QLatin1String(kFamilyIcom)) {
         QJsonObject icom;
@@ -2739,12 +2931,88 @@ void ConnectionPanel::probeRadio(const QString& ip, bool restoreSavedFamily)
     m_manualSourceWarningLabel->setVisible(false);
     updateManualAdvancedVisibility();
 
+    if (currentManualFamily() == QLatin1String(kFamilyWeb888)) {
+        if (bindSettings.mode == RadioBindMode::Explicit) {
+            resetManualConnectButton();
+            setManualMessage(tr("Web-888 uses your system's network route. Choose Auto under Advanced, then connect again."), true);
+            reportStartupProbeFailure(tr("Choose the Auto source path for Web-888."));
+            return;
+        }
+        const QHostAddress address(trimmedIp);
+        if (address.isNull()) {
+            resetManualConnectButton();
+            setManualMessage(tr("Enter the Web-888 IP address."), true);
+            reportStartupProbeFailure(tr("The Web-888 address is invalid."));
+            return;
+        }
+        const auto port = static_cast<quint16>(m_web888PortSpin->value());
+        const QString endpoint = NetworkReceiverCredentials::httpEndpoint(address.toString(), port);
+        if (!m_web888PasswordEdit->text().isEmpty())
+            NetworkReceiverCredentials::setSessionPassword(endpoint, m_web888PasswordEdit->text());
+        m_web888PasswordEdit->clear();
+        RadioInfo info;
+        info.family = QString::fromLatin1(kFamilyWeb888);
+        info.model = info.name = QStringLiteral("Web-888");
+        info.address = address;
+        info.port = port;
+        info.serial = QStringLiteral("web888:%1:%2").arg(address.toString()).arg(port);
+        info.maxSlices = 4;
+        info.maxPanadapters = 2;
+        info.isRouted = true;
+        rememberManualIp(trimmedIp);
+        saveManualProfile(trimmedIp, {}, {}, port);
+        resetManualConnectButton();
+        finishManualProbe(info);
+        return;
+    }
+
     // Probe exactly the family the operator selected. The two wire protocols
     // are disjoint — a Hermes-Lite 2 speaks HPSDR Protocol 1 on UDP/1024 and
     // never answers the Flex TCP/4992 command plane, and a Flex never answers a
     // Metis discovery datagram — so there is nothing to gain from trying both,
     // and trying HL2 first (as this used to) charged every Flex connect the HL2
     // timeout before it started.
+    if (currentManualFamily() == QLatin1String(kFamilyNrsp)) {
+        QHostAddress resolved(trimmedIp);
+        if (resolved.isNull()) {
+            const QHostInfo lookup = QHostInfo::fromName(trimmedIp);
+            for (const QHostAddress& address : lookup.addresses()) {
+                if (address.protocol() == QAbstractSocket::IPv4Protocol) {
+                    resolved = address;
+                    break;
+                }
+            }
+        }
+        if (resolved.isNull()) {
+            resetManualConnectButton();
+            const QString message = tr("Could not resolve nRSP-ST address %1.").arg(trimmedIp);
+            setManualMessage(message, true);
+            reportStartupProbeFailure(message);
+            return;
+        }
+        RadioInfo info;
+        info.family = QString::fromLatin1(kFamilyNrsp);
+        info.address = resolved;
+        info.port = 50000;
+        info.model = QStringLiteral("nRSP-ST");
+        info.name = info.model;
+        info.nickname = info.model;
+        info.serial = QStringLiteral("nrsp:%1").arg(resolved.toString());
+        info.maxSlices = 1;
+        info.maxPanadapters = 1;
+        info.isRouted = true;
+        info.bindSettings = bindSettings;
+        info.sessionBindAddress = bindSettings.mode == RadioBindMode::Explicit
+            ? bindSettings.bindAddress : QHostAddress();
+        saveManualProfile(trimmedIp, bindSettings, info.sessionBindAddress);
+        rememberManualIp(trimmedIp);
+        resetManualConnectButton();
+        const QVariantMap params{{QStringLiteral("nrsp.username"), m_manualNrspUserEdit->text().trimmed()},
+                                 {QStringLiteral("nrsp.password"), m_manualNrspPassEdit->text()}};
+        m_manualNrspPassEdit->clear();
+        finishManualProbe(info, false, params);
+        return;
+    }
     if (currentManualFamily() == QLatin1String(kFamilyIcom)) {
         // NO ANONYMOUS PROBE. A Flex answers TCP/4992 and an HL2 answers a
         // Metis datagram without credentials, so both can be probed before
@@ -3036,7 +3304,7 @@ void ConnectionPanel::handleHl2ProbeResult(Hl2ProbeResult probe, const QString& 
     }
 }
 
-void ConnectionPanel::finishManualProbe(const RadioInfo& info, bool routedOnly)
+void ConnectionPanel::finishManualProbe(const RadioInfo& info, bool routedOnly, const QVariantMap& params)
 {
     // Discovery has handed off to the session layer. A later session failure
     // or interactive probe must not inherit this startup probe's ownership.
@@ -3044,7 +3312,8 @@ void ConnectionPanel::finishManualProbe(const RadioInfo& info, bool routedOnly)
     if (routedOnly) {
         emit routedRadioFound(info);
     } else {
-        emit connectRequested(info);
+        if (params.isEmpty()) { emit connectRequested(info); }
+        else { emit connectWithOptionsRequested(info, params); }
     }
 }
 

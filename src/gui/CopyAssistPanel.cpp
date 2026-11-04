@@ -1,4 +1,5 @@
 #include "CopyAssistPanel.h"
+#include "TabletUi.h"
 
 #include <QFont>
 #include <QHBoxLayout>
@@ -7,6 +8,8 @@
 #include <QProgressBar>
 #include <QPushButton>
 #include <QSignalBlocker>
+#include <QScrollArea>
+#include <QScroller>
 #include <QSlider>
 #include <QTextCharFormat>
 #include <QTextCursor>
@@ -141,7 +144,20 @@ CopyAssistPanel::CopyAssistPanel(QWidget* parent)
 
     // No close button: the panel is shown/hidden by the status-bar "ASR" toggle.
 
-    root->addLayout(controls);
+    if (tabletUiEnabled()) {
+        auto* toolbar = new QWidget(this);
+        toolbar->setLayout(controls);
+        auto* scroll = new QScrollArea(this);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidgetResizable(true);
+        scroll->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        scroll->setFixedHeight(80);
+        scroll->setWidget(toolbar);
+        QScroller::grabGesture(scroll->viewport(), QScroller::TouchGesture);
+        root->addWidget(scroll);
+    } else {
+        root->addLayout(controls);
+    }
 
     // --- Transcript (mirrors the CW decode QTextEdit) -----------------------
     m_text = new QTextEdit(this);
@@ -178,6 +194,7 @@ CopyAssistPanel::CopyAssistPanel(QWidget* parent)
     m_status = new QLabel(tr("Disabled"), this);
     m_status->setObjectName(QStringLiteral("CopyAssistStatus"));
     m_status->setAccessibleName(tr("Copy Assist status"));
+    m_status->setWordWrap(tabletUiEnabled());
     statusRow->addWidget(m_status, 1);
 
     // Transcription backlog — how much received audio is still waiting to be
@@ -186,6 +203,7 @@ CopyAssistPanel::CopyAssistPanel(QWidget* parent)
     m_backlog = new QLabel(this);
     m_backlog->setObjectName(QStringLiteral("CopyAssistBacklog"));
     m_backlog->setAccessibleName(tr("Transcription backlog"));
+    m_backlog->setWordWrap(tabletUiEnabled());
     m_backlog->setToolTip(tr("Seconds of received audio still waiting to be transcribed. "
                              "When the model cannot keep up, audio beyond the queue "
                              "ceiling (twice the Buffer, at least 10 s) is dropped; the "
@@ -197,6 +215,10 @@ CopyAssistPanel::CopyAssistPanel(QWidget* parent)
     root->addLayout(statusRow);
 
     applyFont();
+    if (tabletUiEnabled()) {
+        styleTabletSurface(this);
+        prepareTabletControls(this);
+    }
 }
 
 void CopyAssistPanel::applyFont()
@@ -248,7 +270,10 @@ QSlider* CopyAssistPanel::addSliderInline(QHBoxLayout* bar, const QString& label
     slider->setAccessibleName(accessibleName);
     bar->addWidget(slider);
     auto* valueLabel = new QLabel(this);
-    valueLabel->setMinimumWidth(44);
+    valueLabel->setMinimumWidth(tabletUiEnabled() ? 0 : 44);
+    // Keep the complete value and unit visible when the tablet toolbar scrolls.
+    // Preferred allows QLabel to shrink below its size hint (e.g. "2000 ms").
+    valueLabel->setSizePolicy(QSizePolicy::Minimum, QSizePolicy::Preferred);
     valueLabel->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     bar->addWidget(valueLabel);
     *valueLabelOut = valueLabel;

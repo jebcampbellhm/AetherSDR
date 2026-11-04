@@ -1,4 +1,5 @@
 #include "CopyAssistController.h"
+#include "TabletUi.h"
 
 #include "AetherBuildIdentity.h"   // generated at build time (#5804)
 
@@ -207,7 +208,8 @@ CopyAssistController::CopyAssistController(AudioEngine* audio, CopyAssistPanel* 
             " color: {{color.text.primary}}; }"));
     // The ⚙ glyph renders taller than the text buttons; pin the gear to the
     // Enabled button's height so the row stays flush.
-    m_panel->settingsButton()->setFixedHeight(m_panel->enableButton()->sizeHint().height());
+    m_panel->settingsButton()->setFixedHeight(tabletUiEnabled()
+        ? 48 : m_panel->enableButton()->sizeHint().height());
 
     // Language selector — every language the whisper build supports.
     // Multilingual models honor it; English-only models ignore it. (The
@@ -483,7 +485,8 @@ CopyAssistController::CopyAssistController(AudioEngine* audio, CopyAssistPanel* 
     m_panel->setBufferMs(CopyAssistSettings::value(QStringLiteral("AsrDecodeBufferMs"), QStringLiteral("20000")).toString().toInt());
     m_panel->setSensitivity(CopyAssistSettings::value(QStringLiteral("AsrSensitivity"), QStringLiteral("80")).toString().toInt());
     m_panel->setSilenceMs(CopyAssistSettings::value(QStringLiteral("AsrSilenceMs"), QStringLiteral("300")).toString().toInt());
-    m_panel->setFontPx(CopyAssistSettings::value(QStringLiteral("AsrFontPx"), QStringLiteral("13")).toString().toInt());
+    m_panel->setFontPx(CopyAssistSettings::value(QStringLiteral("AsrFontPx"),
+        tabletUiEnabled() ? QStringLiteral("16") : QStringLiteral("13")).toString().toInt());
     m_panel->setNewlineOnSilence(
         CopyAssistSettings::value(QStringLiteral("AsrNewlineOnSilence"), QStringLiteral("False")).toString()
         == QStringLiteral("True"));

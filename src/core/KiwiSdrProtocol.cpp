@@ -8,6 +8,15 @@
 #include <limits>
 
 namespace AetherSDR::KiwiSdrProtocol {
+QString formatEndpointBaseUrl(const QString& scheme, const QString& host, quint16 port)
+{
+    QUrl url;
+    url.setScheme(scheme);
+    url.setHost(host);
+    url.setPort(port);
+    return url.toString(QUrl::FullyEncoded);
+}
+
 namespace {
 
 constexpr int kObservedExtendedSoundFrameBytes = 1034;
@@ -795,6 +804,7 @@ QString streamModeName(StreamMode mode)
 
 QString frameLayoutName(FrameLayout layout)
 {
+    if (layout == FrameLayout::SndIq16) return QStringLiteral("snd-iq16");
     switch (layout) {
     case FrameLayout::Unknown:
         return QStringLiteral("unknown");

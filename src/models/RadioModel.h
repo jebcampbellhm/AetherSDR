@@ -67,6 +67,7 @@
 #include "core/backends/SessionCommandGuard.h"
 
 #include <QTimer>
+#include <QVariantMap>
 #include <QElapsedTimer>
 
 namespace AetherSDR {
@@ -905,6 +906,9 @@ public:
 
     // High-level actions
     void connectToRadio(const RadioInfo& info);
+    // Transient trusted-desktop options; never copied into discovery or saved
+    // profiles. Manual-recovery backends require fresh options for each attempt.
+    void connectToRadioWithOptions(const RadioInfo& info, const QVariantMap& options);
     // One explicit wake, followed by one bounded connection attempt. Never persisted.
     bool wakeIcomRadio(int modelId, int address, QString* error = nullptr);
     bool radioWakeActive() const { return m_radioWakeActive; }
@@ -2019,6 +2023,7 @@ private:
     friend class TuneOutputControlTestAccess;
     friend class TuneOutputDialogTestAccess;
     friend class TxOperationIntegrationTestAccess;
+    friend class RadioModelWeb888TestAccess;
     friend class RerouteDeadControlsTestAccess;
     friend class VoiceKeyerTxRouteTestAccess;
     friend class RadioSetupControlTestAccess;

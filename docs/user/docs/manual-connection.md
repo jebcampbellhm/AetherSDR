@@ -12,6 +12,8 @@ Use **Connect by IP** for:
 - A radio behind a VPN, including a FLEX-8000/Aurora on your tailnet (see [Tailscale Remote Access](./tailscale-remote-access.md))
 - Remote access via a public IP with port forwarding (without SmartLink)
 - A networked Icom, which is always reached this way (see [Networked Icom](./networked-icom.md))
+- A standalone Web-888, including one on your local LAN (see [KiwiSDR and Web-888](./kiwisdr-and-web-888.md))
+- An SDRplay nRSP-ST for direct IQ Lite reception (see [SDRplay nRSP-ST](./nrsp-st.md))
 
 ## Setup
 
@@ -26,12 +28,21 @@ The **Radio IP address** group starts with two rows:
 
 | Row | What to enter |
 |-----|---------------|
-| **Radio type:** | The radio family to look for: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)** or **RTL-SDR (USB)**. Only this family is probed. |
+| **Radio type:** | The radio family to look for: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)**, **Web-888**, **SDRplay nRSP-ST** or **RTL-SDR (USB)**. Only this family is contacted. |
 | **Radio IP:** | The IP address or host name, for example `10.0.0.25`. |
 
 **RTL-SDR (USB)** appears only in builds that include the RTL-SDR backend. Choosing **Icom (network)** adds its connection rows. **ANAN-G2** shows a pointer to **Settings → Radio Setup... → Radio → ANAN Front End**, where its receive options are configured before connecting; see [Networked Icom](./networked-icom.md) and [ANAN-G2](./anan-g2.md). For every family's status, see [Supported Radios](./supported-radios.md).
 
 ## Using Connect by IP
+
+### Connecting to Web-888 or nRSP-ST
+
+Choose the receiver in **Radio type**, then enter its address. Web-888 uses
+its HTTP port (usually **8073**) and optional user password. nRSP-ST uses
+its streaming-account username and password. Both connect directly; no
+host daemon or Demo session is required. See [Web-888](./kiwisdr-and-web-888.md)
+and [nRSP-ST](./nrsp-st.md) for their receive capabilities and permissions.
+Credentials are session-only in builds without an operating-system keychain.
 
 ### Connecting to a FlexRadio
 
@@ -80,7 +91,20 @@ See [SmartLink Setup](./smartlink-setup.md).
 
 ## Troubleshooting
 
-### The probe fails
+### A Web-888 connection fails
+
+Check the receiver's IP address and HTTP port, then check its user password.
+An admin password is not needed. If a saved password is outdated, type the
+current user password into the form and reconnect. Keep **Source path** on
+**Auto**. The FlexRadio ports and MTU advice below do not apply to this
+WebSocket receive stream.
+
+To remove a saved password, enter the receiver's address and port, then click
+**Forget** beside the password field. This clears that endpoint's saved and
+session password without disconnecting an active receiver. Leave the field
+blank on your next connection if the receiver no longer requires a password.
+
+### The FlexRadio probe fails
 
 AetherSDR could not reach the radio on TCP 4992. The panel shows the reason.
 
@@ -88,14 +112,14 @@ AetherSDR could not reach the radio on TCP 4992. The panel shows the reason.
 2. Click **Network Diagnostics** beside the button to check the path.
 3. For access from outside your network, check that TCP 4992 and UDP 4991 are forwarded to the radio's LAN IP.
 
-### The connection fails over a VPN with several network adapters
+### A FlexRadio connection fails over a VPN with several network adapters
 
 AetherSDR may be using the wrong adapter to reach the radio.
 
 1. Open **Advanced: choose the VPN source path**.
 2. Pick the VPN's adapter in **Source path:** and connect again.
 
-### Audio works over a VPN, but the spectrum and waterfall stay empty
+### FlexRadio audio works over a VPN, but the spectrum and waterfall stay empty
 
 Spectrum and waterfall packets are larger than the tunnel allows, so they are dropped while the smaller audio packets get through.
 

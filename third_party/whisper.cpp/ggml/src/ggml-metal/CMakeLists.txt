@@ -24,6 +24,9 @@ if (GGML_METAL_NDEBUG)
 endif()
 
 set(METALLIB_COMMON "${CMAKE_CURRENT_SOURCE_DIR}/../ggml-common.h")
+if(NOT GGML_METAL_SDK)
+    set(GGML_METAL_SDK macosx)
+endif()
 
 # flags for the offline Metal compiler (xcrun metal), shared by every path that
 # compiles the kernels at build time (prebuilt default.metallib, compiled embed)
@@ -48,6 +51,13 @@ endif()
 if (GGML_METAL_MACOSX_VERSION_MIN)
     message(STATUS "Adding  -mmacosx-version-min=${GGML_METAL_MACOSX_VERSION_MIN} flag to metal compilation")
     list   (APPEND XC_FLAGS -mmacosx-version-min=${GGML_METAL_MACOSX_VERSION_MIN})
+endif()
+if(GGML_METAL_IOS_VERSION_MIN)
+    if(GGML_METAL_SDK MATCHES "[Ss]imulator")
+        list(APPEND XC_FLAGS -mios-simulator-version-min=${GGML_METAL_IOS_VERSION_MIN})
+    else()
+        list(APPEND XC_FLAGS -mios-version-min=${GGML_METAL_IOS_VERSION_MIN})
+    endif()
 endif()
 
 if (GGML_METAL_STD)
@@ -104,8 +114,8 @@ if (GGML_METAL_EMBED_LIBRARY)
 
         add_custom_command(
             OUTPUT ${METALLIB_EMBED_BIN}
-            COMMAND xcrun -sdk macosx metal ${XC_FLAGS} -DGGML_METAL_EMBED_LIBRARY=1 -DGGML_METAL_HAS_BF16=1 -c ${METALLIB_SOURCE_EMBED} -o - |
-                    xcrun -sdk macosx metallib        - -o ${METALLIB_EMBED_BIN}
+            COMMAND xcrun -sdk ${GGML_METAL_SDK} metal ${XC_FLAGS} -DGGML_METAL_EMBED_LIBRARY=1 -DGGML_METAL_HAS_BF16=1 -c ${METALLIB_SOURCE_EMBED} -o - |
+                    xcrun -sdk ${GGML_METAL_SDK} metallib - -o ${METALLIB_EMBED_BIN}
             DEPENDS ${METALLIB_SOURCE_EMBED}
             COMMENT "Compiling Metal kernels for embedding"
             )
@@ -138,8 +148,8 @@ else()
 
     add_custom_command(
         OUTPUT ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/default.metallib
-        COMMAND xcrun -sdk macosx metal ${XC_FLAGS} -c ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ggml-metal.metal -o - |
-                xcrun -sdk macosx metallib        - -o ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/default.metallib
+        COMMAND xcrun -sdk ${GGML_METAL_SDK} metal ${XC_FLAGS} -c ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ggml-metal.metal -o - |
+                xcrun -sdk ${GGML_METAL_SDK} metallib - -o ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/default.metallib
         COMMAND rm -f ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ggml-common.h
         COMMAND rm -f ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/ggml-metal.metal
         DEPENDS ggml-metal.metal ${METALLIB_COMMON}

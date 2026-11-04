@@ -239,6 +239,7 @@ DStarModel::DStarModel(QObject* parent, bool autoSelectSerial)
             [this](int) { emit serviceChanged(); },
             Qt::QueuedConnection);
 
+#if QT_CONFIG(process)
     m_serialProbe.setProcessChannelMode(QProcess::MergedChannels);
     connect(&m_serialProbe,
             qOverload<int, QProcess::ExitStatus>(&QProcess::finished),
@@ -268,6 +269,7 @@ DStarModel::DStarModel(QObject* parent, bool autoSelectSerial)
                     .arg(m_serialProbe.errorString()));
         }
     });
+#endif
     connect(&process, &DigitalVoiceWaveformProcess::stateChanged, this,
             [this](DigitalVoiceWaveformProcess::State) {
         if (!DigitalVoiceWaveformProcess::instance().registrationVerified()) {
@@ -820,6 +822,7 @@ void DStarModel::cancelSerialProbe()
     m_serialProbeQueue.clear();
     m_activeSerialProbePath.clear();
     m_serialProbeForcedError.clear();
+#if QT_CONFIG(process)
     if (m_serialProbe.state() != QProcess::NotRunning) {
         m_serialProbe.kill();
         m_serialProbe.waitForFinished(500);
@@ -827,10 +830,12 @@ void DStarModel::cancelSerialProbe()
     if (m_serialProbe.isOpen()) {
         m_serialProbe.readAll();
     }
+#endif
 }
 
 void DStarModel::startNextSerialProbe()
 {
+#if QT_CONFIG(process)
     if (!m_activeSerialProbePath.isEmpty()
         || m_serialProbe.state() != QProcess::NotRunning) {
         return;
@@ -886,6 +891,10 @@ void DStarModel::startNextSerialProbe()
             tr("Timed out waiting for a DV3000 response.");
         m_serialProbe.kill();
     });
+
+#else
+    m_serialProbeQueue.clear();
+#endif
 }
 
 void DStarModel::finishSerialProbe(bool verified, const QString& detail)

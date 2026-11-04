@@ -1,4 +1,5 @@
 #include "PanadapterApplet.h"
+#include "TabletUi.h"
 #include "PanSliceTitle.h"
 #include "PanadapterHeader.h"
 #include "models/CwRxModel.h"
@@ -699,7 +700,8 @@ CopyAssistPanel* PanadapterApplet::copyAssistPanel()
     }
 
     m_copyAssistHeight = std::clamp(
-        CopyAssistSettings::value("AsrPanelHeight", "160").toString().toInt(), 60, 600);
+        CopyAssistSettings::value("AsrPanelHeight", tabletUiEnabled() ? "300" : "160")
+            .toString().toInt(), tabletUiEnabled() ? 220 : 60, 600);
 
     // Dock container styled like the CW decode panel — a top border separating
     // it from the waterfall, fixed height, resizable via a top grip.
@@ -718,12 +720,22 @@ CopyAssistPanel* PanadapterApplet::copyAssistPanel()
 
     m_copyAssistGrip = new QWidget(m_copyAssistDock);
     m_copyAssistGrip->setObjectName("copyAssistResizeGrip");
-    m_copyAssistGrip->setFixedHeight(4);
+    m_copyAssistGrip->setFixedHeight(tabletUiEnabled() ? 44 : 4);
+    m_copyAssistGrip->setAccessibleName(tr("Resize transcript"));
     m_copyAssistGrip->setCursor(Qt::SizeVerCursor);
     m_copyAssistGrip->setToolTip("Drag to resize the Copy Assist panel");
     AetherSDR::ThemeManager::instance().applyStyleSheet(m_copyAssistGrip,
         "QWidget { background: {{color.background.1}}; }");
     m_copyAssistGrip->installEventFilter(this);
+    if (tabletUiEnabled()) {
+        auto* gripLayout = new QHBoxLayout(m_copyAssistGrip);
+        auto* hint = new QLabel(tr("Drag to resize transcript"), m_copyAssistGrip);
+        hint->setAlignment(Qt::AlignCenter);
+        hint->setAttribute(Qt::WA_TransparentForMouseEvents);
+        ThemeManager::instance().applyStyleSheet(hint,
+            "QLabel { color: {{color.canon.inkSoft}}; font-size: 13px; }");
+        gripLayout->addWidget(hint);
+    }
     dockLayout->addWidget(m_copyAssistGrip);
 
     m_copyAssistPanel = new CopyAssistPanel(m_copyAssistDock);
@@ -759,7 +771,7 @@ bool PanadapterApplet::isCopyAssistVisible() const
 
 void PanadapterApplet::setCopyAssistHeight(int h)
 {
-    m_copyAssistHeight = std::clamp(h, 60, 600);
+    m_copyAssistHeight = std::clamp(h, tabletUiEnabled() ? 220 : 60, 600);
     if (m_copyAssistDock != nullptr) {
         m_copyAssistDock->setFixedHeight(m_copyAssistHeight);
     }

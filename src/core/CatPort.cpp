@@ -18,7 +18,7 @@
 #include <QTcpSocket>
 #include <QSocketNotifier>
 
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
 #include <unistd.h>
 #include <fcntl.h>
 #include <termios.h>
@@ -161,7 +161,7 @@ int CatPort::clientCount() const
 
 QString CatPort::ptyPath() const
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     if (!isRunning()) return {};
     if (!m_symlinkPath.isEmpty())
         return m_symlinkPath;
@@ -328,7 +328,7 @@ void CatPort::onOtrspDisconnected()
 
 void CatPort::startPty()
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     char slaveName[256] = {};
     if (openpty(&m_ptyMasterFd, &m_ptySlaveFd, slaveName, nullptr, nullptr) != 0) {
         qCWarning(lcCat) << "CatPort: openpty() failed";
@@ -406,7 +406,7 @@ void CatPort::startPty()
 
 void CatPort::stopPty()
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     if (m_ptyMasterFd < 0) return;
 
     delete m_ptyNotifier;
@@ -441,7 +441,7 @@ void CatPort::stopPty()
 
 void CatPort::onPtyData()
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     char buf[4096];
     ssize_t n = ::read(m_ptyMasterFd, buf, sizeof(buf));
     if (n <= 0) return;
@@ -503,7 +503,7 @@ void CatPort::onPtyData()
 
 void CatPort::writeOtrspPtyResponse(const QByteArray& response)
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     if (!m_ptyOtrspProtocol) { return; }
     m_ptyOtrspOutput += response;
     if (m_ptyOtrspOutput.size() > 65536) {
@@ -519,7 +519,7 @@ void CatPort::writeOtrspPtyResponse(const QByteArray& response)
 
 void CatPort::flushOtrspPtyOutput()
 {
-#ifndef Q_OS_WIN
+#if !defined(Q_OS_WIN) && !defined(Q_OS_IOS)
     if (!m_ptyWriteNotifier) {
         return;
     }

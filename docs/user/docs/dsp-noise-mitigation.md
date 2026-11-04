@@ -210,14 +210,15 @@ BNR runs the NVIDIA Maxine Audio Effects denoiser **in-process** on an NVIDIA Ge
 
 Not available on macOS or without a supported NVIDIA GPU — use DFNR there. See [BNR GPU Noise Removal](./bnr-gpu-noise-removal.md) for setup and troubleshooting.
 
-### MNR — Apple MMSE-Wiener (macOS only)
+### MNR — Apple MMSE-Wiener (macOS and experimental iPadOS)
 **Purpose:** macOS-native spectral noise reduction using Apple's vDSP / Accelerate framework.
 
 MNR tracks steady background noise with smoothed minimum statistics and applies a Wiener mask. It costs almost nothing on Apple Silicon. At full Strength it attenuates stationary noise by about 24.4 dB.
 
 **Settings:** **Strength** 0–100 % (default 100 %). Selecting MNR in the method row is the only on/off switch; there is no separate enable checkbox.
 
-On non-macOS builds MNR is disabled with an explanatory tooltip.
+On non-Apple builds MNR is disabled with an explanatory tooltip. The
+[experimental iPad build](./ipad.md) also includes the Apple Accelerate backend.
 
 ## Choosing a method
 
