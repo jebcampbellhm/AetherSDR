@@ -524,6 +524,35 @@ int main(int argc, char** argv)
     CHECK(model.panadapter(model.slice(3)->panId()));
     modeled->disconnectRadio();
 
+    // Exercise the model route used by band selection and waterfall gestures,
+    // not just the backend setters that bypass capability admission.
+    RadioModel navigation;
+    auto navigationBackend = std::make_unique<OfflineBackend>();
+    auto* navigationRadio = navigationBackend.get();
+    navigation.setBackendForTest(std::move(navigationBackend), QStringLiteral("web888"));
+    navigationRadio->connectRadio(request);
+    auto* navigationClient = navigationRadio->client;
+    emit navigationClient->stateChanged(KiwiSdrClient::State::Connected, {});
+    emit navigationClient->waterfallRowReady({}, {-90.0f, -80.0f}, 7.0, 7.2, 0);
+    CHECK(navigation.panadapters().size() == 1 && navigation.slice(0));
+    auto* navigationPan = navigation.panadapters().first();
+    CHECK(navigation.requestPanCenter(navigationPan->panId(), 14.2, 0.35));
+    emit navigationClient->waterfallRowReady({}, {-90.0f, -80.0f}, 14.0, 14.4, 1);
+    CHECK(navigationPan->centerMhz() == 14.2 && navigationPan->bandwidthMhz() == 0.35);
+    CHECK(navigation.requestPanCenter(navigationPan->panId(), 14.25, -1.0,
+        IRadioBackend::PanCenterIntent::Drag));
+    CHECK(navigation.requestPanBandwidth(navigationPan->panId(), 0.01));
+    // An in-flight row from the old server view must not restore the old
+    // client display crop. Web888's waterfall and receive tuning are separate.
+    emit navigationClient->waterfallRowReady({}, {-90.0f, -80.0f}, 7.0, 7.2, 2);
+    CHECK(navigationPan->centerMhz() == 14.25 && navigationPan->bandwidthMhz() == 0.01);
+    CHECK(navigation.slice(0)->frequency() == 7.1);
+    CHECK(navigation.requestPanDisplay(navigationPan,
+        {PanDisplayField::Geometry, PanGeometryRequest{21.2, 0.2}}) == ReceiveDispatch::Dispatched);
+    emit navigationClient->waterfallRowReady({}, {-90.0f, -80.0f}, 21.0, 21.4, 3);
+    CHECK(navigationPan->centerMhz() == 21.2 && navigationPan->bandwidthMhz() == 0.2);
+    navigationRadio->disconnectRadio();
+
     qInfo() << "Web-888 offline backend checks passed";
     return 0;
 #endif

@@ -57,6 +57,8 @@ RadioCapabilities Web888Backend::capabilities() const
     caps.radioOwnsDbmScale = false;
     caps.panAmplitude = PanAmplitudeModel{false, true};
     caps.panSpanModel = PanSpanModel{false, false};
+    caps.panDisplayControl = PanDisplayControl{{PanDisplayField::Geometry},
+        {PanGeometryComponent::Center, PanGeometryComponent::Bandwidth}};
     // These are engine setpoints, not an acknowledgement from the firmware.
     using Authority = SliceFrequencyControl::Authority;
     caps.sliceFrequencyControl = SliceFrequencyControl{Authority::Engine, 0, 0};

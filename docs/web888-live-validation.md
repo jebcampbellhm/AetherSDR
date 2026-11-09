@@ -1,5 +1,34 @@
 # Web-888 live transport validation — 2026-10-16
 
+## Navigation regression and daily-build candidate — 2026-11-09
+
+Current operating choice is stock 12 kHz (selected October 19), superseding
+the historical 24 kHz notes below. No receiver/admin settings were changed.
+
+The post-upstream-merge snap-back was reproduced through RadioModel: its typed
+pan-display request was refused because Web888 had not declared Geometry in
+PanDisplayControl. Direct backend-setter tests bypassed that admission gate.
+Declared only the implemented center and bandwidth components. The new regression
+failed at requestPanCenter before the fix and passed afterward, including band
+range, drag, zoom, stale incoming rows and the additional-panel typed route.
+
+The manual `web888_live_probe --navigation --endpoint <operator-endpoint>` uses
+the production model connection and OS-keychain lookup with one private RX/waterfall
+lease, no AudioEngine, no UI polling and a 30-second watchdog. Four three-second
+views (14.2 MHz/350 kHz, drag to 14.25 MHz, zoom to 10 kHz, then 7.15 MHz/200 kHz)
+each retained their requested geometry and delivered 58/62/61/62 populated
+spectrum rows. Result: `navigation_steps=4 failed=0 released=1`.
+This verifies live transport/model navigation, not mouse rendering, RF
+calibration, decoded signals, sample timing or audible playback. Evidence:
+ignored `build-web888-evidence/web888-navigation-before.log`,
+`web888-navigation-live.log` and `web888-navigation-*` build/test logs.
+The application rebuilt and all six affected offline regressions passed
+(18.28 seconds), including real-widget spectrum, station setup/reconnect and
+Web888 backend/listener tests. Capability, manifest, log-rule and whitespace
+checks passed. The operator authorized promotion to the daily build with a
+backup of its previous runtime; deployment evidence is kept separately from
+source under `build-web888-evidence`.
+
 Operator decision (2026-10-16): keep the receiver at 24 kHz until the 36 kHz defect is fixed. This supersedes the earlier temporary restoration to 36 kHz. Continue dual-waterfall, independent listening and shared-IQ multi-stream development at 24 kHz.
 
 Receiver firmware reports v2026.919 (2026-09-19 build), HF 32 MHz mode,

@@ -56,6 +56,11 @@ Speaker playback starts with about **360 ms** of buffered audio to smooth
 bursty network delivery. This adds a short delay when starting or recovering
 an exhausted stream. Audio resumes when the reserve refills.
 
+Band selection updates the waterfall view. Dragging or zooming the waterfall
+changes its displayed center/span independently of receive-slice tuning; incoming
+rows retain that requested view. To tune reception, use the slice frequency or
+click a signal in the waterfall.
+
 ### Connecting to a FlexRadio
 
 1. Set **Radio type:** to **FlexRadio**.

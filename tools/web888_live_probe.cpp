@@ -2,13 +2,19 @@
 #include "core/KiwiSdrClient.h"
 #include "core/backends/web888/Web888IqCapture.h"
 #include "core/backends/web888/Web888Backend.h"
+#include "models/RadioModel.h"
+#include "models/PanadapterModel.h"
+#include "models/SliceModel.h"
+#include "core/RadioDiscovery.h"
 #include <QCommandLineParser>
 #include <QCoreApplication>
 #include <QElapsedTimer>
 #include <QLoggingCategory>
 #include <QTimer>
+#include <QUrl>
 #include <QtEndian>
 #include <cmath>
+#include <algorithm>
 #include <array>
 #include <cstdio>
 #include <memory>
@@ -348,6 +354,81 @@ static int runCombinedProbe(QCoreApplication& app, const QString& endpoint,
     return app.exec();
 }
 
+static int runNavigationProbe(QCoreApplication& app, const QString& endpoint)
+{
+    // One private receive lease, normal model control route, no AudioEngine or
+    // desktop automation. Only fixed diagnostics and counters reach evidence.
+    qInstallMessageHandler([](QtMsgType, const QMessageLogContext&, const QString&) {});
+    const QUrl url(endpoint.contains("://") ? endpoint : QStringLiteral("http://") + endpoint);
+    const QHostAddress address(url.host());
+    if (address.isNull()) { return 2; }
+    RadioModel model;
+    struct View { double center; double span; bool drag; };
+    const std::array<View, 4> views{{{14.2, 0.35, false}, {14.25, 0.35, true},
+                                  {14.25, 0.01, false}, {7.15, 0.2, false}}};
+    int step = -1, rows = 0;
+    bool started = false, stopping = false, failed = false;
+    QString panId;
+    QTimer dwell;
+    dwell.setSingleShot(true);
+    const auto finish = [&](bool failure) {
+        if (stopping) { return; }
+        stopping = true;
+        dwell.stop();
+        failed |= failure;
+        model.disconnectFromRadio();
+        failed |= model.isConnected();
+        std::printf("navigation_steps=%d failed=%d released=%d\n", step, int(failed), int(!model.isConnected()));
+        app.exit(failed ? 1 : 0);
+    };
+    const auto advance = [&] {
+        if (stopping) { return; }
+        if (step >= 0) {
+            const auto* pan = model.panadapter(panId);
+            const auto& expected = views[step];
+            const bool matched = pan && std::abs(pan->centerMhz() - expected.center) < 1e-8
+                && std::abs(pan->bandwidthMhz() - expected.span) < 1e-8 && rows > 0;
+            std::printf("navigation_step=%d live_rows=%d geometry_retained=%d\n", step, rows, int(matched));
+            if (!matched) { finish(true); return; }
+        }
+        if (++step == int(views.size())) { finish(false); return; }
+        rows = 0;
+        const auto& next = views[step];
+        if (!next.drag) {
+            if (auto* slice = model.slice(0)) { slice->setFrequency(next.center); }
+        }
+        if (!model.requestPanCenter(panId, next.center, next.span,
+            next.drag ? IRadioBackend::PanCenterIntent::Drag : IRadioBackend::PanCenterIntent::Range)) {
+            finish(true); return;
+        }
+        dwell.start(3000);
+    };
+    QObject::connect(&dwell, &QTimer::timeout, &app, advance);
+    QObject::connect(&model, &RadioModel::panFeedSpectrumReady, &app,
+        [&](quint32, const QVector<float>& bins, qint64, const SpectrumDecodeScale&) {
+            if (stopping) { return; }
+            if (!started && model.controlSessionCurrent(model.controlSession()) && !model.panadapters().isEmpty()) {
+                started = true;
+                panId = model.panadapters().first()->panId();
+                QTimer::singleShot(0, &app, advance);
+            } else if (step >= 0 && std::any_of(bins.cbegin(), bins.cend(), [](float bin) {
+                return std::isfinite(bin) && bin > -199.0f;
+            })) { ++rows; }
+        });
+    QObject::connect(&model, &RadioModel::connectionError, &app, [&](const QString&) { finish(true); });
+    QObject::connect(&model, &RadioModel::connectionStateChanged, &app,
+        [&](bool connected) { if (!connected && started && !stopping) { finish(true); } });
+    QTimer::singleShot(30000, &app, [&] { finish(true); });
+    RadioInfo info;
+    info.family = QStringLiteral("web888"); info.model = QStringLiteral("Web-888");
+    info.address = address; info.port = url.port(8073);
+    info.serial = QStringLiteral("web888:%1:%2").arg(address.toString()).arg(info.port);
+    info.maxSlices = 13; info.maxPanadapters = 2;
+    // Existing OS-keychain credential; no password in arguments.
+    QTimer::singleShot(0, &app, [&model, info] { model.connectToRadio(info); });
+    return app.exec();
+}
+
 // Manual hardware diagnostic. No decoder execution, reporting, or admin commands.
 int main(int argc, char** argv)
 {
@@ -363,6 +444,7 @@ int main(int argc, char** argv)
     parser.addOption({QStringLiteral("backend"), QStringLiteral("Exercise dual-pan backend with one shared digital capture; requires at least 70 seconds")});
     parser.addOption({QStringLiteral("independent-listeners"), QStringLiteral("One waterfall with two independent RX leases")});
     parser.addOption({QStringLiteral("combined"), QStringLiteral("Four independent listeners plus seven digital captures; use at least 20 seconds")});
+    parser.addOption({QStringLiteral("navigation"), QStringLiteral("Band/drag/zoom model path, one private RX lease, 30-second bound; password from keychain")});
     parser.process(app);
     bool validDuration = false;
     const int seconds = parser.value(QStringLiteral("seconds")).toInt(&validDuration);
@@ -374,6 +456,9 @@ int main(int argc, char** argv)
     QString password = qEnvironmentVariable("AETHER_WEB888_PASSWORD");
     qunsetenv("AETHER_WEB888_PASSWORD");
     QLoggingCategory::setFilterRules(QStringLiteral("*.debug=false\n*.info=false"));
+    if (parser.isSet(QStringLiteral("navigation"))) {
+        return runNavigationProbe(app, endpoint);
+    }
     if (parser.isSet(QStringLiteral("combined"))) {
         if (seconds < 20) { return 2; }
         return runCombinedProbe(app, endpoint, password, seconds);
