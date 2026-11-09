@@ -59,7 +59,6 @@
 #include "core/MqttClient.h"
 #endif
 #include "core/WsjtxClient.h"
-#include "core/SpotCollectorClient.h"
 #include "core/PotaClient.h"
 #include "core/EibiClient.h"
 #include "core/N1MMSpotClient.h"
@@ -133,14 +132,19 @@ class QSystemTrayIcon;
 #include "gui/PersistentDialog.h" // showOrRaisePersistent template needs
                                    // PersistentDialog visible at point of use.
 
+class QStackedWidget;
+
 namespace AetherSDR {
 class MonitorAudioRouter;
 
 enum class RadioSliceSelectionSource;
 
 class AetherClockApplet;
+class WsprSpotFeed;
 class AetherClockEngine;
 class AetherClockModel;
+class AntennaAnalyzerModel;
+class AetherLabWidget;
 class AutomationServer;
 class CanonWindow;
 class ConnectionPanel;
@@ -169,6 +173,8 @@ class UiTickLagMeter;
 class WhatsNewDialog;
 class Nr2WisdomDialog;
 class ProfileManagerDialog;
+class HelpDialog;
+class SupportDialog;
 class SettingsBrowserDialog;
 class ProfileImportExportDialog;
 class RadioSetupDialog;
@@ -183,6 +189,7 @@ struct NetEntry;
 struct MemoryEntry;
 class PropDashboardDialog;
 class UpdateChecker;
+class UpdateController;
 class UpdatesWindow;
 class TxBandDialog;
 class BandscopeDialog;
@@ -454,6 +461,8 @@ private:
     void showUpdatesWindow(bool checkNow);  // MainWindow_Menus.cpp
     void setAutomaticUpdateCheck(bool on);  // MainWindow_Menus.cpp
     void restoreKnownUpdate();         // MainWindow_Menus.cpp
+    void restartToUpdate();            // MainWindow_Menus.cpp
+    void reportLastUpdate();           // MainWindow_Menus.cpp
     void minimizeActiveApplicationWindow();
     void toggleActiveApplicationWindowFullScreen();
     void applyDarkTheme();
@@ -984,6 +993,15 @@ private:
     template <class T, class... Args>
     void showOrRaisePersistent(QPointer<T>& slot, Args&&... ctorArgs);
 
+    // Lazy-construct + show + raise + activate for a CanonWindow, which is
+    // always frameless and so is not tracked for View → Frameless Window.
+    // `create` builds the window with this as its parent; it is deleted on
+    // close. Returns true when this call created it, so the caller can wire
+    // its signals once.
+    // Example: if (showOrRaiseCanon(m_fooDialog, [this] { return new FooDialog(this); })) …
+    template <class T, class Create>
+    bool showOrRaiseCanon(QPointer<T>& slot, Create&& create);
+
     // Create-or-raise helper for the AetherDSP Settings dialog.  Centralizes
     // the ~17 audio-parameter signal connections that every call site was
     // duplicating; on first construction wires them once, on subsequent calls
@@ -1110,6 +1128,7 @@ private:
     void updatePaTempLabel();
     void showNetworkDiagnosticsDialog();
     void showSystemInfoDialog();
+    void showHelpGuide(const QString& title, const QString& resourcePath);
     void showAgcCalibrationDialog(int sliceId);
     void showAx25HfPacketDecodeDialog();
     // Construct the AetherModem window hidden if it does not exist yet, and
@@ -1129,6 +1148,9 @@ private:
     void stopDigitalVoiceService(bool waitForExit);
     void showPskReporterMapDialog();
     void startKissTncOnStartupIfConfigured();
+    AntennaAnalyzerModel* antennaAnalyzerModel();
+    void showAetherLab();
+    void returnFromAetherLab();
     void showFlexControlDialog();
     void handleFlexControlTuneSteps(int steps);
     void handleFlexControlButton(int button, int action);
@@ -1160,6 +1182,13 @@ private:
     bool confirmClientSlotAvailability(const WanRadioInfo& info, QList<quint32>* disconnectHandles);
     bool sendWanRadioClientDisconnects(const QString& serial, const QList<quint32>& handles);
     void disconnectWanRadioClients(const WanRadioInfo& info);
+    // Lift the adaptive cap on one pan (or every pan) by sending its
+    // pre-cap FPS and waterfall rate. Used on throttle lift, and before a
+    // disconnect, app close, band change or pan close while capped.
+    void restorePreCapPanRates(const QString& onlyPanId = {});
+    // Push the throttle's enabled flag and current cap to the radio tab's AT chip.
+    void refreshAdaptiveThrottleChip();
+    void refreshNetworkQualityIndicators();
     void startWanRadioConnect(const WanRadioInfo& info, bool promptForClientSlots = true);
     void requestWanReconnect();
     void showForcedDisconnectDialog(bool wasWan, const RadioInfo& radioInfo, const WanRadioInfo& wanInfo);
@@ -1197,8 +1226,7 @@ private:
     BandSnapshot captureCurrentBandState() const;
     void restoreBandState(const BandSnapshot& snap);
     void startSwrSweep(int requestedSliceId = -1, int sweepPowerWatts = 1,
-                       double customLowMhz = 0.0, double customHighMhz = 0.0,
-                       bool forceLicenseConfirm = false);
+                       double customLowMhz = 0.0, double customHighMhz = 0.0);
     void clearSwrSweepPlot();
     void saveSwrSweepCsv();
     void advanceSwrSweep();
@@ -1391,11 +1419,13 @@ private:
     QTimer            m_cwxTxEndTimer;
 #endif
     WsjtxClient*       m_wsjtxClient{nullptr};
-    SpotCollectorClient* m_spotCollectorClient{nullptr};
     PotaClient*          m_potaClient{nullptr};
     EibiClient*          m_eibiClient{nullptr};
     QHash<QString, int>  m_eibiSpotKeyToId;
     N1MMSpotClient*      m_n1mmSpotClient{nullptr};
+    // The WSPR receiver on the radio (tools/wspr-agent): its spots for
+    // SpotHub and the panadapter. Main thread; it only polls HTTP.
+    WsprSpotFeed*        m_wsprFeed{nullptr};
     PropForecastClient*  m_propForecast{nullptr};
 #ifdef HAVE_WEBSOCKETS
     FreeDvClient*      m_freedvClient{nullptr};
@@ -1569,6 +1599,17 @@ private:
     QMetaObject::Connection m_tmate2XitConn;
 #endif
 
+    // Touch tap-and-hold -> synthesized right-click / context menu. On a
+    // touchscreen Qt synthesizes a LEFT click from a tap; a press held in place
+    // long enough is turned into a right-click here, so press-and-hold acts like
+    // the right mouse button (context menus) with no physical mouse. Driven from
+    // the qApp eventFilter watching Qt's synthesized mouse events. Kept outside
+    // HAVE_HIDAPI: a touchscreen gesture, not a USB encoder one (#6782).
+    QTimer*           m_touchHoldTimer{nullptr};
+    QPoint            m_touchHoldGlobalPos;
+    QPointer<QWidget> m_touchHoldWidget;
+    bool              m_touchHoldSwallowRelease{false};  // a fired hold owns the click
+
     // The amplifier's forward power and SWR reach the S-Meter, the cross-needle
     // and the TMate2 from TWO sources — the radio-relayed AMP meters and the
     // amplifier's own port-9008 status. They are the same measurement, so the
@@ -1614,6 +1655,10 @@ private:
 #endif
 
     // GUI — left sidebar
+    AntennaAnalyzerModel* m_antennaAnalyzer{nullptr};
+    AetherLabWidget* m_aetherLabWidget{nullptr};
+    QStackedWidget* m_labWorkspaceStack{nullptr};
+    bool m_aetherLabActive{false};
     ConnectionPanel* m_connPanel{nullptr};
 
     // GUI — main area
@@ -1752,6 +1797,8 @@ private:
     QPointer<MultiFlexDialog> m_multiFlexDialog;
     QPointer<FlexControlDialog> m_flexControlDialog;
     QPointer<WhatsNewDialog> m_whatsNewDialog;
+    QHash<QString, QPointer<HelpDialog>> m_helpDialogs;   // by resource path
+    QPointer<SupportDialog> m_supportDialog;
     QPointer<CanonWindow> m_aboutWindow;
     QPointer<AetherRxDialog> m_rxDialog;
     QPointer<Nr2WisdomDialog> m_nr2WisdomDialog;
@@ -2065,6 +2112,10 @@ private:
     QHash<QString, QVector<QMetaObject::Connection>> m_panDisplayStatusConnections;
     bool m_adaptiveThrottleActive{false}; // fps/wf status held as restore targets while true
     int  m_adaptiveFpsCap{0};             // current cap (> 0 when throttle active); shown in network label
+    // Every cap (fps, and its waterfall rate) sent since the throttle engaged.
+    // A status echo of any of them is ours, not the operator's setting.
+    QSet<int> m_adaptiveFpsCapsSent;
+    QSet<int> m_adaptiveWfRatesSent;
     QTimer* m_layoutRestoreTimer{nullptr}; // debounced layout rearrange after pans added on connect
     qint64 m_layoutRestoreUntilMs{0};
     // WheelApf-while-off hint: wall-clock until which the notice is already
@@ -2193,6 +2244,12 @@ private:
     QString m_panadapterConnectionAnimationLabel;
     ShortcutManager m_shortcutManager;
     UpdateChecker* m_updateChecker{nullptr};
+    // Install update in place (RFC #5304): outlives the Updates window, so
+    // a staged release installs on quit (closeEvent).
+    UpdateController* m_updateController{nullptr};
+    // applyUiScale() starts a new instance before quitting: the swap would
+    // find the install in use, so a staged update waits for the next quit.
+    bool m_relaunchingApp{false};
     QPointer<UpdatesWindow> m_updatesWindow;
     QAction* m_autoUpdateAction{nullptr};
 
@@ -2253,6 +2310,10 @@ private:
         qint64 untilMs{0};
     };
     QHash<int, CenterLockTuneHold> m_centerLockTuneHoldBySlice;
+    // Pans whose live Center Lock was set by a TCI client (`rx_ctun_ex`), not
+    // the operator. The saved letter map is neither written nor cleared on
+    // their behalf; any other set or clear of the pan's lock drops the mark.
+    QSet<QString> m_centerLockSessionOnlyPans;
     // While a slice is being dragged (in-window tune OR edge auto-pan) Center Lock
     // stands down so it doesn't fight the drag with per-tick recenters. The
     // drag-end handler recenters once so the locked pan re-asserts.
@@ -2275,6 +2336,7 @@ private:
     void setCenterLockForSlice(SliceModel* slice, bool on);
     void setCenterLockForPan(const QString& panId, int sliceId, bool on,
                              bool persist = true);
+    void setSessionCenterLockForSlice(int sliceId, bool on);
     void clearCenterLockForPan(const QString& panId, bool clearPersistedIntent = false);
     void clearCenterLockForSlice(int sliceId, bool clearPersistedIntent = false);
     // serial + "/" + station: per-client persistence identity so co-located
@@ -2368,6 +2430,19 @@ void MainWindow::showOrRaisePersistent(QPointer<T>& slot, Args&&... ctorArgs)
     slot->show();
     slot->raise();
     slot->activateWindow();
+}
+
+template <class T, class Create>
+bool MainWindow::showOrRaiseCanon(QPointer<T>& slot, Create&& create)
+{
+    const bool created = !slot;
+    if (created) {
+        T* window = create();
+        window->setAttribute(Qt::WA_DeleteOnClose);
+        slot = window;
+    }
+    slot->showAndActivate();
+    return created;
 }
 
 } // namespace AetherSDR
