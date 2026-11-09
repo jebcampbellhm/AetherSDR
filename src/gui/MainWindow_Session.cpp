@@ -1,4 +1,6 @@
 #include "gui/StationWorkspace.h"
+#include "gui/RadioSetupDialog.h"
+#include <QMenu>
 #include "models/MonitorAudioRouter.h"
 #include <QDockWidget>
 // MainWindow_Session.cpp — radio-session wiring: wireDiscovery() (LAN,
@@ -361,6 +363,10 @@ void MainWindow::refreshRadioTabs()
             || !hidden.contains(entry.id);
     }
     m_titleBar->setDiscoveredRadios(tabs);
+    if (auto* station = findChild<StationWorkspace*>()) {
+        const auto receiverTabs = station->receiverTabs();
+        for (const auto& receiver : receiverTabs) { tabs.append(receiver); }
+    }
     if (m_aetherLabWidget) {
         RadioTabEntry lab;
         lab.kind = RadioTabEntry::Kind::Workspace;
@@ -596,6 +602,11 @@ void MainWindow::wireDiscovery()
         // operator confirm — the tab is a selector, not a disconnect button.
         connect(m_titleBar, &TitleBar::radioTabActivated, this,
                 [this](const QString& radioId) {
+            if (radioId.startsWith(QLatin1String("station:"))) {
+                showStationWorkspace();
+                if (auto* station = findChild<StationWorkspace*>()) { station->activateReceiver(radioId); }
+                return;
+            }
             if (radioId == QLatin1String("aetherlab")) { showAetherLab(); return; }
             returnFromAetherLab();
             if (m_radioModel.isConnected() && m_radioModel.serial() == radioId) {
@@ -659,6 +670,14 @@ void MainWindow::wireDiscovery()
         });
         connect(m_titleBar->radioTabBar(), &RadioTabBar::aetherLabRequested,
                 this, &MainWindow::showAetherLab);
+        connect(m_titleBar->radioTabBar(), &RadioTabBar::radioContextMenuRequested,
+                this, [this](const QString& id, const QPoint& position) {
+            if (id == QLatin1String("aetherlab")) { return; }
+            showStationWorkspace();
+            if (auto* station = findChild<StationWorkspace*>()) {
+                station->createRadioMenu(id, station)->popup(position);
+            }
+        });
         connect(m_titleBar->radioTabBar(), &RadioTabBar::rescanRequested,
                 m_connPanel, &ConnectionPanel::retryDiscoveryRequested);
         connect(m_titleBar->radioTabBar(), &RadioTabBar::radioActionRequested,
@@ -3576,6 +3595,23 @@ void MainWindow::createPansSequentially(const QString& layoutId, int total,
 } // namespace AetherSDR
 
 namespace AetherSDR {
+void MainWindow::closeStationWorkspace()
+{
+    auto* dock = findChild<QDockWidget*>(QStringLiteral("additionalReceiversDock"));
+    if (!dock) { return; }
+    if (auto* workspace = dock->findChild<StationWorkspace*>()) {
+        QObject::disconnect(workspace, nullptr, this, nullptr);
+    }
+    for (auto* dialog : findChildren<RadioSetupDialog*>()) {
+        if (dialog->property("stationRadioId").toString().startsWith(QLatin1String("station:"))) {
+            delete dialog;
+        }
+    }
+    // Session teardown can emit audio/state callbacks. Do it before the
+    // MainWindow members and audio thread are destroyed by the outer owner.
+    delete dock;
+}
+
 void MainWindow::showStationWorkspace()
 {
     auto* dock = findChild<QDockWidget*>(QStringLiteral("additionalReceiversDock"));
@@ -3585,6 +3621,14 @@ void MainWindow::showStationWorkspace()
         dock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::RightDockWidgetArea);
         dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
         auto* workspace = new StationWorkspace(&m_radioModel, dock);
+        connect(workspace, &StationWorkspace::receiversChanged, this, [this] {
+            scheduleRadioTabRefresh();
+            for (auto* dialog : findChildren<RadioSetupDialog*>()) {
+                const QString id = dialog->property("stationRadioId").toString();
+                if (dialog->property("stationSetupWired").toBool()) { configureStationSetupDialog(dialog, id); }
+            }
+        });
+        connect(workspace, &StationWorkspace::setupRequested, this, &MainWindow::showStationRadioSetup);
         connect(workspace, &StationWorkspace::primaryTransmitPermissionChanged, this, [this](bool allowed) {
             if (!m_audio) { return; }
             const TxCoordinator::Context microphone = allowed && m_radioModel.isConnected()
@@ -3609,5 +3653,66 @@ void MainWindow::showStationWorkspace()
         addDockWidget(Qt::BottomDockWidgetArea, dock);
     }
     dock->show(); dock->raise();
+}
+
+void MainWindow::configureStationSetupDialog(RadioSetupDialog* dialog, const QString& id)
+{
+    auto* station = findChild<StationWorkspace*>();
+    const bool receiver = id.startsWith(QLatin1String("station:"));
+    if (receiver && (!station || !station->receiverModel(id))) {
+        delete dialog;
+        return;
+    }
+    QList<QPair<QString, QString>> radios;
+    const QString primaryName = m_radioModel.model().isEmpty() ? tr("Primary radio") : m_radioModel.model();
+    radios.append({m_radioModel.serial(), tr("%1 · Primary · %2")
+        .arg(primaryName, m_radioModel.lastRadioInfo().address.toString())});
+    if (station) {
+        for (const auto& tab : station->receiverTabs()) { radios.append({tab.id, tab.name + tr(" · RX only")}); }
+    }
+    const QString selectedId = receiver ? id : m_radioModel.serial();
+    dialog->setStationRadios(radios, selectedId, receiver);
+    dialog->setProperty("stationRadioId", selectedId);
+    if (dialog->property("stationSetupWired").toBool()) { return; }
+    dialog->setProperty("stationSetupWired", true);
+    connect(dialog, &RadioSetupDialog::stationRadioSelected, this,
+            [this, dialog](const QString& selected) {
+        if (selected == QLatin1String("station:add")) {
+            showStationWorkspace();
+            if (auto* workspace = findChild<StationWorkspace*>()) { workspace->requestAddReceiver(); }
+        } else {
+            showStationRadioSetup(selected);
+        }
+        // The old window remains bound to its original radio, including when
+        // both radios have the same family, model name or reported serial.
+        configureStationSetupDialog(dialog, dialog->property("stationRadioId").toString());
+    });
+}
+
+void MainWindow::showStationRadioSetup(const QString& id)
+{
+    if (!id.startsWith(QLatin1String("station:"))) {
+        if (id == m_radioModel.serial()) { openRadioSetupPage(); }
+        return;
+    }
+    auto* station = findChild<StationWorkspace*>();
+    auto* model = station ? station->receiverModel(id) : nullptr;
+    if (!model || !model->isConnected()) { return; }
+    for (auto* dialog : findChildren<RadioSetupDialog*>()) {
+        if (dialog->property("stationRadioId").toString() == id) {
+            dialog->show(); dialog->raise(); dialog->activateWindow();
+            return;
+        }
+    }
+    auto* dialog = new RadioSetupDialog(model);
+    dialog->setParent(this, dialog->windowFlags());
+    dialog->setAttribute(Qt::WA_DeleteOnClose);
+    dialog->setWindowTitle(tr("Radio Setup · %1 · %2").arg(model->model(), model->lastRadioInfo().address.toString()));
+    configureStationSetupDialog(dialog, id);
+    connect(model, &RadioModel::connectionStateChanged, dialog, [dialog](bool connected) {
+        if (!connected) { delete dialog; }
+    });
+    connect(model, &QObject::destroyed, dialog, [dialog] { delete dialog; });
+    dialog->show(); dialog->raise(); dialog->activateWindow();
 }
 } // namespace AetherSDR

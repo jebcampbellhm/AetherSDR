@@ -7,6 +7,7 @@
 #include <QString>
 #include <QVariantMap>
 #include <QPointer>
+#include <QPoint>
 #include <QWidget>
 
 class QHBoxLayout;
@@ -213,6 +214,7 @@ public:
 
 signals:
     void radioActivated(const QString& id);
+    void radioContextMenuRequested(const QString& id, const QPoint& position);
     void radioActionRequested(const QString& id, const QString& action);
     void rescanRequested();
     void aetherLabRequested();

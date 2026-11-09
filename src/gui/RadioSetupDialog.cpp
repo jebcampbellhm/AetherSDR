@@ -1428,7 +1428,7 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
         if (!current) {
             return;
         }
-        if (!isCapabilityPageAvailable(current)) {
+        if (current->isDisabled() || !isCapabilityPageAvailable(current)) {
             selectTab(QStringLiteral("Radio"));
             return;
         }
@@ -2057,6 +2057,7 @@ QWidget* RadioSetupDialog::buildRadioTab()
             }
         });
         connect(m_callsignEdit, &QLineEdit::editingFinished, this, [this] {
+            if (m_receiverSessionOnly) { return; }
             // The typed route sends any radio copy before persisting client
             // identity; callsignChanged listeners must not restart on old state.
             const QString entered = m_callsignEdit->text().trimmed().toUpper();
@@ -2094,6 +2095,7 @@ QWidget* RadioSetupDialog::buildRadioTab()
         QString stationVal = AppSettings::instance().value("StationName", "").toString();
         auto* stationEdit = new QLineEdit(
             stationVal.isEmpty() ? QSysInfo::machineHostName() : stationVal);
+        stationEdit->setObjectName(QStringLiteral("radioSetupStationName"));
         stationEdit->setCursorPosition(0);
         stationEdit->setToolTip("Identifies this client to other Multi-Flex stations.\n"
                                 "Defaults to OS hostname if empty.");
@@ -2101,6 +2103,7 @@ QWidget* RadioSetupDialog::buildRadioTab()
                                       kInfoRightLabelWidth),
                         1, 1);
         connect(stationEdit, &QLineEdit::editingFinished, this, [this, stationEdit] {
+            if (m_receiverSessionOnly) { return; }
             m_model->requestRadioSetup({SetupField::ClientStation, stationEdit->text()});
         });
 
@@ -9366,6 +9369,8 @@ bool RadioSetupDialog::confirmPeripheralRemoval(const QString& label, const QStr
 
 void RadioSetupDialog::buildDeferredTab(int index)
 {
+    if (m_receiverSessionOnly && m_pageItems.value(index)
+        && m_pageItems.value(index)->isDisabled()) { return; }
     auto it = m_deferredBuilders.find(index);
     if (it == m_deferredBuilders.end())
         return;                             // already built or out of range
@@ -9379,6 +9384,61 @@ void RadioSetupDialog::buildDeferredTab(int index)
     // of forcing the dialog past the screen edge (#3345).
     lay->addWidget(wrapTabInScrollArea(content));
     m_deferredBuilders.erase(it);           // build only once
+}
+
+void RadioSetupDialog::setStationRadios(const QList<QPair<QString, QString>>& radios,
+                                      const QString& currentId, bool receiverOnly)
+{
+    const bool applyReceiverRestrictions = receiverOnly && !m_receiverSessionOnly;
+    m_receiverSessionOnly = receiverOnly;
+    if (!m_stationRadioSelector) {
+        m_stationRadioSelector = new QComboBox(bodyWidget());
+        m_stationRadioSelector->setObjectName(QStringLiteral("stationSetupRadio"));
+        m_stationRadioSelector->setAccessibleName(tr("Radio to configure"));
+        m_stationRadioSelector->setAccessibleDescription(tr("Each connection has its own setup window, including radios of the same type. Add receiver opens a new independent connection."));
+        if (auto* layout = qobject_cast<QVBoxLayout*>(bodyWidget()->layout())) {
+            layout->insertWidget(1, m_stationRadioSelector);
+        }
+        connect(m_stationRadioSelector, &QComboBox::activated, this, [this] {
+            emit stationRadioSelected(m_stationRadioSelector->currentData().toString());
+        });
+    }
+    const QSignalBlocker blocker(m_stationRadioSelector);
+    m_stationRadioSelector->clear();
+    for (const auto& radio : radios) { m_stationRadioSelector->addItem(radio.second, radio.first); }
+    m_stationRadioSelector->addItem(tr("Add independent receiver…"), QStringLiteral("station:add"));
+    m_stationRadioSelector->setCurrentIndex(m_stationRadioSelector->findData(currentId));
+    if (applyReceiverRestrictions) {
+        if (auto* stationName = findChild<QLineEdit*>(QStringLiteral("radioSetupStationName"))) {
+            const QString reason = tr("The station name is shared. Edit it in the primary radio's setup.");
+            stationName->setEnabled(false);
+            stationName->setToolTip(reason);
+            stationName->setAccessibleDescription(reason);
+        }
+        if (m_callsignEdit) {
+            const QString reason = tr("The station callsign is shared. Edit it in the primary radio's setup.");
+            m_callsignEdit->setEnabled(false);
+            m_callsignEdit->setToolTip(reason);
+            m_callsignEdit->setAccessibleDescription(reason);
+        }
+        // These pages only address this model. Audio devices, controllers and
+        // application preferences still belong to the primary workspace.
+        const QStringList localPages{QStringLiteral("Radio"), QStringLiteral("Receive"),
+            QStringLiteral("Filters"), QStringLiteral("GPS"), QStringLiteral("Time"),
+            QStringLiteral("Calibration"), QStringLiteral("RTL Receiver"),
+            QStringLiteral("HL2 Hardware"), QStringLiteral("ANAN Front End"),
+            QStringLiteral("Droop Correction")};
+        for (auto it = m_pageIndexes.cbegin(); it != m_pageIndexes.cend(); ++it) {
+            if (localPages.contains(it.key())) { continue; }
+            auto* item = m_pageItems.value(it.value());
+            if (!item) { continue; }
+            const QString reason = tr("Shared application, controller and transmit settings belong to the primary radio's setup.");
+            item->setDisabled(true);
+            item->setToolTip(0, reason);
+            item->setData(0, Qt::AccessibleDescriptionRole, reason);
+        }
+        selectTab(QStringLiteral("Radio"));
+    }
 }
 
 void RadioSetupDialog::selectTab(const QString& tabName)
@@ -9399,7 +9459,7 @@ void RadioSetupDialog::selectTab(const QString& tabName)
     const QString pageName = kLegacyPageNames.value(tabName, tabName);
     const int index = m_pageIndexes.value(pageName, -1);
     if (QTreeWidgetItem* item = m_pageItems.value(index, nullptr)) {
-        if (!isCapabilityPageAvailable(item)) {
+        if (item->isDisabled() || !isCapabilityPageAvailable(item)) {
             return;
         }
         if (isGpsPage(item) && !isGpsSetupAvailable()) {

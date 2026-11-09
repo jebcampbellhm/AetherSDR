@@ -1518,15 +1518,6 @@ private:
     void togglePanZoomModeForPan(const QString& panId, bool segmentZoom);
     void setPanZoomMode(bool segmentZoom, bool enable);
     void zoomActivePanadapter(double factor);
-    // Touch tap-and-hold -> synthesized right-click / context menu. On a
-    // touchscreen Qt synthesizes a LEFT click from a tap; a press held in place
-    // long enough is turned into a right-click here, so press-and-hold acts like
-    // the right mouse button (context menus) with no physical mouse. Driven from
-    // the qApp eventFilter watching Qt's synthesized mouse events.
-    QTimer*           m_touchHoldTimer{nullptr};
-    QPoint            m_touchHoldGlobalPos;
-    QPointer<QWidget> m_touchHoldWidget;
-    bool              m_touchHoldSwallowRelease{false};  // a fired hold owns the click
 #ifdef HAVE_HIDAPI
     HidEncoderManager*   m_hidEncoder{nullptr};
     static QString hidEncoderDefaultAction(int encoderIndex);
@@ -2014,6 +2005,9 @@ private:
     bool m_panadapterUiPreparedForShutdown{false};
     void preparePanadapterUiForShutdown();
     void showStationWorkspace();
+    void closeStationWorkspace();
+    void showStationRadioSetup(const QString& id);
+    void configureStationSetupDialog(RadioSetupDialog* dialog, const QString& id);
     void toggleConnectionDialog();
     bool m_useSystemClock{true};     // true when no GPS installed
     bool m_paTempUseFahrenheit{true};

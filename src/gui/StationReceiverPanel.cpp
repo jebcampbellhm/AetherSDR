@@ -106,6 +106,10 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
     connect(m_model, &RadioModel::connectionError, this, [this](const QString& error) {
         if (m_model) { m_status->setText(error); refreshControls(); }
     });
+    connect(m_model, &RadioModel::sliceLifecycleFailed, this,
+        [this](const QString&, int, const QString& reason) {
+            if (m_model) { m_status->setText(reason); refreshControls(); }
+        });
     connect(m_model, &RadioModel::capabilitiesChanged, this, &StationReceiverPanel::applyCapabilities);
     connect(m_model, &RadioModel::infoChanged, this, &StationReceiverPanel::refreshControls);
     connect(m_model, &RadioModel::panadapterAdded, this, &StationReceiverPanel::addPan);
@@ -190,7 +194,8 @@ void StationReceiverPanel::refreshControls()
     m_reconnect->setAccessibleDescription(!m_reconnect->isEnabled()
         ? tr("This receiver is already connected or a connection attempt is in progress.")
         : tr("Open a fresh connection form for this receiver. Other receivers keep running."));
-    m_addSlice->setEnabled(connected && m_model->slices().size() < m_model->maxSlices());
+    m_addSlice->setEnabled(connected && m_model->backendCapabilities().canCreateSlices
+        && m_model->slices().size() < m_model->maxSlices());
     m_addSlice->setAccessibleDescription(m_addSlice->isEnabled() ? QString() : tr("Connect a receiver with a free receive slot."));
     m_removeSlice->setEnabled(connected && slice);
     m_removeSlice->setAccessibleDescription(slice ? QString() : tr("Select a receive slice to remove."));

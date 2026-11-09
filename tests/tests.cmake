@@ -2854,6 +2854,10 @@ if(AETHER_BUILD_SPECTRUM_GESTURE_TEST)
         COMMAND spectrum_confirmed_geometry_test --station-display-isolation)
     add_test(NAME station_transmit_permission_test
         COMMAND spectrum_confirmed_geometry_test --station-transmit-permission)
+    add_test(NAME station_radio_bar_test
+        COMMAND spectrum_confirmed_geometry_test --station-radio-bar)
+    set_tests_properties(station_radio_bar_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
     add_test(NAME station_reconnect_test
         COMMAND spectrum_confirmed_geometry_test --station-reconnect)
     set_tests_properties(station_reconnect_test PROPERTIES

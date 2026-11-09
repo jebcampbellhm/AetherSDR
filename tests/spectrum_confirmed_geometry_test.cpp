@@ -9,6 +9,14 @@
 #include "gui/DisplaySettings.h"
 #include "gui/StationReceiverPanel.h"
 #include "gui/StationWorkspace.h"
+#include "gui/RadioSetupDialog.h"
+#include <QMenu>
+#include <QContextMenuEvent>
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
+#include <QAction>
+#include <QDir>
+#include <QFontDatabase>
 #include "gui/ConnectionPanel.h"
 #include "core/AppSettings.h"
 #include "core/SpectrumDecodeScale.h"
@@ -50,6 +58,7 @@ using namespace AetherSDR;
 
 namespace AetherSDR {
 struct StationWorkspaceTestAccess {
+    static void add(StationWorkspace& workspace, const RadioInfo& info) { workspace.addReceiver(info, {}); }
     static void open(StationWorkspace& workspace, int id) { workspace.showConnect(id); }
     static RadioStation& station(StationWorkspace& workspace) { return workspace.m_station; }
     static ConnectionPanel* form(StationWorkspace& workspace) { return workspace.m_connection; }
@@ -255,7 +264,8 @@ int runTraceBins()
     };
     const auto nearHz = [](double a, double b) { return std::abs(a - b) < 1e-3; };
 
-    SpectrumWidget w;
+    auto wStorage = std::make_unique<SpectrumWidget>();
+    auto& w = *wStorage;
     w.resize(1000, 600);
     w.setFrequencyRangeImmediate(14.100, 0.200);
     check(refusal(w.traceBinsSnapshot()).contains(QLatin1String("no frame")),
@@ -347,7 +357,8 @@ int runTraceBins()
     // and delivered after it. Unflagged, as on 3c71caffb, they pass at the new
     // centre; flagged as held they are refused until kSettledFrames unheld.
     {
-        SpectrumWidget q;
+        auto qStorage = std::make_unique<SpectrumWidget>();
+        auto& q = *qStorage;
         q.resize(1000, 600);
         q.setFrequencyRangeImmediate(14.100, 0.200);
         for (int i = 0; i < kSettled; ++i) {
@@ -385,7 +396,8 @@ int runTraceBins()
 
     // The encoder fields are the frame's, not the widget's current range.
     {
-        SpectrumWidget e;
+        auto eStorage = std::make_unique<SpectrumWidget>();
+        auto& e = *eStorage;
         e.resize(1000, 600);
         e.setFrequencyRangeImmediate(7.100, 0.200);
         e.setEncoderDbmRange(-140.0f, -20.0f, 1);
@@ -423,7 +435,8 @@ int runTraceBins()
 
     // Confirmation mode: a sent request changes nothing until the radio's echo.
     {
-        SpectrumWidget f;
+        auto fStorage = std::make_unique<SpectrumWidget>();
+        auto& f = *fStorage;
         f.resize(1000, 600);
         f.setPanGeometryConfirmationRequired(true);
         f.observeFrequencyRange(10.120, 0.200);
@@ -676,6 +689,176 @@ static int runStationDisplayIsolation()
     return failures ? 1 : 0;
 }
 
+
+static int runStationRadioBar()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", text); failures += !ok;
+    };
+    const auto waitFor = [](const auto& predicate) {
+        QElapsedTimer timer; timer.start();
+        while (!predicate() && timer.elapsed() < 2000) {
+            QCoreApplication::processEvents(); QThread::msleep(1);
+        }
+        return predicate();
+    };
+    ConnectionPanel discovery;
+    discovery.addDemoRadio();
+    const auto radios = discovery.automationLocalRadios();
+    if (radios.isEmpty()) { return 1; }
+    RadioInfo info = radios.first();
+    RadioModel primary;
+    StationWorkspace workspace(&primary);
+    StationWorkspaceTestAccess::add(workspace, info);
+    info.address = QHostAddress(QStringLiteral("127.0.0.2"));
+    StationWorkspaceTestAccess::add(workspace, info);
+    auto& station = StationWorkspaceTestAccess::station(workspace);
+    const auto ids = station.sessionIds();
+    if (ids.size() != 2) { return 1; }
+    auto* first = &station.session(ids.first())->radioModel();
+    auto* second = &station.session(ids.last())->radioModel();
+    const bool admitted = waitFor([&] {
+        return first->controlSessionCurrent(first->controlSession())
+            && second->controlSessionCurrent(second->controlSession());
+    });
+    check(admitted, "both demo control sessions finish admission before menu actions");
+    if (!admitted) { return 1; }
+    const bool slicesReady = waitFor([&] {
+        return first->slices().size() == 1 && second->slices().size() == 1;
+    });
+    check(slicesReady, "both demo receivers publish their initial slice before isolation checks");
+    if (!slicesReady) { return 1; }
+    const auto tabs = workspace.receiverTabs();
+    check(tabs.size() == 2 && tabs[0].id != tabs[1].id && tabs[0].name != tabs[1].name,
+        "same-type radios with identical reported serials have distinct tabs and endpoint labels");
+    check(workspace.receiverModel(tabs[0].id) == first && workspace.receiverModel(tabs[1].id) == second,
+        "each tab resolves only its owning model");
+    RadioTabBar strip;
+    strip.setRadios(tabs);
+    QString contextId;
+    QObject::connect(&strip, &RadioTabBar::radioContextMenuRequested, &strip,
+        [&](const QString& id, const QPoint&) { contextId = id; });
+    auto* tab = strip.findChild<RadioTab*>(QStringLiteral("radioTab_") + tabs[1].id);
+    if (!tab) { return 1; }
+    QContextMenuEvent event(QContextMenuEvent::Keyboard, QPoint(2,2), QPoint(2,2));
+    QApplication::sendEvent(tab, &event);
+    check(contextId == tabs[1].id, "keyboard context menu retains the selected receiver identity");
+    auto* menu = workspace.createRadioMenu(tabs[1].id, &workspace);
+    auto* add = menu->findChild<QAction*>(QStringLiteral("stationMenuAddSlice"));
+    check(add && !add->isEnabled(), "single-slice demo advertises no spare slice slot");
+    QString setupId;
+    QObject::connect(&workspace, &StationWorkspace::setupRequested, &workspace,
+        [&](const QString& id) { setupId = id; });
+    auto* setup = menu->findChild<QAction*>(QStringLiteral("stationMenuSetup"));
+    if (!setup) { return 1; }
+    setup->trigger();
+    check(setupId == tabs[1].id, "setup action targets its own radio instance");
+    {
+        RadioSetupDialog firstSetup(first), secondSetup(second);
+        const QList<QPair<QString, QString>> entries{{tabs[0].id, tabs[0].name}, {tabs[1].id, tabs[1].name}};
+        firstSetup.setStationRadios(entries, tabs[0].id, true);
+        secondSetup.setStationRadios(entries, tabs[1].id, true);
+        auto* firstPicker = firstSetup.findChild<QComboBox*>(QStringLiteral("stationSetupRadio"));
+        auto* secondPicker = secondSetup.findChild<QComboBox*>(QStringLiteral("stationSetupRadio"));
+        check(firstPicker && secondPicker && firstPicker->currentData() != secondPicker->currentData(),
+            "same-type radio setup windows keep independent selected identities");
+        bool sharedAudioDisabled = false;
+        for (auto* tree : secondSetup.findChildren<QTreeWidget*>()) {
+            QTreeWidgetItemIterator item(tree);
+            while (*item) { if ((*item)->text(0) == QStringLiteral("Audio")) { sharedAudioDisabled = (*item)->isDisabled(); } ++item; }
+        }
+        check(sharedAudioDisabled, "additional setup cannot change shared PC audio devices");
+        auto* stationName = secondSetup.findChild<QLineEdit*>(QStringLiteral("radioSetupStationName"));
+        const auto savedName = AppSettings::instance().value("StationName", "");
+        check(stationName && !stationName->isEnabled(), "shared station name is read-only in additional setup");
+        if (stationName) {
+            stationName->setText(QStringLiteral("Must not replace primary station"));
+            emit stationName->editingFinished();
+            check(AppSettings::instance().value("StationName", "") == savedName,
+                "stale editing callback cannot change the primary station identity");
+            stationName->setText(savedName.toString());
+        }
+        const QString preview = qEnvironmentVariable("AETHER_STATION_PREVIEW_DIR");
+        if (!preview.isEmpty()) {
+            strip.resize(900, 52); strip.show();
+            secondSetup.resize(960, 800); secondSetup.show();
+            QCoreApplication::processEvents();
+            check(strip.grab().save(QDir(preview).filePath(QStringLiteral("station-radio-bar.png"))),
+                "offscreen radio bar preview saved");
+            check(secondSetup.grab().save(QDir(preview).filePath(QStringLiteral("station-radio-setup.png"))),
+                "offscreen radio setup preview saved");
+        }
+    }
+    // A normalized in-memory terminal records slice requests; no wire peer,
+    // socket, sound device or transmit operation is involved.
+    class SliceTerminal final : public IRadioBackend {
+    public:
+        int creates = 0;
+        int capacity = 2;
+        bool live = true;
+        QString lastPan;
+        RadioCapabilities capabilities() const override {
+            RadioCapabilities caps; caps.maxSlices = capacity; caps.maxPanadapters = 1;
+            caps.canCreateSlices = true; return caps;
+        }
+        bool isConnected() const override { return live; }
+        void connectRadio(const RadioConnectRequest&) override { live = true; }
+        void disconnectRadio() override { live = false; }
+        bool createSlice(const QString& pan, double) override { ++creates; lastPan = pan; return true; }
+        void setSliceFrequency(int, double) override {}
+        void setSliceMode(int, const QString&) override {}
+        void setSliceFilter(int, int, int) override {}
+        void setSliceAgc(int, const QString&, int) override {}
+        void setPanCenter(const QString&, double, PanCenterIntent) override {}
+        void setKeying(bool, const TxCoordinator::Operation&, const TxCoordinator::Completion&) override {}
+        void invokeExtension(const QString&, const QString&, quint64, const QVariant&) override {}
+    };
+    second->disconnectFromRadio();
+    if (!waitFor([&] { return !second->isConnected(); })) { return 1; }
+    auto terminal = std::make_unique<SliceTerminal>();
+    auto* sink = terminal.get();
+    second->setBackendForTest(std::move(terminal), QStringLiteral("station-test"));
+    const QString panId = QStringLiteral("test:owned-pan");
+    emit sink->panCenterBandwidthChanged(panId, 14.1, 0.012);
+    SliceDelta slice;
+    slice.panId = panId; slice.frequency = 14.1; slice.mode = QStringLiteral("USB");
+    slice.inUse = true; slice.active = true;
+    emit sink->sliceChanged(0, slice);
+    auto* currentMenu = workspace.createRadioMenu(tabs[1].id, &workspace);
+    auto* currentAdd = currentMenu->findChild<QAction*>(QStringLiteral("stationMenuAddSlice"));
+    check(currentAdd && currentAdd->isEnabled(), "spare receive capacity enables Add slice");
+    if (!currentAdd) { return 1; }
+    currentAdd->trigger();
+    check(sink->creates == 1 && sink->lastPan == panId && first->slices().size() == 1,
+        "Add slice reaches only the selected receiver and its own pan");
+    sink->capacity = 1;
+    currentAdd->trigger();
+    check(sink->creates == 1, "capacity is rechecked when an already open menu is used");
+    sink->capacity = 2;
+    second->setBackendForTest(std::make_unique<SliceTerminal>(), QStringLiteral("station-test"));
+    auto* replacement = static_cast<SliceTerminal*>(second->backend());
+    emit replacement->panCenterBandwidthChanged(panId, 14.1, 0.012);
+    emit replacement->sliceChanged(0, slice);
+    currentAdd->trigger();
+    check(replacement->creates == 0,
+        "menu from a replaced backend cannot add a slice to the new session");
+
+    setupId.clear();
+    second->disconnectFromRadio();
+    if (!waitFor([&] { return !second->isConnected(); })) { return 1; }
+    setup->trigger();
+    check(setupId.isEmpty(), "open menu refuses setup after its connection is retired");
+    check(first->isConnected() && !first->stationTransmitAllowed() && !second->stationTransmitAllowed(),
+        "receiver menus do not disconnect the other radio or grant transmit");
+    station.removeSession(ids.last());
+    check(!workspace.receiverModel(tabs[1].id) && !workspace.activateReceiver(tabs[1].id),
+        "removed receiver identity cannot target the surviving radio");
+    station.removeSession(ids.first());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    return failures ? 1 : 0;
+}
+
 static int runStationReconnect()
 {
     int failures = 0;
@@ -893,6 +1076,13 @@ int main(int argc, char** argv)
     TestSettingsProfile profile("spectrum-confirmed-geometry");
     if (!profile.isValid()) { return 2; }
     QApplication app(argc, argv);
+    for (const char* font : {":/fonts/Inter-Regular.ttf", ":/fonts/Inter-Bold.ttf"}) {
+        if (QFontDatabase::addApplicationFont(QString::fromLatin1(font)) < 0) { return 1; }
+    }
+    QApplication::setFont(QFont(QStringLiteral("Inter"), 10));
+    if (app.arguments().contains(QStringLiteral("--station-radio-bar"))) {
+        return runStationRadioBar();
+    }
     if (app.arguments().contains(QStringLiteral("--station-reconnect"))) {
         return runStationReconnect();
     }

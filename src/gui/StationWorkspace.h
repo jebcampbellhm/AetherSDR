@@ -1,5 +1,6 @@
 #pragma once
 #include "gui/CanonSurface.h"
+#include "gui/RadioTabBar.h"
 #include "models/RadioStation.h"
 #include <QMap>
 #include <QPointer>
@@ -7,6 +8,7 @@ class QVBoxLayout;
 class QLabel;
 class QComboBox;
 class QCheckBox;
+class QMenu;
 namespace AetherSDR {
 class ConnectionPanel;
 class StationReceiverPanel;
@@ -18,7 +20,14 @@ class StationWorkspace final : public CanonCanvas {
 public:
     explicit StationWorkspace(RadioModel* primary, QWidget* parent = nullptr);
     ~StationWorkspace() override;
+    QList<RadioTabEntry> receiverTabs() const;
+    RadioModel* receiverModel(const QString& tabId) const;
+    bool activateReceiver(const QString& tabId);
+    QMenu* createRadioMenu(const QString& tabId, QWidget* parent);
+    void requestAddReceiver() { showConnect(); }
 signals:
+    void receiversChanged();
+    void setupRequested(const QString& tabId);
     void primaryTransmitPermissionChanged(bool allowed);
     void monitorSelectionChanged(int source);
     void monitorAvailabilityChanged(int source, bool available);

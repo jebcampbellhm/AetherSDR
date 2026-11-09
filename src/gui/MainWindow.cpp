@@ -2640,6 +2640,7 @@ MainWindow::MainWindow(QWidget* parent)
 
 MainWindow::~MainWindow()
 {
+    closeStationWorkspace();
 #ifdef HAVE_CW_RX_BACKENDS
     m_cwDecoder.stop();
 #endif
@@ -3608,6 +3609,9 @@ RadioSetupDialog* MainWindow::openRadioSetupPage(const QString& page)
     });
     if (wasFresh && m_radioSetupDialog)
         wireRadioSetupDialogSignals(m_radioSetupDialog, prevComp);
+    if (m_radioSetupDialog) {
+        configureStationSetupDialog(m_radioSetupDialog, m_radioModel.serial());
+    }
     if (m_radioSetupDialog && !page.isEmpty())
         m_radioSetupDialog->selectTab(page);
     return m_radioSetupDialog;

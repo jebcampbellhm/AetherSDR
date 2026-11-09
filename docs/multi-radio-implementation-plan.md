@@ -1,5 +1,67 @@
 # Independent multi-radio station
 
+
+## 2026-11-09 radio bar and setup increment
+
+New operator authorization supersedes the closed October development window:
+merge upstream, review integration, and expose the IC-7300MK2 primary plus
+Web888/nRSP-ST additional receivers in the top bar. Multiple instances of the
+same receiver type must have independent setup targets. No automation was
+resumed; work remains local and the daily executable remains separate.
+
+- Merged upstream `origin/main` at `12ec46d0` (26.11.2) into
+  `feature/multi-radio-station`, signed merge `6c4dc44e`. Preserved station audio
+  routing and fresh connection options alongside upstream reboot state handling;
+  retained both test sets, regenerated the touchpoint manifest and log locations.
+- Additional tabs use monotonic station session IDs, not family/model/serial
+  strings. Labels include endpoint/port and RX-only role. Clicking reveals the
+  owning panel. Context menus use the owning model's receive capacity and
+  control-session fence; no radio is disconnected or granted TX by selection.
+- Radio Setup's instance selector opens independent model-bound windows and
+  offers Add independent receiver. Additional setup only exposes receiver-owned
+  pages; shared audio, station callsign/name, controllers and TX remain primary-owned.
+  Additional setup closes at disconnect/removal. Reconnect retains the original
+  endpoint and accepts fresh credentials through the existing connection form.
+- Slice lifecycle failures are surfaced in the owning additional panel, including
+  asynchronous capacity refusals. No persistent receiver/admin/RF setting is
+  changed by development tests.
+- The new StationWorkspace includes of SliceModel and PanadapterModel only read
+  active slice/pan identity for the existing neutral addSliceOnPan verb. These
+  two manifest includer counts increase by one; no new vendor includes, protocol
+  strings, capabilities or engine APIs were added.
+- Fixed duplicate touch-hold declarations introduced by the automatic merge.
+  Additional sessions and setup windows now close before MainWindow's audio and
+  other members are destroyed, preventing late teardown callbacks into them.
+- Fixed the upstream trace-bin widget test's Windows stack overflow
+  (`0xC00000FD`): its four large SpectrumWidget fixtures now live on the heap.
+  This changes test allocation, not spectrum processing.
+- Experimental application and optional real-widget test harness built with
+  MSVC/Qt. All 16 selected tests passed (71.34 s): radio-bar identity/setup,
+  reconnect, display isolation, TX permission, monitor routing, receive
+  interruption, station ownership, spectrum geometry/retina/trace bins,
+  Web888 backend/pool/connection panel and nRSP backend/session/protocol.
+  The new fixture waits for both admission and initial slices; it never opens
+  sockets or audio devices. Two same-type demo radios share a reported serial
+  but retain distinct endpoint IDs and setup windows. Shared station-name
+  editing is blocked even through a stale editing callback.
+- Deliberately removing the menu's control-session guard made the replaced-
+  backend regression fail. Restored the guard and rebuilt both application and
+  harness before the passing run. Offscreen previews with bundled Inter fonts
+  were inspected; this is not normal rendered-desktop or physical audio testing.
+- Manifest, command-plane/capability/test-registration, log-rule and whitespace
+  checks passed. Strict engine boundary: 0 blockers, 101 pre-existing warnings.
+  The user manual built successfully. Evidence is in ignored
+  `build-web888-evidence/station-radio-bar-*` logs and preview images.
+- Working daily executable in `build-daily-web888-nrsp` is unchanged. Experimental
+  executable is `build-multi-radio-station/AetherSDR.exe`. No live connections,
+  transmissions, credential changes, pushes or radio/admin settings changes.
+- Limitations: nRSP-ST currently supplies one slice per connection; Icom uses
+  its model-defined receiver topology. Add slice follows current backend
+  capability, not an invented capacity. Icom must be primary for TX designation;
+  both additional receivers stay RX-only. Three-radio/Icom hardware, normal
+  desktop interaction and audible monitoring still need operator qualification.
+
+
 ## Authorized work window
 
 2026-10-26 until 21:30 UTC (4:30 pm America/Chicago). Branch:

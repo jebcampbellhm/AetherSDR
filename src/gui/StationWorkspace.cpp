@@ -1,6 +1,10 @@
 #include "gui/StationWorkspace.h"
 #include "gui/StationReceiverPanel.h"
 #include "gui/ConnectionPanel.h"
+#include "models/SliceModel.h"
+#include "models/PanadapterModel.h"
+#include <QMenu>
+#include <QAction>
 #include <QLabel>
 #include <QPushButton>
 #include <QVBoxLayout>
@@ -76,6 +80,7 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
         m_monitor->removeItem(m_monitor->findData(id + 1));
         auto* panel = m_panels.take(id);
         if (panel) { panel->detach(); m_receivers->removeWidget(panel); panel->hide(); panel->deleteLater(); }
+        emit receiversChanged();
     });
     connect(&m_station, &RadioStation::audioFrameReady, this,
         [this](int id, quint64 revision, const PcmFrame& frame) {
@@ -146,12 +151,14 @@ void StationWorkspace::addReceiver(const RadioInfo& info, const QVariantMap& opt
         if (m_connection) { m_connection->setStatusText(tr("Two additional receivers are already open. Remove one before adding another.")); }
         return;
     }
-    const int id = m_station.addSession(info.model + QStringLiteral(" · ") + info.address.toString());
+    const int id = m_station.addSession(tr("%1 · %2:%3").arg(info.model, info.address.toString()).arg(info.port));
     auto* session = m_station.session(id);
     if (!session) { return; }
     connect(&session->radioModel(), &RadioModel::connectionStateChanged, this, [this, id](bool connected) {
         if (m_station.session(id)) { emit monitorAvailabilityChanged(id + 1, connected); }
+        emit receiversChanged();
     });
+    connect(&session->radioModel(), &RadioModel::infoChanged, this, &StationWorkspace::receiversChanged);
     m_monitor->addItem(session->label(), id + 1);
     auto* panel = new StationReceiverPanel(session, this);
     m_panels.insert(id, panel); m_receivers->insertWidget(m_receivers->count() - 1, panel, 1);
@@ -159,6 +166,7 @@ void StationWorkspace::addReceiver(const RadioInfo& info, const QVariantMap& opt
     connect(panel, &StationReceiverPanel::removeRequested, this, [this](int removeId) { m_station.removeSession(removeId); });
     connect(panel, &StationReceiverPanel::reconnectRequested, this, &StationWorkspace::showConnect);
     connectReceiver(id, info, options);
+    emit receiversChanged();
 }
 void StationWorkspace::reconnectReceiver(int id, const RadioInfo& info, const QVariantMap& options)
 {
@@ -193,4 +201,124 @@ void StationWorkspace::connectReceiver(int id, const RadioInfo& info, const QVar
     if (m_connection) { m_connection->hide(); }
     session->radioModel().connectToRadioWithOptions(info, options);
 }
+QList<RadioTabEntry> StationWorkspace::receiverTabs() const
+{
+    QList<RadioTabEntry> result;
+    for (const int id : m_station.sessionIds()) {
+        const auto* session = m_station.session(id);
+        if (!session) { continue; }
+        const auto& model = session->radioModel();
+        RadioTabEntry entry;
+        entry.id = QStringLiteral("station:%1").arg(id);
+        entry.name = session->label();
+        entry.model = model.model();
+        entry.transport = model.lastRadioInfo().address.toString();
+        entry.detail = model.isConnected() ? tr("RX only") : tr("Disconnected · RX only");
+        entry.status = model.isConnected() ? RadioTabStatus::Connected : RadioTabStatus::Available;
+        result.append(entry);
+    }
+    return result;
+}
+RadioModel* StationWorkspace::receiverModel(const QString& tabId) const
+{
+    for (const int id : m_station.sessionIds()) {
+        if (tabId == QStringLiteral("station:%1").arg(id)) {
+            auto* session = m_station.session(id);
+            return session ? &session->radioModel() : nullptr;
+        }
+    }
+    return nullptr;
+}
+bool StationWorkspace::activateReceiver(const QString& tabId)
+{
+    for (const int id : m_station.sessionIds()) {
+        if (tabId != QStringLiteral("station:%1").arg(id)) { continue; }
+        if (auto* panel = m_panels.value(id)) {
+            if (auto* scroll = findChild<QScrollArea*>()) { scroll->ensureWidgetVisible(panel); }
+            panel->setFocus(Qt::OtherFocusReason);
+            return true;
+        }
+    }
+    return false;
+}
+QMenu* StationWorkspace::createRadioMenu(const QString& tabId, QWidget* parent)
+{
+    const bool primary = m_primary && !tabId.isEmpty() && tabId == m_primary->serial();
+    QPointer<RadioModel> model = primary ? m_primary.data() : receiverModel(tabId);
+    auto* menu = new QMenu(parent);
+    menu->setObjectName(QStringLiteral("stationRadioMenu"));
+    menu->setAttribute(Qt::WA_DeleteOnClose);
+    if (model) {
+        const auto session = model->controlSession();
+        const auto current = [this, model, session, primary, tabId] {
+            return model && model->isConnected() && model->controlSessionCurrent(session)
+                && (primary ? model == m_primary : model == receiverModel(tabId));
+        };
+        auto* add = menu->addAction(tr("Add slice"));
+        add->setObjectName(QStringLiteral("stationMenuAddSlice"));
+        add->setEnabled(current() && model->backendCapabilities().canCreateSlices
+            && model->slices().size() < model->maxSlices()
+            && !model->panadapters().isEmpty());
+        add->setStatusTip(add->isEnabled() ? tr("Add a receive slice to this radio.")
+            : tr("Connect this radio with a waterfall and a free receive slot."));
+        connect(add, &QAction::triggered, menu, [this, model, current] {
+            if (!current() || model->slices().size() >= model->maxSlices()) { return; }
+            QString panId;
+            for (auto* slice : model->slices()) {
+                if (slice->isActive()) { panId = slice->panId(); break; }
+            }
+            if (panId.isEmpty() && !model->panadapters().isEmpty()) { panId = model->panadapters().first()->panId(); }
+            if (panId.isEmpty() || !model->addSliceOnPan(panId)) {
+                m_hint->setText(tr("This radio cannot add another slice. Its available receive capacity may have changed."));
+            }
+        });
+        auto* waterfall = menu->addAction(tr("Add waterfall"));
+        waterfall->setEnabled(current() && model->panadapters().size() < model->maxPanadapters());
+        waterfall->setStatusTip(waterfall->isEnabled() ? tr("Add a waterfall to this radio.")
+            : tr("No additional waterfall is available on this radio."));
+        connect(waterfall, &QAction::triggered, menu, [model, current] {
+            if (current()) { model->createPanadapter(); }
+        });
+        auto* listen = menu->addAction(tr("Listen to this radio"));
+        listen->setEnabled(current());
+        listen->setStatusTip(tr("Select PC audio from this radio only. PC Audio must also be enabled."));
+        connect(listen, &QAction::triggered, menu, [this, current, primary, tabId] {
+            if (!current()) { return; }
+            if (primary) { selectMonitor(0); return; }
+            for (const int id : m_station.sessionIds()) {
+                if (tabId == QStringLiteral("station:%1").arg(id)) { selectMonitor(id + 1); return; }
+            }
+        });
+        auto* setup = menu->addAction(tr("Radio setup…"));
+        setup->setObjectName(QStringLiteral("stationMenuSetup"));
+        setup->setEnabled(current());
+        setup->setStatusTip(tr("Configure this radio connection. Other receivers keep their own settings."));
+        connect(setup, &QAction::triggered, menu, [this, current, tabId] {
+            if (current()) { emit setupRequested(tabId); }
+        });
+        if (!primary) {
+            auto* reconnect = menu->addAction(tr("Reconnect…"));
+            reconnect->setEnabled(!model->isConnected() && !model->isConnectAttemptInFlight());
+            reconnect->setStatusTip(tr("Reconnect this receiver at its original endpoint."));
+            connect(reconnect, &QAction::triggered, menu, [this, tabId] {
+                for (const int id : m_station.sessionIds()) {
+                    if (tabId == QStringLiteral("station:%1").arg(id)) { showConnect(id); return; }
+                }
+            });
+            auto* remove = menu->addAction(tr("Remove receiver"));
+            connect(remove, &QAction::triggered, menu, [this, tabId] {
+                for (const int id : m_station.sessionIds()) {
+                    if (tabId == QStringLiteral("station:%1").arg(id)) { m_station.removeSession(id); return; }
+                }
+            });
+        }
+        menu->addSeparator();
+    }
+    auto* addReceiver = menu->addAction(tr("Add independent receiver…"));
+    addReceiver->setEnabled(m_panels.size() < 2);
+    addReceiver->setStatusTip(tr("Connect up to two additional radios, including another of the same type."));
+    connect(addReceiver, &QAction::triggered, menu, [this] { showConnect(); });
+    return menu;
+}
+
 }

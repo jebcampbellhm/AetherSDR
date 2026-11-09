@@ -208,6 +208,40 @@ already sent to a speaker device or another program. Keep the hardware receive
 cutoff in your antenna arrangement. Icom Ethernet operation and transmit-status
 timing in a three-radio station have not yet been hardware validated.
 
+## Station radio bar and per-radio setup
+
+In the experimental station build, connect the IC-7300MK2 as the primary radio,
+then use **File → Additional receivers… → Add receiver…** for the Web888 and
+nRSP-ST. Up to two additional connections may be open. They may be different
+radio types or two instances of the same type; each keeps its own endpoint,
+credentials, slices and setup window.
+
+Additional receivers appear in the top radio bar with their endpoint and **RX
+only** label. Click one to reveal its receiver panel without disconnecting the
+others. Right-click a radio (or focus its tab and use the keyboard context-menu
+key) for **Add slice**, **Add waterfall**, **Listen to this radio**, and **Radio
+setup…**. Unavailable slice/waterfall actions stay dimmed. The receiver makes the
+final capacity decision; a refusal is displayed in its panel.
+
+**Radio Setup** includes a **Radio to configure** selector and **Add independent
+receiver…**. Choosing a radio opens that connection's own setup window, even if
+another radio has the same model name. Additional receivers expose supported
+radio settings; shared PC audio, station callsign/name, controller and transmit
+settings belong to the primary workspace. Their setup window closes when its
+receiver disconnects. Use **Reconnect…** to reconnect at the original endpoint,
+or remove and add a receiver to change the endpoint.
+
+The Icom must be the primary radio in this arrangement. Additional radios remain
+receive-only. **Allow transmit on primary radio** explicitly designates the
+primary; clicking another tab or selecting its audio never transfers transmit
+permission or keys a radio. **Listen to this radio** selects only the audio source;
+**PC Audio** must also be enabled by the operator. Exact IC-7300MK2 Ethernet and
+physical transmit/receive interruption still require hardware qualification.
+
+The current nRSP-ST backend supplies one slice per connection; its **Add slice**
+action is therefore disabled. Icom receiver counts depend on the model. Web888
+can request additional slices when its receiver slots are available.
+
 ## See also
 
 - [Tailscale Remote Access](./tailscale-remote-access.md)
