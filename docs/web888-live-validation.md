@@ -610,4 +610,3 @@ web888_capture_pool_test, kiwi_sdr_session_test and web888_connection_panel_test
 The connection-panel size/routing test passed after correcting its merged
 signal subscription. These are socket-free tests with a fake credential store;
 no live receiver authentication or real OS-keychain round trip was performed.
-
