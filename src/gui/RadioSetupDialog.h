@@ -6,6 +6,8 @@
 
 #include <QHash>
 #include <QPointer>
+#include <QPair>
+#include <QList>
 #include <QStringList>
 #include <QVector>
 #include <array>
@@ -68,6 +70,8 @@ public:
                               Kxpa100Model* kxpa100 = nullptr,
                               RfkitConnection* rfkit = nullptr);
     void selectTab(const QString& tabName);
+    void setStationRadios(const QList<QPair<QString, QString>>& radios,
+                          const QString& currentId, bool receiverOnly);
     void done(int result) override;
     // Like selectTab("Serial & Controllers"), but also scrolls the page so
     // the FlexControl Tuning Knob group is actually in view instead of just
@@ -89,6 +93,7 @@ public:
     void reportAutomationBridgeStartResult(bool ok);
 
 signals:
+    void stationRadioSelected(const QString& id);
     void txBandSettingsRequested();
     void serialSettingsChanged();
     // Fired when the user toggles SliceLetterDisplay mode in the Themes
@@ -272,6 +277,8 @@ private:
     QLabel* m_pageTitle{nullptr};
     QHash<QString, int> m_pageIndexes;
     QHash<int, QTreeWidgetItem*> m_pageItems;
+    QComboBox* m_stationRadioSelector{nullptr};
+    bool m_receiverSessionOnly{false};
     // First visible navigation match for the current search text (#4183).
     // Stashed by the search filter and committed on Enter, so typing highlights
     // the match without eagerly building deferred, hardware-probing pages.

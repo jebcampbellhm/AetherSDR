@@ -318,6 +318,9 @@ public:
 
     // ---- identity & capability (feeds the protocol `welcome`, §4.1) ----
     virtual RadioCapabilities capabilities() const = 0;
+    // Local-only receive gap, for engine-owned decoder buffers. Never writes
+    // gain, mute, frequency or any persistent/shared receiver setting.
+    virtual void setReceiveInterrupted(bool interrupted) { Q_UNUSED(interrupted); }
 
     // True when this backend delivers demodulated RX audio over the seam
     // (audioFrameReady) rather than through a Flex PanadapterStream. The RX-audio

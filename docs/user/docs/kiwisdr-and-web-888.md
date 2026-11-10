@@ -50,7 +50,7 @@ it; passwords never go in the settings database. Leave the password blank to
 reuse the saved password or connect to a passwordless receiver. Recent
 addresses retain the Web-888 type and port.
 Use **Forget** beside the password to remove the saved password for the entered
-address and port. An active connection stays open. See [Manual Connection](./manual-connection.md#connecting-to-web-888-or-nrsp-st)
+address and port. An active connection stays open. See [Manual Connection](./manual-connection.md#connecting-to-a-web-888)
 for source-path guidance and password recovery.
 
 The separate KiwiSDR receiver setup below remains available for using an

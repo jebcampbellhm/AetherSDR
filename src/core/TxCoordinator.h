@@ -220,6 +220,7 @@ public:
         Producer m_producer;
         Operation m_operation;
         quint64 m_session{0};
+        quint64 m_admissionEpoch{0};
         bool m_continuous{false};
     };
 
@@ -248,7 +249,7 @@ public:
         [[nodiscard]] bool accepted() const { return refusal == Refusal::None; }
     };
 
-    enum class StopReason { OwnerCancelled, ActorRevoked, Expired, Reset, Emergency };
+    enum class StopReason { OwnerCancelled, ActorRevoked, Expired, Reset, Emergency, AdmissionDisabled };
     using StopHandler = std::function<void(const Operation&, StopReason)>;
     using Clock = std::function<qint64()>;
     static constexpr int kMaximumActors = 64;
@@ -321,6 +322,11 @@ public:
     void expire(qint64 monotonicMs);
     void reset();
     void emergencyStop();
+    // Trusted station composition. Defaults to standalone behavior. Disabling
+    // closes all actors and terminal media writers before stop callbacks run;
+    // re-enabling never revives captured inputs or media from an earlier role.
+    bool setTransmitAllowed(bool allowed);
+    [[nodiscard]] bool transmitAllowed() const;
     // Acknowledge a stop only on qualified readback or transport teardown, never on
     // a requested unkey or drained queue. A matching ack clears forced-stop
     // recovery or an unconfirmed local completion; an old completion can't ack a
@@ -349,6 +355,8 @@ private:
         std::atomic<quint64> continuousDispatches{0};
         std::atomic<bool> independentOperation{false};
         std::atomic<bool> alive{true};
+        std::atomic<bool> transmitAllowed{true};
+        std::atomic<quint64> admissionEpoch{0};
         std::atomic<int> requests{0};
         Clock clock; // immutable after construction; test clocks must be worker-safe
     };
@@ -431,6 +439,7 @@ private:
     StopRequest m_stopRequest;
     StopHandler m_stopHandler;
     bool m_inStopHandler{false};
+    bool m_changingAdmission{false};
 };
 
 } // namespace AetherSDR

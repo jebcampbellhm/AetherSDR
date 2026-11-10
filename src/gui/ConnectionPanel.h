@@ -46,6 +46,8 @@ public:
 
     bool selectRadio(const QString& serial);
     void selectManualConnection();
+    // Prefill an existing receiver's saved route without probing or connecting.
+    void selectManualConnection(const RadioInfo& radio);
     bool canRenameRadio(const QString& serial) const;
     bool canRenameRadio(const RadioInfo& radio) const;
     QString radioDisplayName(const RadioInfo& radio, const QString& fallback) const;

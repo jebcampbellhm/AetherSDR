@@ -22,19 +22,18 @@
 
 namespace AetherSDR {
 
+// Absent preserves the established host retry behavior. Manual sessions must
+// not repeat admission failures (password, busy, access policy) automatically.
+struct ConnectionRecovery {
+    enum class Mode { HostRetry, Manual };
+    Mode mode{Mode::HostRetry};
+};
+
 // Radio-owned TUNE RCA output suppression, independently persisted per band.
 struct TuneOutputSuppressionControl {
     enum class Scope { PerBand };
     Scope scope = Scope::PerBand;
     int maximumBandId = 255;
-};
-
-struct ConnectionRecovery {
-    enum class Mode { HostRetry, Manual };
-    Mode mode{Mode::HostRetry};
-};
-struct ReceiveAudioBuffering {
-    int jitterTargetMs = 0;
 };
 
 struct TxPowerBand {
@@ -115,6 +114,13 @@ struct ReceiveAudioControl {
     // Both gain (0..100) and mute must act on the shared slice's RX audio.
 };
 // Typed pre-monitor sliceAudioFrameReady export; grants no TX, IQ or control verb.
+// Host playout policy for a burst-delivered receive stream. This grants no
+// radio action: the desktop audio engine consumes the target before playback.
+// Absent preserves the existing low-latency path.
+struct ReceiveAudioBuffering {
+    int jitterTargetMs = 0;
+};
+
 struct ReceiveAudioExport {
     QVector<int> sampleRatesHz;
     int maximumReceivers = 0;
@@ -466,9 +472,9 @@ struct RadioCapabilities {
     std::optional<ReceiveModeControl> receiveModeControl;
     std::optional<ReceiveFilterControl> receiveFilterControl;
     std::optional<ReceiveAudioControl> receiveAudioControl;
+    std::optional<ReceiveAudioBuffering> receiveAudioBuffering;
     std::optional<ReceiveCwPitchControl> receiveCwPitchControl;
     std::optional<ReceiveDspControl> receiveDspControl;
-    std::optional<ReceiveAudioBuffering> receiveAudioBuffering;
     std::optional<ReceiveAudioExport> receiveAudioExport;
     std::optional<BroadcastFmReceive> broadcastFmReceive;
     std::optional<ReceivePanRangeControl> receivePanCenterControl;

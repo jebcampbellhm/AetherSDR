@@ -47,6 +47,7 @@ public:
     // Clock/source invalidation without replacing the profile or disturbing
     // other captures. Preserves reservations; matching routes need new anchors.
     int disarmCapture(quint64 captureId);
+    void disarmAll(); // Retain the profile/budget; require fresh anchors for every route.
     std::optional<Web888DecoderJob> takeNext();
     void clear();
     quint64 reservedSampleBytes() const { return m_reservedBytes; }

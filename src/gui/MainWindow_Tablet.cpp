@@ -204,6 +204,8 @@ void MainWindow::setupTabletUi()
         nav->addWidget(button);
         return button;
     };
+    auto* radios = addAction(tr("Radios"));
+    connect(radios, &QPushButton::clicked, this, &MainWindow::showStationWorkspace);
     auto* rx = addAction(tr("Receiver"));
     connect(rx, &QPushButton::clicked, this, &MainWindow::showTabletReceiver);
     auto* nr = addAction(tr("Noise reduction"));

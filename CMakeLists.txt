@@ -7,7 +7,7 @@ if(POLICY CMP0156)
     cmake_policy(SET CMP0156 NEW)
 endif()
 
-project(AetherSDR VERSION 26.11.1 LANGUAGES C CXX)
+project(AetherSDR VERSION 26.11.2 LANGUAGES C CXX)
 
 if(IOS)
     include(cmake/AetherIOS.cmake)
@@ -1165,6 +1165,8 @@ set(CORE_SOURCES
     src/core/TailnetShimTokenStore.cpp
     src/core/TailnetShimDownloader.cpp  # pinned, SHA-256-verified image download (RFC #6271 D2)
     src/core/RadioHealthClient.cpp    # radio health agent readout (tools/radio-health)
+    src/core/WsprAgent.cpp            # WSPR receiver on the radio (tools/wspr-agent)
+    src/core/WsprAgentClient.cpp
     src/core/TailnetLinkTelemetry.cpp   # link telemetry from the shim, for Network Diagnostics
     src/core/WaveformUploadState.cpp
     src/core/LegacyWaveformPackage.cpp
@@ -1291,12 +1293,13 @@ if(WIN32)
 endif()
 
 set(MODEL_SOURCES
+    src/models/RadioSwrValidityFilter.cpp
     src/models/DecoderAudioModel.cpp
     src/models/Ax25ReceiveModel.cpp
     src/models/AprsDigipeaterModel.cpp
     src/models/Nr2SettingsModel.cpp
-    src/models/DigitalMonitoringModel.cpp
     src/models/Rn2SettingsModel.cpp
+    src/models/DigitalMonitoringModel.cpp
     src/models/RadioModel.cpp
     src/models/RadioModel_Setup.cpp
     src/models/RadioModel_Administration.cpp
@@ -1309,6 +1312,8 @@ set(MODEL_SOURCES
     src/models/RadioModel_TxCoordinator.cpp
     src/models/TxController.cpp
     src/models/DeclaredBands.cpp
+    src/models/MonitorAudioRouter.cpp
+    src/models/RadioStation.cpp
     src/models/RadioSession.cpp
     src/models/ReceiverSlotCount.cpp
     src/models/ModelCapabilities.cpp
@@ -1394,6 +1399,8 @@ set(GUI_SOURCES
     src/gui/AgcCalibrationDialog.cpp
     src/gui/AudioDeviceChangeDialog.cpp
     src/gui/WfmDeviceDialog.cpp
+    src/gui/StationWorkspace.cpp
+    src/gui/StationReceiverPanel.cpp
     src/gui/ConnectionPanel.cpp
     src/gui/ClientDisconnectDialog.cpp
     src/gui/ConnectedStationsDialog.cpp
@@ -1453,6 +1460,7 @@ set(GUI_SOURCES
     src/gui/WaveformsDialog.cpp
     src/gui/WaveformEnvironmentDialog.cpp
     src/gui/TailnetShimDialog.cpp
+    src/gui/WsprConfigureWindow.cpp
     src/gui/QrCodeImage.cpp
     src/gui/ClientRxDspApplet.cpp
     src/gui/DragValuePopup.cpp
@@ -1490,8 +1498,8 @@ set(GUI_SOURCES
     src/gui/HealthApplet.cpp
     src/gui/PersistentDialog.cpp
     src/gui/AetherLabWidget.cpp
-    src/gui/DisplaySessionMonitor.cpp
     src/gui/CanonWindow.cpp
+    src/gui/DisplaySessionMonitor.cpp
     src/gui/CanonMessageBox.cpp
     src/gui/CanonSurface.cpp
     src/gui/PanadapterHeader.cpp
@@ -1514,7 +1522,6 @@ set(GUI_SOURCES
     src/gui/AdaptiveFilterControls.cpp
     src/gui/FilterPassbandWidget.cpp
     src/gui/AnalogMeterFaceTheme.cpp
-    src/gui/RadioSwrValidityFilter.cpp
     src/gui/SMeterGeometry.cpp
     src/gui/SMeterWidget.cpp
     src/gui/CrossNeedleMeterGeometry.cpp
@@ -1952,8 +1959,7 @@ add_library(aethercore ${_aether_core_library_type}
 )
 target_link_libraries(aethercore PRIVATE aether::wdsp)
 target_link_libraries(aethercore PRIVATE aether_monocypher)   # core: EspFirmwareCatalog, UpdateStager
-target_link_libraries(aethercore PRIVATE aether_zstd)         # core: UpdateStager
-target_link_libraries(aethercore PRIVATE ${AETHER_NRSP_CRYPTO})
+target_link_libraries(aethercore PRIVATE aether_zstd ${AETHER_NRSP_CRYPTO}) # core: UpdateStager, nRSP-ST
 target_compile_definitions(aethercore PRIVATE
     AETHER_FIRMWARE_DEV_OVERRIDES=$<BOOL:${AETHER_FIRMWARE_DEV_OVERRIDES}>
     AETHER_UPDATE_DEV_OVERRIDES=$<BOOL:${AETHER_UPDATE_DEV_OVERRIDES}>)
@@ -2703,6 +2709,10 @@ endif()
 
 # macOS app bundle
 if(IOS)
+    set(AETHER_IOS_PLATFORM_NAME "iPhoneOS")
+    if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+        set(AETHER_IOS_PLATFORM_NAME "iPhoneSimulator")
+    endif()
     set_target_properties(AetherSDR PROPERTIES
         MACOSX_BUNDLE TRUE
         MACOSX_BUNDLE_GUI_IDENTIFIER "${AETHER_IOS_BUNDLE_ID}"
@@ -2730,6 +2740,27 @@ if(IOS)
     # The prebuilt device kit ships dynamic XCFrameworks that need embedding.
     if(NOT AVCODEC_LIBRARY MATCHES "\\.a$")
         qt_add_ios_ffmpeg_libraries(AetherSDR)
+        # Qt's helper embeds frameworks only with the Xcode generator. Keep
+        # command-line Ninja builds deployable with the same native libraries.
+        if(NOT CMAKE_GENERATOR STREQUAL "Xcode")
+            set(_ios_ffmpeg_slice "ios-${CMAKE_OSX_ARCHITECTURES}")
+            if(CMAKE_OSX_SYSROOT MATCHES "[Ss]imulator")
+                string(APPEND _ios_ffmpeg_slice "-simulator")
+            endif()
+            foreach(_component avcodec avformat avutil swresample swscale)
+                set(_framework "${QT6_INSTALL_PREFIX}/${QT6_INSTALL_LIBS}/ffmpeg/lib${_component}.xcframework/${_ios_ffmpeg_slice}/lib${_component}.framework")
+                if(NOT EXISTS "${_framework}")
+                    message(FATAL_ERROR "Missing native FFmpeg framework: ${_framework}")
+                endif()
+                add_custom_command(TARGET AetherSDR POST_BUILD
+                    COMMAND ${CMAKE_COMMAND} -E copy_directory "${_framework}"
+                        "$<TARGET_BUNDLE_DIR:AetherSDR>/Frameworks/lib${_component}.framework"
+                    VERBATIM)
+            endforeach()
+            set_target_properties(AetherSDR PROPERTIES
+                BUILD_WITH_INSTALL_RPATH TRUE
+                INSTALL_RPATH "@executable_path/Frameworks")
+        endif()
     endif()
 elseif(APPLE)
     set(AETHER_MACOS_BUNDLE_IDENTIFIER "com.aethersdr.AetherSDR" CACHE STRING

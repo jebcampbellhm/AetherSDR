@@ -732,6 +732,13 @@ target_link_libraries(radio_setup_control_routing_test PRIVATE aethercore Qt6::C
 add_test(NAME radio_setup_control_routing_test COMMAND radio_setup_control_routing_test)
 set_tests_properties(radio_setup_control_routing_test PROPERTIES TIMEOUT 45)
 
+# Socket-free bookmark/CAT routing through production handlers and encoders.
+add_executable(bandstack_cat_controls_test tests/bandstack_cat_controls_test.cpp)
+target_include_directories(bandstack_cat_controls_test PRIVATE src tests)
+target_link_libraries(bandstack_cat_controls_test PRIVATE aethercore Qt6::Core Qt6::Test)
+add_test(NAME bandstack_cat_controls_test COMMAND bandstack_cat_controls_test)
+set_tests_properties(bandstack_cat_controls_test PROPERTIES TIMEOUT 30)
+
 # #6614: injected production writers and an unbound automation server object.
 # No socket endpoint, synthetic firmware peer, physical device or TX operation.
 add_executable(desktop_utility_routing_test tests/desktop_utility_routing_test.cpp)
@@ -2389,6 +2396,59 @@ add_test(NAME callsign_lookup_dialog_test COMMAND callsign_lookup_dialog_test)
 set_tests_properties(callsign_lookup_dialog_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+# Support & Diagnostics on CanonWindow (#7051): no layout warnings, a plain
+# selectable log path, every close path and a legible floor. No radio, no
+# sockets: the window only reads the log file.
+add_executable(support_dialog_test
+    tests/support_dialog_test.cpp
+    src/gui/SupportDialog.cpp
+    src/gui/FramelessMessageBox.cpp
+    src/gui/ResetSettingsPrompts.cpp
+    src/gui/CanonMessageBox.cpp
+    src/gui/CanonWindow.cpp
+    src/gui/ModemChrome.cpp
+    src/gui/DragValuePopup.cpp
+    src/gui/FramelessResizer.cpp
+    src/gui/FramelessWindowTitleBar.cpp
+    ${THEME_TEST_RESOURCES}
+)
+target_include_directories(support_dialog_test PRIVATE src tests)
+target_link_libraries(support_dialog_test PRIVATE
+    aethercore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Network Qt6::Test)
+set_target_properties(support_dialog_test PROPERTIES AUTOMOC ON)
+add_test(NAME support_dialog_test COMMAND support_dialog_test)
+set_tests_properties(support_dialog_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 90)
+
+# Theme Editor on CanonWindow (#7057): canon chrome while every token row
+# still shows the edited theme, canon name prompts, every close path, and the
+# old geometry key.
+add_executable(theme_editor_dialog_test
+    tests/theme_editor_dialog_test.cpp
+    src/gui/ThemeEditorDialog.cpp
+    src/gui/TokenEditorWidget.cpp
+    src/gui/ThemeInspector.cpp
+    src/gui/GradientEditorDialog.cpp
+    src/gui/CompactColorPicker.cpp
+    src/gui/PersistentDialog.cpp
+    src/gui/FramelessWindowTitleBar.cpp
+    src/gui/CanonMessageBox.cpp
+    src/gui/CanonWindow.cpp
+    src/gui/ModemChrome.cpp
+    src/gui/DragValuePopup.cpp
+    src/gui/FramelessResizer.cpp
+    ${THEME_TEST_RESOURCES}
+)
+target_include_directories(theme_editor_dialog_test PRIVATE src tests)
+target_link_libraries(theme_editor_dialog_test PRIVATE
+    aethercore Qt6::Core Qt6::Gui Qt6::Widgets Qt6::Test)
+set_target_properties(theme_editor_dialog_test PROPERTIES AUTOMOC ON)
+add_test(NAME theme_editor_dialog_test COMMAND theme_editor_dialog_test)
+set_tests_properties(theme_editor_dialog_test PROPERTIES
+    ENVIRONMENT "QT_QPA_PLATFORM=offscreen"
+    TIMEOUT 90)
+
 # The CTR2 window (FirmwareInstallDialog): with only another kind of
 # controller selected it shows the relay alone, and its height follows the
 # CTR2-Max part as it hides and shows. Socket-free: device lists injected, no
@@ -2770,6 +2830,9 @@ if(AETHER_BUILD_SPECTRUM_GESTURE_TEST)
     # The registered CTest path remains socket-free.
     add_executable(spectrum_confirmed_geometry_test
         tests/spectrum_confirmed_geometry_test.cpp ${_spectrum_gesture_sources})
+    add_test(NAME tablet_station_layout_test COMMAND spectrum_confirmed_geometry_test --tablet-station-layout)
+    set_tests_properties(tablet_station_layout_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
     target_include_directories(spectrum_confirmed_geometry_test PRIVATE
         $<TARGET_PROPERTY:AetherSDR,INCLUDE_DIRECTORIES>)
     target_compile_definitions(spectrum_confirmed_geometry_test PRIVATE
@@ -2778,15 +2841,53 @@ if(AETHER_BUILD_SPECTRUM_GESTURE_TEST)
         $<TARGET_PROPERTY:AetherSDR,COMPILE_OPTIONS>)
     target_link_libraries(spectrum_confirmed_geometry_test PRIVATE
         $<TARGET_PROPERTY:AetherSDR,LINK_LIBRARIES>)
+    if(WIN32 AND TARGET Qt6::QOffscreenIntegrationPlugin)
+        # Desktop deployment normally copies only qwindows. This opt-in lane
+        # needs the matching offscreen plugin, without opening a native window.
+        add_custom_command(TARGET spectrum_confirmed_geometry_test POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory
+                "$<TARGET_FILE_DIR:spectrum_confirmed_geometry_test>/platforms"
+            COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "$<TARGET_FILE:Qt6::QOffscreenIntegrationPlugin>"
+                "$<TARGET_FILE_DIR:spectrum_confirmed_geometry_test>/platforms"
+            VERBATIM)
+    endif()
     add_test(NAME spectrum_confirmed_geometry_test COMMAND spectrum_confirmed_geometry_test)
+    add_test(NAME station_display_isolation_test
+        COMMAND spectrum_confirmed_geometry_test --station-display-isolation)
+    add_test(NAME station_transmit_permission_test
+        COMMAND spectrum_confirmed_geometry_test --station-transmit-permission)
+    add_test(NAME station_radio_bar_test
+        COMMAND spectrum_confirmed_geometry_test --station-radio-bar)
+    set_tests_properties(station_radio_bar_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
+    add_test(NAME station_reconnect_test
+        COMMAND spectrum_confirmed_geometry_test --station-reconnect)
+    set_tests_properties(station_reconnect_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
+    set_tests_properties(station_transmit_permission_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
+    set_tests_properties(station_display_isolation_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
     set_tests_properties(spectrum_confirmed_geometry_test PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1")
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
     # Same binary at a Retina device pixel ratio: pins the Flex pan xpixels cap.
     add_test(NAME spectrum_pan_pixels_retina_test
         COMMAND spectrum_confirmed_geometry_test --pan-pixels-retina)
     set_tests_properties(spectrum_pan_pixels_retina_test PROPERTIES
-        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2;AETHER_AUTOMATION_NO_TX=1")
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_SCALE_FACTOR=2;AETHER_AUTOMATION_NO_TX=1" TIMEOUT 30)
+    # Same binary: `get tracedebug <pan> bins` refuses across pan/zoom (#5806).
+    add_test(NAME spectrum_trace_bins_widget_test
+        COMMAND spectrum_confirmed_geometry_test --trace-bins)
+    set_tests_properties(spectrum_trace_bins_widget_test PROPERTIES
+        ENVIRONMENT "QT_QPA_PLATFORM=offscreen;AETHER_AUTOMATION_NO_TX=1")
 endif()
+
+# SpectrumTraceBins (header-only): the `get tracedebug <pan> bins` reply (#5806).
+add_executable(spectrum_trace_bins_test tests/spectrum_trace_bins_test.cpp)
+target_include_directories(spectrum_trace_bins_test PRIVATE src)
+target_link_libraries(spectrum_trace_bins_test PRIVATE Qt6::Core)
+add_test(NAME spectrum_trace_bins_test COMMAND spectrum_trace_bins_test)
 
 add_executable(pan_frame_guard_test tests/pan_frame_guard_test.cpp)
 target_include_directories(pan_frame_guard_test PRIVATE src)
@@ -4541,6 +4642,27 @@ else()
 endif()
 add_test(NAME radio_health_client_test COMMAND radio_health_client_test)
 
+# The WSPR receiver on the radio (tools/wspr-agent): status and settings
+# JSON parse and are bounded, the settings body round-trips, a spot becomes
+# a SpotHub DxSpot, only LAN or tailnet addresses are tried, and the bundled
+# package matches its pin. Socket-free; writes only to a QTemporaryDir.
+qt_add_resources(WSPR_AGENT_TEST_RESOURCES resources/resources.qrc)
+add_executable(wspr_agent_test
+    tests/wspr_agent_test.cpp
+    src/core/WsprAgent.cpp
+    src/core/LegacyWaveformPackage.cpp
+    src/core/ZipArchive.cpp
+    ${WSPR_AGENT_TEST_RESOURCES}
+)
+target_include_directories(wspr_agent_test PRIVATE src)
+target_link_libraries(wspr_agent_test PRIVATE Qt6::Core Qt6::Network)
+if (USE_SYSTEM_ZLIB)
+    target_link_libraries(wspr_agent_test PRIVATE PkgConfig::zlib)
+else()
+    target_link_libraries(wspr_agent_test PRIVATE zlibstatic)
+endif()
+add_test(NAME wspr_agent_test COMMAND wspr_agent_test)
+
 # The Remote Access sign-in QR code: encodes the URL scannably (quiet zone,
 # finder patterns, theme-invariant colors), socket-free.
 add_executable(qr_code_image_test
@@ -4682,6 +4804,28 @@ target_include_directories(adaptive_engine_test PRIVATE src)
 target_link_libraries(adaptive_engine_test PRIVATE Qt6::Core)
 set_target_properties(adaptive_engine_test PROPERTIES AUTOMOC ON)
 add_test(NAME adaptive_engine_test COMMAND adaptive_engine_test)
+
+# not registered: manual operator-selected receive-only station diagnostic.
+add_executable(radio_station_live_probe EXCLUDE_FROM_ALL tests/radio_station_live_probe.cpp)
+target_link_libraries(radio_station_live_probe PRIVATE aethercore)
+
+# Socket-free monitor selection; no AudioEngine or audio device.
+add_executable(monitor_audio_router_test tests/monitor_audio_router_test.cpp src/models/MonitorAudioRouter.cpp)
+target_include_directories(monitor_audio_router_test PRIVATE src)
+target_link_libraries(monitor_audio_router_test PRIVATE Qt6::Core)
+add_test(NAME monitor_audio_router_test COMMAND monitor_audio_router_test)
+set_tests_properties(monitor_audio_router_test PROPERTIES TIMEOUT 15)
+
+# Socket-free independent model ownership and queued audio selection fencing.
+add_executable(station_receive_interruption_test tests/station_receive_interruption_test.cpp)
+target_link_libraries(station_receive_interruption_test PRIVATE aethercore)
+add_test(NAME station_receive_interruption_test COMMAND station_receive_interruption_test)
+set_tests_properties(station_receive_interruption_test PROPERTIES TIMEOUT 30)
+
+add_executable(radio_station_test tests/radio_station_test.cpp)
+target_link_libraries(radio_station_test PRIVATE aethercore)
+add_test(NAME radio_station_test COMMAND radio_station_test)
+set_tests_properties(radio_station_test PROPERTIES TIMEOUT 30)
 
 # not registered: manual positive live-radio diagnostic; requires --host and --output.
 add_executable(nrsp_live_probe EXCLUDE_FROM_ALL tests/nrsp_live_probe.cpp)
@@ -6058,7 +6202,7 @@ add_test(NAME kat500_meter_source_test COMMAND kat500_meter_source_test)
 add_executable(s_meter_geometry_test
     tests/s_meter_geometry_test.cpp
     src/gui/AnalogMeterFaceTheme.cpp
-    src/gui/RadioSwrValidityFilter.cpp
+    src/models/RadioSwrValidityFilter.cpp
     src/gui/SMeterGeometry.cpp
     src/gui/SMeterWidget.cpp
     src/core/ThemeManager.cpp
@@ -6620,6 +6764,16 @@ target_link_libraries(automation_lab_test PRIVATE aethercore Qt6::Widgets Qt6::T
 add_test(NAME automation_lab_test COMMAND automation_lab_test)
 set_tests_properties(automation_lab_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
+# `get tracedebug <pan> bins` at the bridge (#5806): refusals and the meta-call name.
+add_executable(automation_tracedebug_bins_test
+    tests/automation_tracedebug_bins_test.cpp
+)
+target_include_directories(automation_tracedebug_bins_test PRIVATE src)
+target_compile_definitions(automation_tracedebug_bins_test PRIVATE
+    AETHER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
+target_link_libraries(automation_tracedebug_bins_test PRIVATE aethercore Qt6::Widgets)
+add_test(NAME automation_tracedebug_bins_test COMMAND automation_tracedebug_bins_test)
+set_tests_properties(automation_tracedebug_bins_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 add_executable(automation_device_diagnostics_test
     tests/automation_device_diagnostics_test.cpp
@@ -8428,6 +8582,17 @@ endif()
 set_target_properties(log_manager_filter_rules_test PROPERTIES AUTOMOC ON)
 add_test(NAME log_manager_filter_rules_test COMMAND log_manager_filter_rules_test)
 
+add_executable(log_manager_file_test
+    tests/log_manager_file_test.cpp
+)
+target_include_directories(log_manager_file_test PRIVATE src tests)
+target_link_libraries(log_manager_file_test PRIVATE aethercore Qt6::Core)
+if(UNIX)
+    target_link_libraries(log_manager_file_test PRIVATE pthread)
+endif()
+set_target_properties(log_manager_file_test PROPERTIES AUTOMOC ON)
+add_test(NAME log_manager_file_test COMMAND log_manager_file_test)
+
 # Windows Firewall verdicts and Fix command, and failed external-request
 # logging (aether.network). Pure logic; the COM inspection compiles on Windows
 # only, so this runs everywhere.
@@ -8730,9 +8895,10 @@ set_tests_properties(system_info_dialog_test PROPERTIES
 add_executable(help_dialog_test
     tests/help_dialog_test.cpp
     src/gui/HelpDialog.cpp
-    src/gui/PersistentDialog.cpp
+    src/gui/CanonWindow.cpp
+    src/gui/ModemChrome.cpp
+    src/gui/DragValuePopup.cpp
     src/gui/FramelessResizer.cpp
-    src/gui/FramelessWindowTitleBar.cpp
     # HelpDialog.cpp calls ThemeManager::resolve() post-Phase-2 migration;
     # pull in the manager + its logging deps so the test links.
     src/core/ThemeManager.cpp
@@ -8740,8 +8906,9 @@ add_executable(help_dialog_test
     $<TARGET_OBJECTS:aether_test_settings>
     $<TARGET_OBJECTS:aether_test_log_manager>
     $<TARGET_OBJECTS:aether_test_async_log_writer>
+    ${THEME_TEST_RESOURCES}
 )
-target_include_directories(help_dialog_test PRIVATE src)
+target_include_directories(help_dialog_test PRIVATE src tests)
 # AETHER_SOURCE_DIR: the link test opens the real resources/help page.
 target_compile_definitions(help_dialog_test PRIVATE
     AETHER_SOURCE_DIR="${CMAKE_CURRENT_SOURCE_DIR}")
@@ -8751,6 +8918,29 @@ target_link_libraries(help_dialog_test PRIVATE
 set_target_properties(help_dialog_test PROPERTIES AUTOMOC ON)
 add_test(NAME help_dialog_test COMMAND help_dialog_test)
 set_tests_properties(help_dialog_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
+
+# SwrSweepLicenseDialog::confirm() — remembered-answer short-circuit and when
+# the answer is stored.  No MainWindow required; confirm() only needs
+# AppSettings and QDialog::exec(); the test dismisses the modal from a timer.
+add_executable(swr_sweep_license_dialog_test
+    tests/swr_sweep_license_dialog_test.cpp
+    src/gui/SwrSweepLicenseDialog.cpp
+    src/gui/PersistentDialog.cpp
+    src/gui/FramelessResizer.cpp
+    src/gui/FramelessWindowTitleBar.cpp
+    src/core/ThemeManager.cpp
+    src/core/ThemeSeedGenerated.cpp
+    $<TARGET_OBJECTS:aether_test_settings>
+    $<TARGET_OBJECTS:aether_test_log_manager>
+    $<TARGET_OBJECTS:aether_test_async_log_writer>
+)
+target_include_directories(swr_sweep_license_dialog_test PRIVATE src)
+target_link_libraries(swr_sweep_license_dialog_test PRIVATE
+    Qt6::Core Qt6::Widgets Qt6::Test
+)
+set_target_properties(swr_sweep_license_dialog_test PROPERTIES AUTOMOC ON)
+add_test(NAME swr_sweep_license_dialog_test COMMAND swr_sweep_license_dialog_test)
+set_tests_properties(swr_sweep_license_dialog_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen" TIMEOUT 60)
 
 # In-app links to docs.aethersdr.com (src/gui/DocsLinks.h, header-only): the
 # Help menu's documentation block, the docs pages the app links to, and the
@@ -8903,6 +9093,16 @@ add_test(NAME connection_panel_size_test COMMAND connection_panel_size_test)
 set_tests_properties(connection_panel_size_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
+add_executable(display_session_monitor_test
+    tests/display_session_monitor_test.cpp src/gui/DisplaySessionMonitor.cpp)
+target_include_directories(display_session_monitor_test PRIVATE src)
+target_link_libraries(display_session_monitor_test PRIVATE Qt6::Widgets)
+if(WIN32)
+    target_link_libraries(display_session_monitor_test PRIVATE Wtsapi32)
+endif()
+set_target_properties(display_session_monitor_test PROPERTIES AUTOMOC ON)
+add_test(NAME display_session_monitor_test COMMAND display_session_monitor_test)
+set_tests_properties(display_session_monitor_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 # The VPN source-path picker keeps the operator's own pick across family
 # flips while the address is edited. Socket-free (reads the interface list);
 # exit 77 without an adapter carrying an IPv6 GUA and ULA.
@@ -9853,6 +10053,15 @@ set_tests_properties(unified_title_bar_test PROPERTIES
     ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 if(APPLE)
+    add_executable(mac_native_window_title_test
+        tests/mac_native_window_title_test.mm
+        src/gui/mac/NativeWindowTitle.mm)
+    target_include_directories(mac_native_window_title_test PRIVATE src)
+    target_link_libraries(mac_native_window_title_test PRIVATE Qt6::Widgets "-framework AppKit")
+    add_test(NAME mac_native_window_title_test COMMAND mac_native_window_title_test)
+    # A hidden Cocoa window checks native ownership; offscreen cannot reach AppKit.
+    set_tests_properties(mac_native_window_title_test PROPERTIES SKIP_RETURN_CODE 77 TIMEOUT 30)
+
     foreach(titlebar_target IN ITEMS unified_title_bar_test titlebar_headphone_mute_test hl2_pc_audio_lock_test
             mixer_control_availability_test)
         target_sources(${titlebar_target} PRIVATE src/gui/mac/NativeWindowTitle.mm)
@@ -10648,6 +10857,10 @@ if(TARGET Qt6::WebSockets)
 endif()
 
 set(AETHER_SETTINGS_CONSUMERS
+    radio_station_test
+    station_receive_interruption_test
+    radio_station_live_probe
+    bandstack_cat_controls_test
     two_tone_tune_gate_test
     update_controller_test
     update_installer_test
@@ -10805,6 +11018,8 @@ set(AETHER_SETTINGS_CONSUMERS
     theme_manager_test
     canon_window_test
     callsign_lookup_dialog_test
+    support_dialog_test
+    theme_editor_dialog_test
     canon_message_box_test
     shortcut_dialog_test
     reset_settings_prompts_test
@@ -10867,6 +11082,7 @@ set(AETHER_SETTINGS_CONSUMERS
     memory_import_test
     transmit_model_apd_test
     help_dialog_test
+    swr_sweep_license_dialog_test
     flex_control_dialog_size_test
     aethercontrol_window_test
     multiflex_dashboard_window_test
@@ -10886,6 +11102,7 @@ set(AETHER_SETTINGS_CONSUMERS
     workspace_controller_test
     mini_pan_widget_test
     log_manager_filter_rules_test
+    log_manager_file_test
     bandplan_voice_labels_test
     bandplan_usage_resource_test
     vkamp_connection_test
@@ -10929,6 +11146,7 @@ set(AETHER_AUTOMATION_SERVER_TESTS
     automation_sensitive_grab_command_test
     automation_ping_build_identity_test
     automation_gauge_verb_test
+    automation_tracedebug_bins_test
     automation_persist_diagnostics_test
     automation_server_gesture_test
     automation_device_diagnostics_test
@@ -11587,17 +11805,6 @@ if(Qt6WebSockets_FOUND)
     target_include_directories(web888_live_probe PRIVATE src tests)
     target_link_libraries(web888_live_probe PRIVATE aethercore Qt6::Core Qt6::Network)
 endif()
-
-add_executable(display_session_monitor_test
-    tests/display_session_monitor_test.cpp src/gui/DisplaySessionMonitor.cpp)
-target_include_directories(display_session_monitor_test PRIVATE src)
-target_link_libraries(display_session_monitor_test PRIVATE Qt6::Widgets)
-if(WIN32)
-    target_link_libraries(display_session_monitor_test PRIVATE Wtsapi32)
-endif()
-set_target_properties(display_session_monitor_test PROPERTIES AUTOMOC ON)
-add_test(NAME display_session_monitor_test COMMAND display_session_monitor_test)
-set_tests_properties(display_session_monitor_test PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen")
 
 # Shared dialogs also fit the available tablet screen on rotation. Standalone
 # widget tests compile those dialogs directly, so carry their shared helper.

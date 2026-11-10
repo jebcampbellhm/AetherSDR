@@ -22,27 +22,52 @@ Use **Connect by IP** for:
 *The Connect by IP card, with a documentation address typed in.*
 
 1. Open the **Connect to Radio** window: **File → Connect to Radio...**, or the **+** button beside the title bar's radio tabs → **Connect manually…**.
-2. Choose the **Connect by IP** card ("Best for VPN or routed station access when you already know the radio IP").
+2. Choose the **Connect by IP** card.
 
 The **Radio IP address** group starts with two rows:
 
 | Row | What to enter |
 |-----|---------------|
-| **Radio type:** | The radio family to look for: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)**, **Web-888**, **SDRplay nRSP-ST** or **RTL-SDR (USB)**. Only this family is contacted. |
+| **Radio type:** | The radio family to connect: **FlexRadio**, **Hermes-Lite 2**, **ANAN-G2**, **Icom (network)**, **Web-888**, **SDRplay nRSP-ST** or **RTL-SDR (USB)**. Only this family is contacted. |
 | **Radio IP:** | The IP address or host name, for example `10.0.0.25`. |
 
 **RTL-SDR (USB)** appears only in builds that include the RTL-SDR backend. Choosing **Icom (network)** adds its connection rows. **ANAN-G2** shows a pointer to **Settings → Radio Setup... → Radio → ANAN Front End**, where its receive options are configured before connecting; see [Networked Icom](./networked-icom.md) and [ANAN-G2](./anan-g2.md). For every family's status, see [Supported Radios](./supported-radios.md).
 
+Choosing **SDRplay nRSP-ST** adds optional **Username:** and **Password:**
+fields for the radio's streaming account. The password is not saved. See
+[SDRplay nRSP-ST](./nrsp-st.md) for authentication and control permissions.
+
 ## Using Connect by IP
 
-### Connecting to Web-888 or nRSP-ST
+### Connecting to a Web-888
 
-Choose the receiver in **Radio type**, then enter its address. Web-888 uses
-its HTTP port (usually **8073**) and optional user password. nRSP-ST uses
-its streaming-account username and password. Both connect directly; no
-host daemon or Demo session is required. See [Web-888](./kiwisdr-and-web-888.md)
-and [nRSP-ST](./nrsp-st.md) for their receive capabilities and permissions.
-Credentials are session-only in builds without an operating-system keychain.
+Choose **Web-888**, enter its IP address and HTTP port (usually **8073**),
+then enter its user password if needed. Leave the password blank to use the
+saved password or connect without one. Click **Connect by IP**, or press Enter
+in the password field. The receiver opens directly with one receive slice
+and one spectrum/waterfall; no Demo session is needed. Passwords are saved
+only in the operating system keychain after an accepted connection.
+
+Leave **Source path** on **Auto**: Web-888 follows the system's network route.
+**Use low bandwidth mode** is unavailable for this receiver transport.
+Use a numeric IPv4 or IPv6 address in this form; enter the port separately.
+The receive tuning range is **1 Hz–30.72 MHz**.
+Speaker playback starts with about **360 ms** of buffered audio to smooth
+bursty network delivery. This adds a short delay when starting or recovering
+an exhausted stream. Audio resumes when the reserve refills.
+
+Band selection updates the waterfall view. Dragging or zooming the waterfall
+changes its displayed center/span independently of receive-slice tuning; incoming
+rows retain that requested view. To tune reception, use the slice frequency or
+click a signal in the waterfall.
+
+### Connecting to nRSP-ST
+
+Choose **SDRplay nRSP-ST**, enter the receiver address and streaming-account
+username and password. This connects directly; no host daemon is required.
+See [nRSP-ST](./nrsp-st.md) for receive capabilities and permissions.
+Credentials for both receiver families remain session-only in builds without
+an operating-system keychain, including the current iPad build.
 
 ### Connecting to a FlexRadio
 
@@ -124,6 +149,111 @@ AetherSDR may be using the wrong adapter to reach the radio.
 Spectrum and waterfall packets are larger than the tunnel allows, so they are dropped while the smaller audio packets get through.
 
 1. Lower **Network MTU**; see [Low Bandwidth Connections](./low-bandwidth-connections.md).
+
+## Additional receivers (experimental station build)
+
+The multi-radio station development build adds **File → Additional receivers…**.
+Open this dock and choose **Add receiver…** to connect a receiver without
+replacing the primary radio. Select its radio type and enter its address and
+credentials in the normal connection form. Up to two additional receiver panels
+can remain alongside the main radio's display.
+
+Each panel owns its waterfalls, receive slices, frequency, mode and filter
+edges. Selecting a slice or clicking its spectrum affects that receiver only.
+If a waterfall is removed or replaced, its pending tuning gestures are discarded
+so they cannot change a replacement waterfall's slices. Removing a receiver also
+discards its pending display updates.
+Use the panel's close button to disconnect and remove it. Closing the dock only
+hides it; its receivers continue running until removed or AetherSDR exits.
+
+If a receiver disconnects or its connection fails, click **Reconnect…** in that
+panel. Confirm its original radio type, address and port in the fresh connection
+form, then connect. Saved credentials remain available through the normal
+password store; you can enter a corrected password if needed. This keeps the
+same panel and listening selection, and other receivers keep running. To change
+to a different receiver, remove the panel and use **Add receiver…**. Reconnect is
+unavailable while connected or while an attempt is in progress.
+
+Extra waterfalls start with the primary display's current appearance. Their
+display adjustments stay local for the life of each waterfall and do not change
+the primary display or another receiver. These extra display preferences are
+not yet saved across removal or restart.
+
+Use **Listen to:** to choose **Primary radio**, one additional receiver, or
+**Off**. Only that radio feeds the main speaker route; changing the selection
+discards queued audio from the previous choice. Removing the selected receiver
+sets the selector to **Off**. Adding a receiver does not change the selection.
+The existing **PC Audio** switch must also be on; choosing a radio does not turn
+it on. Decoder/recording feeds keep their own radio source. A selected additional
+receiver can play while the primary radio is disconnected; primary reconnects
+do not restart that receiver's speaker output. Losing the selected receiver or
+choosing Off releases the live receiver's speaker output. The speaker DSP
+controls remain shared. An intentional local recording/preview playback can
+still use the shared output while live reception is Off.
+
+For the Icom/Web-888/nRSP-ST station, connect the **Icom as the primary radio**,
+then add the two SDRs here. Opening Additional receivers initially disables
+software transmit. Check **Allow transmit on primary radio** to designate the
+connected primary radio; checking it does not transmit. Its normal transmit
+controls and interlocks still apply. Disconnecting clears this permission;
+reconnecting requires a fresh selection. Hiding the dock does not change it.
+
+Additional sessions are receive-only at the transmit engine, including keyboard,
+CAT and queued input paths. Selecting a receiver or changing **Listen to:**
+does not move the transmit designation. Unchecking permission stops local TX
+and invalidates queued keying/audio. This does not disable the radio's physical
+PTT, front-panel controls or other clients. If the stop is not confirmed,
+the existing recovery interlock remains closed; reconnect before transmitting
+again rather than treating the permission checkbox as a stop acknowledgment.
+When the primary reports transmission, the station pauses its local receive
+audio and decoder feeds for all three radios. Connections and waterfalls stay
+running. Queued receive audio and incomplete Web-888 decoder periods are
+discarded. The station waits for confirmed receive status before resuming;
+releasing a button or losing the connection does not confirm that transmission
+has stopped. The dock displays this waiting state. A resumed decoder stream
+starts a fresh segment; timed Web-888 jobs also need a fresh verified clock
+anchor. This does not enable timed decoding on unqualified firmware.
+This waiting state still applies if the primary disconnects during transmission;
+the independent speaker lifecycle does not bypass it.
+
+This is local audio/data muting, not RF protection, and cannot mute samples
+already sent to a speaker device or another program. Keep the hardware receive
+cutoff in your antenna arrangement. Icom Ethernet operation and transmit-status
+timing in a three-radio station have not yet been hardware validated.
+
+## Station radio bar and per-radio setup
+
+In the experimental station build, connect the IC-7300MK2 as the primary radio,
+then use **File → Additional receivers… → Add receiver…** for the Web888 and
+nRSP-ST. Up to two additional connections may be open. They may be different
+radio types or two instances of the same type; each keeps its own endpoint,
+credentials, slices and setup window.
+
+Additional receivers appear in the top radio bar with their endpoint and **RX
+only** label. Click one to reveal its receiver panel without disconnecting the
+others. Right-click a radio (or focus its tab and use the keyboard context-menu
+key) for **Add slice**, **Add waterfall**, **Listen to this radio**, and **Radio
+setup…**. Unavailable slice/waterfall actions stay dimmed. The receiver makes the
+final capacity decision; a refusal is displayed in its panel.
+
+**Radio Setup** includes a **Radio to configure** selector and **Add independent
+receiver…**. Choosing a radio opens that connection's own setup window, even if
+another radio has the same model name. Additional receivers expose supported
+radio settings; shared PC audio, station callsign/name, controller and transmit
+settings belong to the primary workspace. Their setup window closes when its
+receiver disconnects. Use **Reconnect…** to reconnect at the original endpoint,
+or remove and add a receiver to change the endpoint.
+
+The Icom must be the primary radio in this arrangement. Additional radios remain
+receive-only. **Allow transmit on primary radio** explicitly designates the
+primary; clicking another tab or selecting its audio never transfers transmit
+permission or keys a radio. **Listen to this radio** selects only the audio source;
+**PC Audio** must also be enabled by the operator. Exact IC-7300MK2 Ethernet and
+physical transmit/receive interruption still require hardware qualification.
+
+The current nRSP-ST backend supplies one slice per connection; its **Add slice**
+action is therefore disabled. Icom receiver counts depend on the model. Web888
+can request additional slices when its receiver slots are available.
 
 ## See also
 

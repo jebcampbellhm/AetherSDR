@@ -2,19 +2,47 @@
 #include "TestSettingsProfile.h"
 #include "FlexSquelchBridgeFixture.h"
 #include "gui/SpectrumWidget.h"
+#include "gui/SpectrumTraceBins.h"
 #include "gui/VfoWidget.h"
 #include "gui/SpectrumOverlayMenu.h"
 #include "gui/MainWindowHelpers.h"
+#include "gui/DisplaySettings.h"
+#include "gui/StationReceiverPanel.h"
+#include "gui/StationWorkspace.h"
+#include "gui/RadioSetupDialog.h"
+#include <QMenu>
+#include <QScrollArea>
+#include <QScrollBar>
+#include <QContextMenuEvent>
+#include <QTreeWidget>
+#include <QTreeWidgetItemIterator>
+#include <QAction>
+#include <QDir>
+#include <QFontDatabase>
+#include "gui/ConnectionPanel.h"
+#include "core/AppSettings.h"
+#include "core/SpectrumDecodeScale.h"
+#include "models/RadioSession.h"
+#ifdef AETHER_BACKEND_RTL
 #include "RtlInjectedDevice.h"
+#include "core/backends/rtl/RtlSdrBackend.h"
+#endif
 #include "core/backends/flex/FlexBackend.h"
 #include "core/backends/hl2/Hl2Backend.h"
-#include "core/backends/rtl/RtlSdrBackend.h"
 #include "models/SliceModel.h"
 #include "models/PanadapterModel.h"
 #include "models/BandPlanManager.h"
 #include <QImage>
 #include <QToolTip>
 #include <QPainter>
+#include <QMap>
+#include <QVariant>
+#include <QCheckBox>
+#include <QComboBox>
+#include <QPointer>
+#include <QEvent>
+#include <QLineEdit>
+#include <QElapsedTimer>
 
 #include <QApplication>
 #include <QElapsedTimer>
@@ -26,10 +54,18 @@
 #include <QPushButton>
 #include <cmath>
 #include <cstdio>
+#include <memory>
 
 using namespace AetherSDR;
 
 namespace AetherSDR {
+struct StationWorkspaceTestAccess {
+    static void add(StationWorkspace& workspace, const RadioInfo& info) { workspace.addReceiver(info, {}); }
+    static void open(StationWorkspace& workspace, int id) { workspace.showConnect(id); }
+    static RadioStation& station(StationWorkspace& workspace) { return workspace.m_station; }
+    static ConnectionPanel* form(StationWorkspace& workspace) { return workspace.m_connection; }
+    static StationReceiverPanel* panel(StationWorkspace& workspace, int id) { return workspace.m_panels.value(id); }
+};
 struct SpectrumOffscreenTestAccess {
     static QImage sqlImage(SpectrumWidget& widget) {
         QImage image(800, 300, QImage::Format_ARGB32);
@@ -107,8 +143,17 @@ struct SpectrumOffscreenTestAccess {
                              QPointF globalPos) {
         widget.applyAnchoredZoom(bandwidthFactor, globalPos);
     }
+    static void finishZoomSettle(SpectrumWidget& widget) {
+        widget.finishFrequencyRangeSettleUpdate();
+    }
+    // One in-window slice-drag tune step: edgePanTuneRequested with the
+    // centre unchanged.
+    static void sliceDragTuneStep(SpectrumWidget& widget, int x) {
+        widget.driveVfoDragTune(x, "test");
+    }
 };
 }
+#ifdef AETHER_BACKEND_RTL
 namespace AetherSDR::rtl {
 struct RtlCaptureBackendTestAccess {
     static void start(RtlSdrBackend& backend, std::unique_ptr<RtlSdrWorker::Device> device) {
@@ -119,6 +164,7 @@ struct RtlCaptureBackendTestAccess {
     static bool idle(const RtlSdrBackend& backend) { return !backend.m_capture.busy() && !backend.m_pendingDrag; }
 };
 }
+#endif
 namespace AetherSDR::hl2 {
 struct Hl2DspReadbackTestAccess {
     static void receiver(Hl2Backend& backend) {
@@ -158,7 +204,8 @@ int runPanPixelsAtRetinaScale()
         std::printf("[%s] %s\n", ok ? "OK" : "FAIL", name);
         failures += !ok;
     };
-    SpectrumWidget pan;
+    auto panStorage = std::make_unique<SpectrumWidget>();
+    auto& pan = *panStorage;
     pan.resize(1000, 600);
     const double ratio = pan.devicePixelRatioF();
     if (!near(ratio, 2.0)) {
@@ -179,17 +226,929 @@ int runPanPixelsAtRetinaScale()
     check(panXpixelsFor(&pan) == 3840, "pan pixels: a 2560-point pan (a 5K screen's full width) is capped at 3840");
     return failures ? 1 : 0;
 }
+
+// `get tracedebug <pan> bins` (#5806): the widget hands out the last frame as
+// it arrived, with the geometry it arrived under, and refuses while a pan or
+// zoom has not been followed by kSettledFrames frames.
+int runTraceBins()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", name);
+        failures += !ok;
+    };
+    constexpr int kSettled = static_cast<int>(SpectrumTraceBins::FrameCapture::kSettledFrames);
+    int frameNo = 0;
+    // Each frame distinct and sloped, so a reprojected copy cannot equal it.
+    const auto frame = [&frameNo]() {
+        ++frameNo;
+        QVector<float> bins(256);
+        for (int i = 0; i < bins.size(); ++i) {
+            bins[i] = -130.0f + 0.1f * static_cast<float>(i) + static_cast<float>(frameNo);
+        }
+        bins[64] = -40.0f - static_cast<float>(frameNo);
+        return bins;
+    };
+    const auto refusal = [](const QVariantMap& m) {
+        return m.value(QStringLiteral("refusal")).toString();
+    };
+    const auto sameBins = [](const QVariantMap& m, const QVector<float>& want) {
+        const QVariantList got = m.value(QStringLiteral("bins")).toList();
+        if (got.size() != want.size()) {
+            return false;
+        }
+        for (int i = 0; i < want.size(); ++i) {
+            if (got.at(i).toDouble() != static_cast<double>(want.at(i))) {
+                return false;
+            }
+        }
+        return true;
+    };
+    const auto nearHz = [](double a, double b) { return std::abs(a - b) < 1e-3; };
+
+    auto wStorage = std::make_unique<SpectrumWidget>();
+    auto& w = *wStorage;
+    w.resize(1000, 600);
+    w.setFrequencyRangeImmediate(14.100, 0.200);
+    check(refusal(w.traceBinsSnapshot()).contains(QLatin1String("no frame")),
+          "trace bins: refused before any frame");
+
+    QVector<float> last;
+    for (int i = 0; i < kSettled; ++i) {
+        last = frame();
+        w.updateSpectrum(last);
+    }
+    QVariantMap m = w.traceBinsSnapshot();
+    check(refusal(m).isEmpty() && sameBins(m, last),
+          "trace bins (a): settled frames are returned exactly as fed");
+    check(nearHz(m.value(QStringLiteral("centerHz")).toDouble(), 14'100'000.0)
+              && nearHz(m.value(QStringLiteral("spanHz")).toDouble(), 200'000.0)
+              && m.value(QStringLiteral("ageMs")).toLongLong() >= 0,
+          "trace bins (a): with the ingest geometry and a frame age");
+
+    // (b) A radio-echo zoom: setFrequencyRangeImmediate reprojects m_bins.
+    w.setFrequencyRangeImmediate(14.100, 0.100);
+    m = w.traceBinsSnapshot();
+    check(!refusal(m).isEmpty(), "trace bins (b): refused right after a zoom, before any new frame");
+    for (int i = 0; i < kSettled - 1; ++i) {
+        last = frame();
+        w.updateSpectrum(last);
+        check(!refusal(w.traceBinsSnapshot()).isEmpty(),
+              "trace bins (b): refused while fewer than kSettledFrames frames followed the zoom");
+    }
+    last = frame();
+    w.updateSpectrum(last);
+    m = w.traceBinsSnapshot();
+    check(refusal(m).isEmpty() && sameBins(m, last)
+              && nearHz(m.value(QStringLiteral("spanHz")).toDouble(), 100'000.0),
+          "trace bins (b): the kSettledFrames-th frame after the zoom is returned as fed, at the new span");
+
+    // (b) A centre-only snap (a large pan): m_bins is reprojected, not replaced.
+    w.setFrequencyRangeImmediate(14.160, 0.100);
+    check(!refusal(w.traceBinsSnapshot()).isEmpty(),
+          "trace bins (b): refused right after a large pan");
+    for (int i = 0; i < kSettled; ++i) {
+        last = frame();
+        w.updateSpectrum(last);
+    }
+    m = w.traceBinsSnapshot();
+    check(refusal(m).isEmpty() && sameBins(m, last)
+              && nearHz(m.value(QStringLiteral("centerHz")).toDouble(), 14'160'000.0),
+          "trace bins (b): settled again after the pan, at the new centre");
+
+    // (b) A local anchored zoom (trackpad/pinch path): in progress until it settles.
+    const QPointF anchor(w.mapToGlobal(QPoint(w.width() / 2, w.height() / 2)));
+    SpectrumOffscreenTestAccess::anchoredZoom(w, 1.5, anchor);
+    check(!refusal(w.traceBinsSnapshot()).isEmpty(),
+          "trace bins (b): refused during a local zoom gesture");
+    SpectrumOffscreenTestAccess::finishZoomSettle(w);
+    for (int i = 0; i < kSettled - 1; ++i) {
+        w.updateSpectrum(frame());
+    }
+    check(!refusal(w.traceBinsSnapshot()).isEmpty(),
+          "trace bins (b): refused after the gesture until kSettledFrames frames");
+    last = frame();
+    w.updateSpectrum(last);
+    m = w.traceBinsSnapshot();
+    check(refusal(m).isEmpty() && sameBins(m, last),
+          "trace bins (b): returned once the gesture's frames settled");
+
+    // (c) A pan-follow nudge animates the centre.
+    const double center = w.centerMhz();
+    w.setFrequencyRange(center + w.bandwidthMhz() * 0.05, w.bandwidthMhz());
+    check(refusal(w.traceBinsSnapshot()).contains(QLatin1String("animation")),
+          "trace bins (c): refused while the pan animation runs");
+    for (int i = 0; i < kSettled; ++i) {
+        w.updateSpectrum(frame());
+    }
+    check(refusal(w.traceBinsSnapshot()).contains(QLatin1String("animation")),
+          "trace bins (c): frames during the animation do not end the refusal");
+    wait(400);
+    check(!refusal(w.traceBinsSnapshot()).isEmpty(),
+          "trace bins (c): refused after the animation lands until new frames arrive");
+    for (int i = 0; i < kSettled; ++i) {
+        last = frame();
+        w.updateSpectrum(last);
+    }
+    m = w.traceBinsSnapshot();
+    check(refusal(m).isEmpty() && sameBins(m, last)
+              && nearHz(m.value(QStringLiteral("centerHz")).toDouble(), w.centerMhz() * 1e6),
+          "trace bins (c): returned after the animation at the landed centre");
+
+    // (d) rfoust's probe (#6720): frames queued by Receive Sync before a pan
+    // and delivered after it. Unflagged, as on 3c71caffb, they pass at the new
+    // centre; flagged as held they are refused until kSettledFrames unheld.
+    {
+        auto qStorage = std::make_unique<SpectrumWidget>();
+        auto& q = *qStorage;
+        q.resize(1000, 600);
+        q.setFrequencyRangeImmediate(14.100, 0.200);
+        for (int i = 0; i < kSettled; ++i) {
+            q.updateSpectrum(frame());
+        }
+        QList<QVector<float>> queued;
+        for (int i = 0; i < kSettled; ++i) {
+            queued.append(frame());
+        }
+        q.setFrequencyRangeImmediate(14.160, 0.200);
+        for (const auto& f : queued) {
+            q.updateSpectrum(f);
+        }
+        QVariantMap qm = q.traceBinsSnapshot();
+        check(refusal(qm).isEmpty()
+                  && nearHz(qm.value(QStringLiteral("centerHz")).toDouble(), 14'160'000.0),
+              "trace bins (d): unflagged queued frames pass at the new centre (the defect)");
+        q.setFrequencyRangeImmediate(14.220, 0.200);
+        for (const auto& f : queued) {
+            q.updateSpectrum(f, {}, true);
+        }
+        check(refusal(q.traceBinsSnapshot()).contains(QLatin1String("held by Receive Sync")),
+              "trace bins (d): held frames are refused");
+        for (int i = 0; i < kSettled - 1; ++i) {
+            q.updateSpectrum(frame());
+        }
+        check(!refusal(q.traceBinsSnapshot()).isEmpty(),
+              "trace bins (d): the count restarts after held frames");
+        last = frame();
+        q.updateSpectrum(last);
+        qm = q.traceBinsSnapshot();
+        check(refusal(qm).isEmpty() && sameBins(qm, last),
+              "trace bins (d): unheld frames are accepted after kSettledFrames");
+    }
+
+    // The encoder fields are the frame's, not the widget's current range.
+    {
+        auto eStorage = std::make_unique<SpectrumWidget>();
+        auto& e = *eStorage;
+        e.resize(1000, 600);
+        e.setFrequencyRangeImmediate(7.100, 0.200);
+        e.setEncoderDbmRange(-140.0f, -20.0f, 1);
+        for (int i = 0; i < kSettled; ++i) {
+            e.updateSpectrum(frame(), SpectrumDecodeScale{-140.0f, -20.0f, 1});
+        }
+        e.setEncoderDbmRange(-150.0f, -30.0f, 2);
+        const QVariantMap em = e.traceBinsSnapshot();
+        check(refusal(em).isEmpty()
+                  && em.value(QStringLiteral("encoderMinDbm")).toFloat() == -140.0f
+                  && em.value(QStringLiteral("encoderMaxDbm")).toFloat() == -20.0f,
+              "trace bins: the encoder range is the one the returned frame was decoded with");
+    }
+
+    // clearDisplay (disconnect, profile load) drops the captured frame.
+    w.clearDisplay();
+    check(refusal(w.traceBinsSnapshot()).contains(QLatin1String("no frame")),
+          "trace bins: refused as no frame after clearDisplay");
+    for (int i = 0; i < kSettled; ++i) {
+        last = frame();
+        w.updateSpectrum(last);
+    }
+    m = w.traceBinsSnapshot();
+    check(refusal(m).isEmpty() && sameBins(m, last), "trace bins: returned again after new frames");
+
+    // A slice-drag tune step leaves the pan where it is: no geometry change.
+    {
+        const quint64 settledBefore = m.value(QStringLiteral("settledFrames")).toULongLong();
+        SpectrumOffscreenTestAccess::sliceDragTuneStep(w, w.width() / 3);
+        const QVariantMap after = w.traceBinsSnapshot();
+        check(refusal(after).isEmpty()
+                  && after.value(QStringLiteral("settledFrames")).toULongLong() == settledBefore,
+              "trace bins: a slice-drag tune step with an unchanged centre keeps the settle count");
+    }
+
+    // Confirmation mode: a sent request changes nothing until the radio's echo.
+    {
+        auto fStorage = std::make_unique<SpectrumWidget>();
+        auto& f = *fStorage;
+        f.resize(1000, 600);
+        f.setPanGeometryConfirmationRequired(true);
+        f.observeFrequencyRange(10.120, 0.200);
+        double reqCenter = -1.0;
+        double reqSpan = -1.0;
+        QObject::connect(&f, &SpectrumWidget::frequencyRangeChangeRequested, &f,
+                         [&](double c, double b) { reqCenter = c; reqSpan = b; });
+        for (int i = 0; i < kSettled; ++i) {
+            f.updateSpectrum(frame());
+        }
+        check(refusal(f.traceBinsSnapshot()).isEmpty(), "trace bins (confirm): settled before the request");
+        const QPointF mid(f.mapToGlobal(QPoint(f.width() / 2, f.height() / 2)));
+        SpectrumOffscreenTestAccess::anchoredZoom(f, 0.5, mid);
+        SpectrumOffscreenTestAccess::finishZoomSettle(f);
+        check(reqSpan > 0.0 && nearHz(f.bandwidthMhz() * 1e6, 200'000.0),
+              "trace bins (confirm): the zoom is requested, not applied");
+        for (int i = 0; i < kSettled; ++i) {
+            f.updateSpectrum(frame());
+        }
+        check(refusal(f.traceBinsSnapshot()).contains(QLatin1String("not yet confirmed")),
+              "trace bins (confirm): frames before the echo do not end the refusal");
+        f.observeFrequencyRange(reqCenter, reqSpan);
+        check(!refusal(f.traceBinsSnapshot()).isEmpty(),
+              "trace bins (confirm): refused right after the echo moves the geometry");
+        for (int i = 0; i < kSettled; ++i) {
+            last = frame();
+            f.updateSpectrum(last);
+        }
+        m = f.traceBinsSnapshot();
+        check(refusal(m).isEmpty() && sameBins(m, last)
+                  && nearHz(m.value(QStringLiteral("spanHz")).toDouble(), reqSpan * 1e6),
+              "trace bins (confirm): returned after the echo and settled frames, at the echoed span");
+        // An echo that never comes stops refusing after the guard.
+        SpectrumOffscreenTestAccess::anchoredZoom(f, 0.5, mid);
+        SpectrumOffscreenTestAccess::finishZoomSettle(f);
+        for (int i = 0; i < kSettled; ++i) {
+            f.updateSpectrum(frame());
+        }
+        check(refusal(f.traceBinsSnapshot()).contains(QLatin1String("not yet confirmed")),
+              "trace bins (confirm): a request without an echo is refused");
+        wait(static_cast<int>(SpectrumTraceBins::FrameCapture::kRequestEchoGuardMs) + 200);
+        check(refusal(f.traceBinsSnapshot()).isEmpty(),
+              "trace bins (confirm): a lost echo stops refusing after kRequestEchoGuardMs");
+        // A slice-drag tune step sends no pan command, so nothing awaits an echo.
+        SpectrumOffscreenTestAccess::sliceDragTuneStep(f, f.width() / 3);
+        check(refusal(f.traceBinsSnapshot()).isEmpty(),
+              "trace bins (confirm): a slice-drag tune step with an unchanged centre is not an unconfirmed request");
+    }
+    return failures ? 1 : 0;
+}
+}
+
+// Real widgets, isolated settings database, no window shown or radio opened.
+static int runStationDisplayIsolation()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", name);
+        failures += !ok;
+    };
+    auto& settings = AppSettings::instance();
+    settings.load();
+    QWidget parent;
+    auto primaryStorage = std::make_unique<SpectrumWidget>(&parent);
+    auto& primary = *primaryStorage;
+    primary.setSpectrumFrac(0.4f);
+    primary.setWfColorGain(50);
+    primary.setShowTuneGuides(false);
+    primary.setShowFpsMeters(false);
+    primary.setExtendedPassband(false);
+    primary.setExtendedTnf(false);
+    primary.setThreeDSliceDepth(false);
+    // A transient constructor must not run the primary slot's migration.
+    settings.setValue("DisplayFftAverage", "42");
+    settings.save();
+    const auto snapshot = [&] {
+        QMap<QString, QVariant> result;
+        for (const QString& key : settings.allKeysForDiagnostics()) { result.insert(key, settings.value(key)); }
+        return result;
+    };
+    const auto before = snapshot();
+    auto firstStorage = std::make_unique<SpectrumWidget>(&parent, SpectrumWidget::SettingsPersistence::SessionOnly);
+    auto& first = *firstStorage;
+    auto secondStorage = std::make_unique<SpectrumWidget>(&parent, SpectrumWidget::SettingsPersistence::SessionOnly);
+    auto& second = *secondStorage;
+    check(first.wfColorGain() == 50 && second.wfColorGain() == 50,
+          "extra panels seed the current appearance");
+    first.setSpectrumFrac(0.7f);
+    first.setWfColorGain(72);
+    first.setWfBlackLevel(31);
+    first.setWfAutoBlack(false);
+    first.setFftSmoothing(3);
+    first.setFftDecombHz(100);
+    first.setDssGain(40);
+    first.setDssFloorDepth(10);
+    first.setShowGrid(false);
+    first.setShowTuneGuides(true);
+    first.setShowFpsMeters(true);
+    first.setExtendedPassband(true);
+    first.setExtendedTnf(true);
+    first.setThreeDSliceDepth(true);
+    first.setWaterfallTimeMarkerSeconds(15);
+    first.setPanIndex(1);
+    first.loadSettings();
+    settings.save();
+    check(snapshot() == before, "extra panel edits and construction leave shared settings unchanged");
+    QString disk;
+    check(settings.readAppRowFromDisk("SpectrumSplitRatio", disk) && disk == "0.400"
+          && settings.readAppRowFromDisk("DisplayFftAverage", disk) && disk == "42",
+          "primary layout and legacy rows remain unchanged on disk");
+    check(std::abs(first.spectrumFrac() - 0.7f) < 0.001f && first.wfColorGain() == 72
+          && first.waterfallTimeMarkerSeconds() == 15 && first.fftSmoothing() == 3,
+          "local edits survive reload and pan-index changes");
+    check(!primary.showTuneGuides() && !primary.showFpsMeters() && !primary.extendedPassband()
+          && !primary.extendedTnf() && !primary.threeDSliceDepth()
+          && !second.showTuneGuides() && !second.showFpsMeters() && second.wfColorGain() == 50,
+          "local edits do not propagate to primary or another receiver");
+    primary.setShowTuneGuides(true);
+    primary.setShowFpsMeters(true);
+    primary.setExtendedPassband(true);
+    primary.setExtendedTnf(true);
+    primary.setThreeDSliceDepth(true);
+    primary.setSpectrumFrac(0.3f);
+    primary.setWfColorGain(60);
+    second.loadSettings();
+    check(!second.showTuneGuides() && !second.showFpsMeters() && !second.extendedPassband()
+          && !second.extendedTnf() && !second.threeDSliceDepth() && second.wfColorGain() == 50
+          && std::abs(second.spectrumFrac() - 0.4f) < 0.001f,
+          "primary edits and global display broadcasts cannot overwrite extra receivers");
+    check(settings.readAppRowFromDisk("SpectrumSplitRatio", disk) && disk == "0.300"
+          && DisplaySettings::extendedPassband(), "primary display settings still persist");
+    primary.prepareForShutdown(); first.prepareForShutdown(); second.prepareForShutdown();
+
+    // Identical per-radio stream IDs must still address different view owners.
+    RadioSession firstRadio, secondRadio;
+    QString fixtureError;
+    check(firstRadio.radioModel().automationApplySliceFixture(0, QStringLiteral("A"), &fixtureError),
+          "offline receive slice fixture created without a transport connection");
+    PanadapterModel firstPan(QStringLiteral("0x40000000"));
+    PanadapterModel secondPan(QStringLiteral("0x40000000"));
+    StationReceiverPanel firstPanel(&firstRadio), secondPanel(&secondRadio);
+    const auto beforePanels = snapshot();
+    emit firstRadio.radioModel().panadapterAdded(&firstPan);
+    emit secondRadio.radioModel().panadapterAdded(&secondPan);
+    auto* firstView = firstPanel.findChild<SpectrumWidget*>();
+    auto* secondView = secondPanel.findChild<SpectrumWidget*>();
+    check(firstView && secondView && firstView != secondView, "receiver panels create independent views");
+    if (firstView && secondView) {
+        firstView->resize(800, 300); secondView->resize(800, 300);
+        firstView->setSpectrumFrac(0.8f);
+        check(snapshot() == beforePanels, "production receiver panels select isolated display preferences");
+        RadioCapabilities caps;
+        caps.radioOwnsDbmScale = false;
+        caps.panAmplitude.emplace();
+        caps.panAmplitude->binsAbsolute = true;
+        emit firstRadio.radioModel().capabilitiesChanged(true, caps);
+        check(!firstView->radioOwnsDbmScale() && firstView->panBinsAbsolute()
+              && secondView->radioOwnsDbmScale() && !secondView->panBinsAbsolute(),
+              "display scale policy follows only its owning radio");
+        emit firstRadio.radioModel().panFeedSpectrumReady(firstPan.panStreamId(),
+            QVector<float>(256, -104.0f), 0, SpectrumDecodeScale{});
+        check(!SpectrumOffscreenTestAccess::corrected(*firstView).isEmpty()
+              && SpectrumOffscreenTestAccess::corrected(*secondView).isEmpty(),
+              "identical stream IDs on different radios do not cross-feed spectrum");
+        auto* fixtureSlice = firstRadio.radioModel().slice(0);
+        int tuneIntents = 0;
+        if (!fixtureSlice) { return 1; }
+        QObject::connect(fixtureSlice, &SliceModel::frequencyCommandIssued, &firstPanel,
+                         [&](double) { ++tuneIntents; });
+        // Queue the actual widget signal, then retire/reuse the pan ID before
+        // its delivery. The old PanadapterModel deliberately stays alive.
+        auto delayedGesture = std::unique_ptr<QThread>(QThread::create([firstView] {
+            emit firstView->frequencyClicked(14.100000);
+        }));
+        delayedGesture->start(); delayedGesture->wait();
+        const QPointer<SpectrumWidget> retiredView(firstView);
+        emit firstRadio.radioModel().panadapterRemoved(firstPan.panId());
+        PanadapterModel replacement(firstPan.panId());
+        emit firstRadio.radioModel().panadapterAdded(&replacement);
+        SpectrumWidget* replacementView = nullptr;
+        for (auto* candidate : firstPanel.findChildren<SpectrumWidget*>()) {
+            if (candidate != firstView) { replacementView = candidate; }
+        }
+        check(replacementView != nullptr, "same pan ID can receive a new waterfall widget");
+        if (!replacementView) { return 1; }
+        QCoreApplication::processEvents();
+        check(tuneIntents == 0, "queued gesture from a retired waterfall cannot tune a replacement with the same pan ID");
+        const int beforeCurrentGesture = tuneIntents;
+        emit replacementView->frequencyClicked(14.101000);
+        check(tuneIntents == beforeCurrentGesture + 1, "current waterfall still sends its own receive-tuning intent");
+        const int beforeReuse = tuneIntents;
+        auto reusedModelGesture = std::unique_ptr<QThread>(QThread::create([replacementView] {
+            emit replacementView->frequencyClicked(14.102000);
+        }));
+        reusedModelGesture->start(); reusedModelGesture->wait();
+        const QPointer<SpectrumWidget> retiredReplacement(replacementView);
+        emit firstRadio.radioModel().panadapterRemoved(replacement.panId());
+        emit firstRadio.radioModel().panadapterAdded(&replacement);
+        firstView = nullptr;
+        for (auto* candidate : firstPanel.findChildren<SpectrumWidget*>()) {
+            if (candidate != retiredView.data() && candidate != retiredReplacement.data()) { firstView = candidate; }
+        }
+        check(firstView != nullptr, "same pan model can receive a replacement waterfall widget");
+        if (!firstView) { return 1; }
+        QCoreApplication::processEvents();
+        check(tuneIntents == beforeReuse, "reusing the same pan model cannot revive its old widget's queued gesture");
+        emit firstView->frequencyClicked(14.103000);
+        check(tuneIntents == beforeReuse + 1, "replacement view for the reused model still sends tuning intent");
+        emit firstRadio.radioModel().capabilitiesChanged(true, caps);
+        emit firstRadio.radioModel().panFeedSpectrumReady(replacement.panStreamId(),
+            QVector<float>(256, -104.0f), 0, SpectrumDecodeScale{});
+        emit replacement.infoChanged(14.2, 0.2);
+        check(firstView->centerMhz() == 14.2 && firstView->bandwidthMhz() == 0.2,
+              "current pan still delivers confirmed geometry");
+        QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+        const auto retained = SpectrumOffscreenTestAccess::corrected(*firstView);
+        const double retainedCenter = firstView->centerMhz();
+        const double retainedSpan = firstView->bandwidthMhz();
+        const float retainedLevel = firstView->refLevel();
+        const float retainedRange = firstView->dynamicRange();
+        PanadapterModel latePan(QStringLiteral("0x40000001"));
+        auto delayedModelUpdate = std::unique_ptr<QThread>(QThread::create([&] {
+            emit firstRadio.radioModel().panFeedSpectrumReady(replacement.panStreamId(),
+                QVector<float>(256, -54.0f), 0, SpectrumDecodeScale{});
+            emit firstRadio.radioModel().capabilitiesChanged(false, caps);
+            emit replacement.infoChanged(28.4, 0.1);
+            emit replacement.levelChanged(-60.0f, 0.0f);
+            emit firstRadio.radioModel().panadapterAdded(&latePan);
+            emit firstRadio.radioModel().sliceAdded(fixtureSlice);
+            emit firstRadio.radioModel().panadapterRemoved(replacement.panId());
+        }));
+        delayedModelUpdate->start(); delayedModelUpdate->wait();
+        const qsizetype retainedViews = firstPanel.findChildren<SpectrumWidget*>().size();
+        firstPanel.detach();
+        QCoreApplication::processEvents();
+        check(SpectrumOffscreenTestAccess::corrected(*firstView) == retained
+              && !firstView->radioOwnsDbmScale(), "detached panel rejects already queued data and capability updates");
+        check(firstView->centerMhz() == retainedCenter && firstView->bandwidthMhz() == retainedSpan,
+              "detached panel rejects queued pan geometry updates");
+        check(firstView->refLevel() == retainedLevel && firstView->dynamicRange() == retainedRange,
+              "detached panel rejects queued pan level updates");
+        check(firstPanel.findChildren<SpectrumWidget*>().size() == retainedViews,
+              "detached panel ignores queued pan creation and removal");
+        emit firstRadio.radioModel().panFeedSpectrumReady(firstPan.panStreamId(),
+            QVector<float>(256, -64.0f), 0, SpectrumDecodeScale{});
+        emit firstRadio.radioModel().capabilitiesChanged(false, caps);
+        check(SpectrumOffscreenTestAccess::corrected(*firstView) == retained
+              && !firstView->radioOwnsDbmScale(), "detached panel rejects later model data and capability changes");
+    }
+    return failures ? 1 : 0;
+}
+
+
+static int runStationRadioBar()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", text); failures += !ok;
+    };
+    const auto waitFor = [](const auto& predicate) {
+        QElapsedTimer timer; timer.start();
+        while (!predicate() && timer.elapsed() < 2000) {
+            QCoreApplication::processEvents(); QThread::msleep(1);
+        }
+        return predicate();
+    };
+    ConnectionPanel discovery;
+    discovery.addDemoRadio();
+    const auto radios = discovery.automationLocalRadios();
+    if (radios.isEmpty()) { return 1; }
+    RadioInfo info = radios.first();
+    RadioModel primary;
+    StationWorkspace workspace(&primary);
+    StationWorkspaceTestAccess::add(workspace, info);
+    info.address = QHostAddress(QStringLiteral("127.0.0.2"));
+    StationWorkspaceTestAccess::add(workspace, info);
+    auto& station = StationWorkspaceTestAccess::station(workspace);
+    const auto ids = station.sessionIds();
+    if (ids.size() != 2) { return 1; }
+    auto* first = &station.session(ids.first())->radioModel();
+    auto* second = &station.session(ids.last())->radioModel();
+    const bool admitted = waitFor([&] {
+        return first->controlSessionCurrent(first->controlSession())
+            && second->controlSessionCurrent(second->controlSession());
+    });
+    check(admitted, "both demo control sessions finish admission before menu actions");
+    if (!admitted) { return 1; }
+    const bool slicesReady = waitFor([&] {
+        return first->slices().size() == 1 && second->slices().size() == 1;
+    });
+    check(slicesReady, "both demo receivers publish their initial slice before isolation checks");
+    if (!slicesReady) { return 1; }
+    const auto tabs = workspace.receiverTabs();
+    check(tabs.size() == 2 && tabs[0].id != tabs[1].id && tabs[0].name != tabs[1].name,
+        "same-type radios with identical reported serials have distinct tabs and endpoint labels");
+    check(workspace.receiverModel(tabs[0].id) == first && workspace.receiverModel(tabs[1].id) == second,
+        "each tab resolves only its owning model");
+    RadioTabBar strip;
+    strip.setRadios(tabs);
+    QString contextId;
+    QObject::connect(&strip, &RadioTabBar::radioContextMenuRequested, &strip,
+        [&](const QString& id, const QPoint&) { contextId = id; });
+    auto* tab = strip.findChild<RadioTab*>(QStringLiteral("radioTab_") + tabs[1].id);
+    if (!tab) { return 1; }
+    QContextMenuEvent event(QContextMenuEvent::Keyboard, QPoint(2,2), QPoint(2,2));
+    QApplication::sendEvent(tab, &event);
+    check(contextId == tabs[1].id, "keyboard context menu retains the selected receiver identity");
+    auto* menu = workspace.createRadioMenu(tabs[1].id, &workspace);
+    auto* add = menu->findChild<QAction*>(QStringLiteral("stationMenuAddSlice"));
+    check(add && !add->isEnabled(), "single-slice demo advertises no spare slice slot");
+    QString setupId;
+    QObject::connect(&workspace, &StationWorkspace::setupRequested, &workspace,
+        [&](const QString& id) { setupId = id; });
+    auto* setup = menu->findChild<QAction*>(QStringLiteral("stationMenuSetup"));
+    if (!setup) { return 1; }
+    setup->trigger();
+    check(setupId == tabs[1].id, "setup action targets its own radio instance");
+    {
+        RadioSetupDialog firstSetup(first), secondSetup(second);
+        const QList<QPair<QString, QString>> entries{{tabs[0].id, tabs[0].name}, {tabs[1].id, tabs[1].name}};
+        firstSetup.setStationRadios(entries, tabs[0].id, true);
+        secondSetup.setStationRadios(entries, tabs[1].id, true);
+        auto* firstPicker = firstSetup.findChild<QComboBox*>(QStringLiteral("stationSetupRadio"));
+        auto* secondPicker = secondSetup.findChild<QComboBox*>(QStringLiteral("stationSetupRadio"));
+        check(firstPicker && secondPicker && firstPicker->currentData() != secondPicker->currentData(),
+            "same-type radio setup windows keep independent selected identities");
+        bool sharedAudioDisabled = false;
+        for (auto* tree : secondSetup.findChildren<QTreeWidget*>()) {
+            QTreeWidgetItemIterator item(tree);
+            while (*item) { if ((*item)->text(0) == QStringLiteral("Audio")) { sharedAudioDisabled = (*item)->isDisabled(); } ++item; }
+        }
+        check(sharedAudioDisabled, "additional setup cannot change shared PC audio devices");
+        auto* stationName = secondSetup.findChild<QLineEdit*>(QStringLiteral("radioSetupStationName"));
+        const auto savedName = AppSettings::instance().value("StationName", "");
+        check(stationName && !stationName->isEnabled(), "shared station name is read-only in additional setup");
+        if (stationName) {
+            stationName->setText(QStringLiteral("Must not replace primary station"));
+            emit stationName->editingFinished();
+            check(AppSettings::instance().value("StationName", "") == savedName,
+                "stale editing callback cannot change the primary station identity");
+            stationName->setText(savedName.toString());
+        }
+        const QString preview = qEnvironmentVariable("AETHER_STATION_PREVIEW_DIR");
+        if (!preview.isEmpty()) {
+            strip.resize(900, 52); strip.show();
+            secondSetup.resize(960, 800); secondSetup.show();
+            QCoreApplication::processEvents();
+            check(strip.grab().save(QDir(preview).filePath(QStringLiteral("station-radio-bar.png"))),
+                "offscreen radio bar preview saved");
+            check(secondSetup.grab().save(QDir(preview).filePath(QStringLiteral("station-radio-setup.png"))),
+                "offscreen radio setup preview saved");
+        }
+    }
+    // A normalized in-memory terminal records slice requests; no wire peer,
+    // socket, sound device or transmit operation is involved.
+    class SliceTerminal final : public IRadioBackend {
+    public:
+        int creates = 0;
+        int capacity = 2;
+        bool live = true;
+        QString lastPan;
+        RadioCapabilities capabilities() const override {
+            RadioCapabilities caps; caps.maxSlices = capacity; caps.maxPanadapters = 1;
+            caps.canCreateSlices = true; return caps;
+        }
+        bool isConnected() const override { return live; }
+        void connectRadio(const RadioConnectRequest&) override { live = true; }
+        void disconnectRadio() override { live = false; }
+        bool createSlice(const QString& pan, double) override { ++creates; lastPan = pan; return true; }
+        void setSliceFrequency(int, double) override {}
+        void setSliceMode(int, const QString&) override {}
+        void setSliceFilter(int, int, int) override {}
+        void setSliceAgc(int, const QString&, int) override {}
+        void setPanCenter(const QString&, double, PanCenterIntent) override {}
+        void setKeying(bool, const TxCoordinator::Operation&, const TxCoordinator::Completion&) override {}
+        void invokeExtension(const QString&, const QString&, quint64, const QVariant&) override {}
+    };
+    second->disconnectFromRadio();
+    if (!waitFor([&] { return !second->isConnected(); })) { return 1; }
+    auto terminal = std::make_unique<SliceTerminal>();
+    auto* sink = terminal.get();
+    second->setBackendForTest(std::move(terminal), QStringLiteral("station-test"));
+    const QString panId = QStringLiteral("test:owned-pan");
+    emit sink->panCenterBandwidthChanged(panId, 14.1, 0.012);
+    SliceDelta slice;
+    slice.panId = panId; slice.frequency = 14.1; slice.mode = QStringLiteral("USB");
+    slice.inUse = true; slice.active = true;
+    emit sink->sliceChanged(0, slice);
+    auto* currentMenu = workspace.createRadioMenu(tabs[1].id, &workspace);
+    auto* currentAdd = currentMenu->findChild<QAction*>(QStringLiteral("stationMenuAddSlice"));
+    check(currentAdd && currentAdd->isEnabled(), "spare receive capacity enables Add slice");
+    if (!currentAdd) { return 1; }
+    currentAdd->trigger();
+    check(sink->creates == 1 && sink->lastPan == panId && first->slices().size() == 1,
+        "Add slice reaches only the selected receiver and its own pan");
+    sink->capacity = 1;
+    currentAdd->trigger();
+    check(sink->creates == 1, "capacity is rechecked when an already open menu is used");
+    sink->capacity = 2;
+    second->setBackendForTest(std::make_unique<SliceTerminal>(), QStringLiteral("station-test"));
+    auto* replacement = static_cast<SliceTerminal*>(second->backend());
+    emit replacement->panCenterBandwidthChanged(panId, 14.1, 0.012);
+    emit replacement->sliceChanged(0, slice);
+    currentAdd->trigger();
+    check(replacement->creates == 0,
+        "menu from a replaced backend cannot add a slice to the new session");
+
+    setupId.clear();
+    second->disconnectFromRadio();
+    if (!waitFor([&] { return !second->isConnected(); })) { return 1; }
+    setup->trigger();
+    check(setupId.isEmpty(), "open menu refuses setup after its connection is retired");
+    check(first->isConnected() && !first->stationTransmitAllowed() && !second->stationTransmitAllowed(),
+        "receiver menus do not disconnect the other radio or grant transmit");
+    station.removeSession(ids.last());
+    check(!workspace.receiverModel(tabs[1].id) && !workspace.activateReceiver(tabs[1].id),
+        "removed receiver identity cannot target the surviving radio");
+    station.removeSession(ids.first());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    return failures ? 1 : 0;
+}
+
+static int runStationReconnect()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", text); failures += !ok;
+    };
+    const auto waitFor = [](const auto& predicate) {
+        QElapsedTimer timer; timer.start();
+        while (!predicate() && timer.elapsed() < 2000) {
+            QCoreApplication::processEvents(); QThread::msleep(1);
+        }
+        return predicate();
+    };
+    // The built-in demo is the subject, not a peer emulating radio firmware.
+    // No sockets, AudioEngine or device output is opened by these sessions.
+    ConnectionPanel discovery;
+    discovery.addDemoRadio();
+    const auto radios = discovery.automationLocalRadios();
+    if (radios.isEmpty()) { return 1; }
+    RadioInfo firstInfo = radios.first();
+    RadioInfo secondInfo = firstInfo;
+    secondInfo.address = QHostAddress(QStringLiteral("127.0.0.2"));
+    RadioModel primary;
+    StationWorkspace workspace(&primary);
+    auto& station = StationWorkspaceTestAccess::station(workspace);
+    StationWorkspaceTestAccess::open(workspace, -1);
+    auto* firstForm = StationWorkspaceTestAccess::form(workspace);
+    if (!firstForm) { return 1; }
+    emit firstForm->connectRequested(firstInfo);
+    emit firstForm->connectRequested(firstInfo);
+    check(station.sessionIds().size() == 1, "a submitted form cannot create a duplicate receiver from a late reply");
+    if (station.sessionIds().size() != 1) { return 1; }
+    const int firstId = station.sessionIds().first();
+    auto* first = station.session(firstId);
+    if (!waitFor([&] { return first->radioModel().isConnected(); })) { return 1; }
+    auto* panel = StationWorkspaceTestAccess::panel(workspace, firstId);
+    auto* reconnect = panel->findChild<QPushButton*>(QStringLiteral("stationReconnectReceiver"));
+    check(reconnect && !reconnect->isEnabled(), "connected receiver disables Reconnect");
+    if (!reconnect) { return 1; }
+    first->radioModel().disconnectFromRadio();
+    const bool recoverable = waitFor([&] { return !first->radioModel().isConnected() && reconnect->isEnabled(); });
+    check(recoverable, "disconnected receiver exposes manual recovery");
+    if (!recoverable) { return 1; }
+    reconnect->click();
+    QPointer<ConnectionPanel> retiredForm(StationWorkspaceTestAccess::form(workspace));
+    if (!retiredForm) { return 1; }
+    QMetaObject::invokeMethod(retiredForm, [retiredForm, firstInfo] {
+        if (retiredForm) { emit retiredForm->connectRequested(firstInfo); }
+    }, Qt::QueuedConnection);
+    StationWorkspaceTestAccess::open(workspace, -1);
+    auto* addForm = StationWorkspaceTestAccess::form(workspace);
+    QCoreApplication::processEvents();
+    check(!first->radioModel().isConnected(), "superseded form cannot reconnect a receiver through a queued reply");
+    if (!addForm) { return 1; }
+    emit addForm->connectRequested(secondInfo);
+    if (station.sessionIds().size() != 2) { return 1; }
+    const int secondId = station.sessionIds().last();
+    auto* second = station.session(secondId);
+    if (!waitFor([&] { return second->radioModel().isConnected(); })) { return 1; }
+    auto* monitor = workspace.findChild<QComboBox*>(QStringLiteral("stationMonitorSource"));
+    monitor->setCurrentIndex(monitor->findData(secondId + 1));
+    emit monitor->activated(monitor->currentIndex());
+    reconnect->click();
+    auto* form = StationWorkspaceTestAccess::form(workspace);
+    if (!form || form == addForm) { return 1; }
+    const auto* host = form->findChild<QLineEdit*>(QStringLiteral("connectionManualIp"));
+    check(host && host->text() == firstInfo.address.toString(), "reconnect form restores its own receiver address");
+    auto* connectButton = form->findChild<QPushButton*>(QStringLiteral("connectionManualConnectButton"));
+    emit second->radioModel().connectionStateChanged(true);
+    check(connectButton && connectButton->isEnabled(), "another receiver's status cannot acknowledge the current connection form");
+    emit form->connectRequested(secondInfo);
+    check(!first->radioModel().isConnected() && second->radioModel().isConnected(),
+          "reconnect refuses a changed endpoint without disturbing either receiver");
+    emit form->connectWithOptionsRequested(firstInfo, QVariantMap{});
+    check(waitFor([&] { return first->radioModel().isConnected(); }) && station.sessionIds().size() == 2
+          && StationWorkspaceTestAccess::panel(workspace, firstId) == panel,
+          "fresh form reconnects the existing session and panel without consuming another slot");
+    check(second->radioModel().isConnected() && monitor->currentData().toInt() == secondId + 1
+          && !first->radioModel().stationTransmitAllowed(),
+          "other receiver, listening selection and receive-only permission survive reconnect");
+    first->radioModel().disconnectFromRadio();
+    if (!waitFor([&] { return !first->radioModel().isConnected() && reconnect->isEnabled(); })) { return 1; }
+    // An injected terminal holds a connect attempt pending. It has no parser,
+    // peer, socket or device; failures enter the real model's error slot.
+    class PendingConnect final : public IRadioBackend {
+    public:
+        int attempts = 0;
+        QVariantMap lastOptions;
+        RadioCapabilities capabilities() const override {
+            RadioCapabilities caps;
+            caps.connectionRecovery = ConnectionRecovery{ConnectionRecovery::Mode::Manual};
+            return caps;
+        }
+        bool isConnected() const override { return false; }
+        void connectRadio(const RadioConnectRequest& request) override { ++attempts; lastOptions = request.params; }
+        void disconnectRadio() override {}
+        void setKeying(bool, const TxCoordinator::Operation&, const TxCoordinator::Completion&) override {}
+        void setSliceFrequency(int, double) override {}
+        void setSliceMode(int, const QString&) override {}
+        void setSliceFilter(int, int, int) override {}
+        void setSliceAgc(int, const QString&, int) override {}
+        void setPanCenter(const QString&, double, PanCenterIntent) override {}
+        void invokeExtension(const QString&, const QString&, quint64, const QVariant&) override {}
+    };
+    auto pending = std::make_unique<PendingConnect>();
+    auto* terminal = pending.get();
+    first->radioModel().setBackendForTest(std::move(pending), firstInfo.family);
+    const auto reject = [&] {
+        return QMetaObject::invokeMethod(&first->radioModel(), "onConnectionError", Qt::DirectConnection,
+            Q_ARG(QString, QStringLiteral("Injected offline connection refusal")));
+    };
+    for (int attempt = 1; attempt <= 3; ++attempt) {
+        reconnect->click();
+        form = StationWorkspaceTestAccess::form(workspace);
+        if (!form || !form->isVisible()) { return 1; }
+        const QVariantMap options = attempt < 3
+            ? QVariantMap{{QStringLiteral("test.attemptTag"), attempt}} : QVariantMap{};
+        emit form->connectWithOptionsRequested(firstInfo, options);
+        check(terminal->attempts == attempt && first->radioModel().isConnectAttemptInFlight()
+              && !reconnect->isEnabled(), "pending attempt disables duplicate manual recovery");
+        check(attempt < 3 ? terminal->lastOptions.value(QStringLiteral("test.attemptTag")).toInt() == attempt
+                          : !terminal->lastOptions.contains(QStringLiteral("test.attemptTag")),
+              "each retry receives only its newly submitted options");
+        check(reject() && !first->radioModel().isConnectAttemptInFlight() && reconnect->isEnabled(),
+              "terminal error without disconnect immediately restores Reconnect");
+    }
+    check(second->radioModel().isConnected() && monitor->currentData().toInt() == secondId + 1,
+          "failed retries leave the other receiver and listening selection intact");
+    station.removeSession(firstId);
+    emit form->connectRequested(firstInfo);
+    check(station.sessionIds().size() == 1 && second->radioModel().isConnected(),
+          "late reply for a removed receiver cannot recreate it or disturb the other session");
+    station.removeSession(secondId);
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    return failures ? 1 : 0;
+}
+
+static int runStationTransmitPermission()
+{
+    // State/terminal recorder only: no protocol parser, peer, socket or device.
+    class Backend final : public IRadioBackend {
+    public:
+        bool connected{true};
+        bool canTransmit{true};
+        int keyCalls{0};
+        RadioCapabilities capabilities() const override {
+            RadioCapabilities caps; caps.canTransmit = canTransmit; return caps;
+        }
+        bool isConnected() const override { return connected; }
+        void connectRadio(const RadioConnectRequest&) override {}
+        void disconnectRadio() override { connected = false; }
+        void setSliceFrequency(int, double) override {}
+        void setSliceMode(int, const QString&) override {}
+        void setSliceFilter(int, int, int) override {}
+        void setSliceAgc(int, const QString&, int) override {}
+        void setPanCenter(const QString&, double, PanCenterIntent) override {}
+        void setKeying(bool, const TxCoordinator::Operation&, const TxCoordinator::Completion&) override { ++keyCalls; }
+        void invokeExtension(const QString&, const QString&, quint64, const QVariant&) override {}
+    };
+    int failures = 0;
+    const auto check = [&](bool ok, const char* text) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", text); failures += !ok;
+    };
+    RadioModel primary;
+    auto owned = std::make_unique<Backend>();
+    auto* backend = owned.get();
+    primary.setBackendForTest(std::move(owned), QStringLiteral("test"));
+    const auto microphoneProducer = primary.registerTxProducer(&primary, true);
+    auto microphone = primary.captureTxMedia(microphoneProducer);
+    const auto oldMicrophone = microphone;
+    {
+        StationWorkspace workspace(&primary);
+        QObject::connect(&workspace, &StationWorkspace::primaryTransmitPermissionChanged,
+                         &primary, [&](bool allowed) {
+            microphone = allowed ? primary.captureTxMedia(microphoneProducer) : TxCoordinator::Context{};
+        });
+        auto* permit = workspace.findChild<QCheckBox*>(QStringLiteral("stationTransmitPrimary"));
+        auto* monitor = workspace.findChild<QComboBox*>(QStringLiteral("stationMonitorSource"));
+        check(permit && permit->isEnabled() && !permit->isChecked() && !primary.stationTransmitAllowed(),
+              "opening station controls requires explicit primary transmit designation");
+        if (!permit || !monitor) { return 1; }
+        permit->click();
+        check(primary.stationTransmitAllowed() && backend->keyCalls == 0,
+              "primary designation grants eligibility without keying");
+        check(microphone.permitsDispatch(TxCoordinator::monotonicMs())
+              && !oldMicrophone.permitsDispatch(TxCoordinator::monotonicMs()),
+              "designation refreshes microphone authorization without reviving queued old audio");
+        monitor->setCurrentIndex(monitor->findData(-1));
+        emit monitor->activated(monitor->currentIndex());
+        check(primary.stationTransmitAllowed(), "listening selection cannot move transmit designation");
+        backend->canTransmit = false;
+        emit primary.capabilitiesChanged(true, backend->capabilities());
+        check(!primary.stationTransmitAllowed() && !permit->isEnabled() && !permit->isChecked(),
+              "receive-only capability revokes and disables designation");
+        backend->canTransmit = true;
+        emit primary.capabilitiesChanged(true, backend->capabilities());
+        check(permit->isEnabled() && !permit->isChecked(), "capability return cannot auto-designate");
+        permit->click();
+        backend->connected = false;
+        emit primary.connectionStateChanged(false);
+        check(!primary.stationTransmitAllowed() && !permit->isChecked() && !permit->isEnabled(),
+              "disconnect clears station transmit permission");
+        backend->connected = true;
+        emit primary.connectionStateChanged(true);
+        check(permit->isEnabled() && !primary.stationTransmitAllowed(), "reconnect requires fresh designation");
+        permit->click();
+    }
+    check(!primary.stationTransmitAllowed() && backend->keyCalls == 0,
+          "destroying station controls revokes permission without idle transport writes");
+    return failures ? 1 : 0;
+}
+
+// Exercise rotation and overflow without connecting to a radio.
+static int runTabletStationLayout()
+{
+    qputenv("AETHER_TABLET_UI", "1");
+    AppSettings::instance().load();
+    int failures = 0;
+    const auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", name);
+        failures += !ok;
+    };
+    RadioModel primary;
+    StationWorkspace workspace(&primary);
+    RadioSession receiver;
+    receiver.setSessionId(1);
+    receiver.setLabel(QStringLiteral("Additional receiver"));
+    StationReceiverPanel panel(&receiver);
+    const QString preview = qEnvironmentVariable("AETHER_STATION_PREVIEW_DIR");
+    for (const QSize size : {QSize(820, 1000), QSize(1180, 720)}) {
+        workspace.resize(size);
+        workspace.show();
+        panel.resize(size.width() - 48, 400);
+        panel.show();
+        QCoreApplication::processEvents();
+        check(workspace.width() == size.width(), "station workspace fits requested tablet width");
+        check(panel.width() == size.width() - 48, "receiver controls do not force tablet wider");
+        auto* scroll = panel.findChild<QScrollArea*>();
+        check(scroll && scroll->widget()->width() >= scroll->viewport()->width(),
+              "receiver controls retain their width inside a scrollable viewport");
+        for (auto* button : workspace.findChildren<QPushButton*>()) {
+            if (button->isVisible()) {
+                check(button->height() >= 44, "station action meets the 44-point touch target");
+            }
+        }
+        if (!preview.isEmpty()) {
+            const QString orientation = size.width() < size.height() ? "portrait" : "landscape";
+            check(workspace.grab().save(QDir(preview).filePath("tablet-station-" + orientation + ".png")),
+                  "tablet station preview saved");
+            check(panel.grab().save(QDir(preview).filePath("tablet-receiver-" + orientation + ".png")),
+                  "tablet receiver preview saved");
+        }
+    }
+    return failures ? 1 : 0;
 }
 
 int main(int argc, char** argv)
 {
     TestSettingsProfile profile("spectrum-confirmed-geometry");
+    if (!profile.isValid()) { return 2; }
     QApplication app(argc, argv);
+    for (const char* font : {":/fonts/Inter-Regular.ttf", ":/fonts/Inter-Bold.ttf"}) {
+        if (QFontDatabase::addApplicationFont(QString::fromLatin1(font)) < 0) { return 1; }
+    }
+    QApplication::setFont(QFont(QStringLiteral("Inter"), 10));
+    if (app.arguments().contains(QStringLiteral("--tablet-station-layout"))) {
+        return runTabletStationLayout();
+    }
+    if (app.arguments().contains(QStringLiteral("--station-radio-bar"))) {
+        return runStationRadioBar();
+    }
+    if (app.arguments().contains(QStringLiteral("--station-reconnect"))) {
+        return runStationReconnect();
+    }
+    if (app.arguments().contains(QStringLiteral("--station-transmit-permission"))) {
+        return runStationTransmitPermission();
+    }
+    if (app.arguments().contains(QStringLiteral("--station-display-isolation"))) {
+        return runStationDisplayIsolation();
+    }
     if (app.arguments().contains(QStringLiteral("--flex-squelch-bridge-fixture"))) {
         return runFlexSquelchBridgeFixture(app);
     }
     if (app.arguments().contains(QStringLiteral("--pan-pixels-retina"))) {
         return runPanPixelsAtRetinaScale();
+    }
+    if (app.arguments().contains(QStringLiteral("--trace-bins"))) {
+        return runTraceBins();
     }
     int failures = 0;
     const auto check = [&](bool ok, const char* name) {
@@ -197,7 +1156,8 @@ int main(int argc, char** argv)
         failures += !ok;
     };
     {
-        SpectrumWidget sql;
+        auto sqlStorage = std::make_unique<SpectrumWidget>();
+        auto& sql = *sqlStorage;
         sql.setSquelchScale(legacyDbmSquelchScale());
         sql.setAutoSquelchEnable(true);
         sql.setSquelchLine(true, 60);
@@ -251,7 +1211,8 @@ int main(int argc, char** argv)
     const DbmRangeTransition::Range original{-165, -35};
     for (const DbmRangeTransition::Range target : {
              DbmRangeTransition::Range{-127.5f, 2.5f}, {-180, -50}, {-170, -90}}) {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setNoiseFloorEnable(false);
         trace.setDbmRange(original.minDbm, original.maxDbm);
         trace.setEncoderDbmRange(original.minDbm, original.maxDbm, 1);
@@ -281,7 +1242,8 @@ int main(int argc, char** argv)
         trace.prepareForShutdown();
     }
     for (const bool gainChange : {true, false}) {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setNoiseFloorEnable(false);
         trace.setDbmRange(-165, -35);
         trace.setEncoderDbmRange(-165, -35, 1);
@@ -301,7 +1263,8 @@ int main(int argc, char** argv)
         trace.prepareForShutdown();
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setNoiseFloorEnable(false);
         trace.setDbmRange(-165, -35);
         trace.setEncoderDbmRange(-165, -35, 1);
@@ -334,7 +1297,8 @@ int main(int argc, char** argv)
         trace.prepareForShutdown();
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.resize(1000, 900);
         trace.setDbmRange(-135, -40);
         trace.setEncoderDbmRange(-135, -40);
@@ -401,7 +1365,8 @@ int main(int argc, char** argv)
         check(lockedRef > -100, "initial local floor lock was established");
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setDbmRange(-100, -16);
         trace.setEncoderDbmRange(-100, -16);
         trace.setNoiseFloorPosition(25);
@@ -447,7 +1412,8 @@ int main(int argc, char** argv)
     {
         // A pan another client owns: this session cannot request headroom, so
         // holding the baseline would stall auto floor for the whole session.
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setDbmRange(-100, -16);
         trace.setEncoderDbmRange(-100, -16);
         trace.setNoiseFloorPosition(25);
@@ -469,7 +1435,8 @@ int main(int argc, char** argv)
     {
         // The floor already sits at Flex's -180 dBm limit: no recovery can
         // come, so holding the baseline would stall auto floor for good.
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.setDbmRange(-180, -90);
         trace.setEncoderDbmRange(-180, -90);
         trace.setNoiseFloorPosition(25);
@@ -492,7 +1459,8 @@ int main(int argc, char** argv)
               "a floor already at -180 dBm is not held for a recovery that cannot come");
     }
     {
-        SpectrumWidget trace;
+        auto traceStorage = std::make_unique<SpectrumWidget>();
+        auto& trace = *traceStorage;
         trace.updateSpectrum(QVector<float>(32,-80));
         trace.updateSpectrum(QVector<float>(32,-20));
         check(std::abs(SpectrumOffscreenTestAccess::trace(trace).front()+59)<.001,
@@ -502,6 +1470,7 @@ int main(int argc, char** argv)
         trace.updateSpectrum(QVector<float>(32,-10));
         check(SpectrumOffscreenTestAccess::trace(trace)==QVector<float>(32,-10),
               "backend-averaged bins reach the displayed trace without a second EMA");
+#ifdef AETHER_BACKEND_RTL
         const auto caps=rtl::RtlSdrBackend().capabilities();
         const auto averaging=caps.backendPanAveraging.value_or(BackendPanAveraging{0,false,{},{}});
         auto* menu=trace.overlayMenu();
@@ -515,6 +1484,7 @@ int main(int argc, char** argv)
         check(avg && weighted && avg->accessibleDescription().isEmpty()
             && weighted->toolTip().contains("Weights recent"),
             "switching to an undeclared family restores its original wording");
+#endif
         trace.observeFrequencyRange(100.0, 0.01875);
         trace.updateSpectrum(QVector<float>(512, -80));
         QVector<float> capture(65536, -90);
@@ -560,7 +1530,8 @@ int main(int argc, char** argv)
         check(near(dss.rowCenterMhzAtAge(0) + dss.rowBandwidthMhzAtAge(0) / 2, 101.2),
             "a zoom preview preserves explicit coherent RF bounds instead of relabeling a padded preview frame");
     }
-    SpectrumWidget widget;
+    auto widgetStorage = std::make_unique<SpectrumWidget>();
+    auto& widget = *widgetStorage;
     widget.resize(1200, 600);
     widget.setBandwidthLimits(0.01, 2.16);
     widget.setPanGeometryConfirmationRequired(true);
@@ -685,6 +1656,7 @@ int main(int argc, char** argv)
     widget.observeFrequencyRange(460.3, 0.125);
     check(near(widget.centerMhz(), optimistic), "Flex retains stale-echo hold during drag");
     mouse(widget, QEvent::MouseButtonRelease, 300, 150);
+#ifdef AETHER_BACKEND_RTL
     // Real marker -> the owner dispatch helper -> RadioModel -> RTL worker.
     // Routing reveal as Range must fail: that request cannot leave capture.
     {
@@ -705,7 +1677,8 @@ int main(int argc, char** argv)
         SliceModel* slice = model.slice(0);
         PanadapterModel* pan = slice ? model.panadapter(slice->panId()) : nullptr;
         if (pan) {
-            SpectrumWidget reveal;
+            auto revealStorage = std::make_unique<SpectrumWidget>();
+            auto& reveal = *revealStorage;
             reveal.resize(1200, 600);
             reveal.setPanGeometryConfirmationRequired(true);
             int tunes = 0, reveals = 0;
@@ -778,6 +1751,9 @@ int main(int argc, char** argv)
         }
         backend.disconnectRadio();
     }
+#else
+    std::printf("[SKIP] RTL-specific backend rows: RTL-SDR is disabled in this build\n");
+#endif
     // Independent pan windows keep the historical Range dispatch. Offline
     // command capture and receiver state only: no Flex/Hermes connection.
     {
@@ -806,7 +1782,8 @@ int main(int argc, char** argv)
         plans.setActivePlan(QStringLiteral("IARU Region 1"));
         check(plans.activePlanName() == QStringLiteral("IARU Region 1"),
               "usage hover: IARU Region 1 plan loads from resources");
-        SpectrumWidget band;
+        auto bandStorage = std::make_unique<SpectrumWidget>();
+        auto& band = *bandStorage;
         band.resize(800, 400);
         band.setBandPlanManager(&plans);
         band.setBandPlanFontSize(6);
@@ -851,7 +1828,8 @@ int main(int argc, char** argv)
     {
         // The cap holds without a scale factor, so it stays pinned even if the
         // --pan-pixels-retina registration's QT_SCALE_FACTOR is ignored.
-        SpectrumWidget wide;
+        auto wideStorage = std::make_unique<SpectrumWidget>();
+        auto& wide = *wideStorage;
         wide.resize(5000, 600);
         if (near(wide.devicePixelRatioF(), 1.0)) {
             check(panXpixelsFor(&wide) == 3840, "pan pixels: a 5000-pixel pan at ratio 1 is capped at 3840");
@@ -865,7 +1843,8 @@ int main(int argc, char** argv)
         // Anchored gesture zoom (the shared applyAnchoredZoom extracted from the
         // trackpad/pinch paths). Under confirmation the new span is requested,
         // not applied locally, so assert the requested span and the clamp.
-        SpectrumWidget widget;
+        auto widgetStorage = std::make_unique<SpectrumWidget>();
+        auto& widget = *widgetStorage;
         widget.resize(1000, 400);
         widget.setPanGeometryConfirmationRequired(true);
         widget.setFrequencyRangeImmediate(14.200, 0.200);

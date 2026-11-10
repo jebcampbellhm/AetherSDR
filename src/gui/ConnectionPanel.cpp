@@ -1,9 +1,9 @@
 #include <QUrl>
 #include "core/NrspCredentials.h"
-#include "core/NetworkReceiverCredentials.h"
 #include "ConnectionPanel.h"
 #include "TabletUi.h"
 #include "core/AppSettings.h"
+#include "core/NetworkReceiverCredentials.h"
 #include "core/backends/ConnectionSharingPolicy.h"  // in-use share gate (#4448), shared with MainWindow_Session
 #include "core/backends/anan/AnanDiscovery.h" // shared nickname + MAC->serial helpers
 #include "core/backends/anan/P2Protocol.h"  // buildDiscovery/parseDiscoveryReply, kRadioPort
@@ -1635,6 +1635,16 @@ bool ConnectionPanel::selectRadio(const QString& serial)
 void ConnectionPanel::selectManualConnection()
 {
     setCurrentMode(ManualMode);
+}
+
+void ConnectionPanel::selectManualConnection(const RadioInfo& radio)
+{
+    selectManualConnection();
+    const QString address = radio.address.toString();
+    m_manualIpEdit->setText(address);
+    applySavedSourceSelection(address, true);
+    setManualFamily(radio.family);
+    updateActionState();
 }
 
 bool ConnectionPanel::canRenameRadio(const QString& serial) const

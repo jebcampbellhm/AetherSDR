@@ -1044,6 +1044,10 @@ void RadioTabBar::rebuild()
     while (m_tabs.size() < m_radios.size()) {
         auto* tab = new RadioTab(m_radios.at(m_tabs.size()), this);
         tab->installEventFilter(this);   // drag-to-scroll (handleStripDrag)
+        tab->setContextMenuPolicy(Qt::CustomContextMenu);
+        connect(tab, &QWidget::customContextMenuRequested, this, [this, tab](const QPoint& position) {
+            emit radioContextMenuRequested(tab->entry().id, tab->mapToGlobal(position));
+        });
         connect(tab, &QAbstractButton::clicked, this, [this, tab]() {
             // A click opens the picker; it does not switch radios, so the
             // active tab changes only when the session does (setActiveRadio).

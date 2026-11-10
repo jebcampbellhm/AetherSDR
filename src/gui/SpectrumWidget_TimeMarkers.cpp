@@ -21,7 +21,9 @@ void SpectrumWidget::setWaterfallTimeMarkerSeconds(int seconds)
         return;
     }
     m_wfTimeMarkerSeconds = seconds;
-    DisplaySettings::setWaterfallTimeMarkerSeconds(m_panIndex, seconds);
+    if (hasPersistentDisplaySettings()) {
+        DisplaySettings::setWaterfallTimeMarkerSeconds(m_panIndex, seconds);
+    }
     QAccessibleValueChangeEvent event(this, seconds);
     QAccessible::updateAccessibility(&event);
     update();

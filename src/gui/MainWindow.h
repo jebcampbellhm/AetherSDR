@@ -135,10 +135,12 @@ class QSystemTrayIcon;
 class QStackedWidget;
 
 namespace AetherSDR {
+class MonitorAudioRouter;
 
 enum class RadioSliceSelectionSource;
 
 class AetherClockApplet;
+class WsprSpotFeed;
 class AetherClockEngine;
 class AetherClockModel;
 class AntennaAnalyzerModel;
@@ -171,6 +173,8 @@ class UiTickLagMeter;
 class WhatsNewDialog;
 class Nr2WisdomDialog;
 class ProfileManagerDialog;
+class HelpDialog;
+class SupportDialog;
 class SettingsBrowserDialog;
 class ProfileImportExportDialog;
 class RadioSetupDialog;
@@ -678,23 +682,12 @@ private:
     // Re-establish the connections bound to the backend's PanadapterStream after
     // RadioModel swapped backends for a different radio family.
     void rewirePanStreamAfterBackendSwap();   // MainWindow_Session.cpp
-    // PanadapterStream-bound connect groups, each shared by its buildUI-time
-    // site and the post-backend-swap rebind so the two can never drift (#4448).
-    // Every stream-bound sink lives in one of these; a new one added here is
-    // automatically re-bound after a Flex->HL2->Flex swap.
-    void wirePanStreamRxAudioSinks();         // MainWindow_Session.cpp
+    // Idempotent normalized RX subscriptions survive backend replacement.
+    void wireMonitorAudio();                 // MainWindow_Session.cpp
+    void refreshMonitorPlayback(bool restart = false); // MainWindow_Session.cpp
     void wireRxDemodAudioSinks();             // MainWindow_Session.cpp
-    // True when the connected backend supplies RX audio over the IRadioBackend
-    // seam rather than through PanadapterStream — i.e. the demo (RFC #4288
-    // Route A), which is the one backend that owns BOTH. Every site that wires
-    // PanadapterStream::pcmFrameReady → AudioEngine::feedPcmFrame must consult
-    // this, or the two sources sum at the sink (wobble + distortion).
-    bool backendFeedsEngineDirectly();        // MainWindow_Session.cpp
     // Live RX is muted while something plays audio back through the same sink:
-    // the QSO recorder, the PUDU monitor, or a voice keyer preview. The Flex
-    // path achieves that by disconnecting PanadapterStream::pcmFrameReady; a
-    // seam backend has no such connection to drop, so its relay consults this
-    // instead. (PR #4537 review.)
+    // the QSO recorder, the PUDU monitor, or a voice keyer preview.
     bool m_rxMutedForPlayback{false};
     // Who is asking; see RxPlaybackMuteOwners.h. A plain bool would let
     // whichever producer finished first unmute under the others.
@@ -1140,6 +1133,7 @@ private:
     void updatePaTempLabel();
     void showNetworkDiagnosticsDialog();
     void showSystemInfoDialog();
+    void showHelpGuide(const QString& title, const QString& resourcePath);
     void showAgcCalibrationDialog(int sliceId);
     void showAx25HfPacketDecodeDialog();
     // Construct the AetherModem window hidden if it does not exist yet, and
@@ -1237,8 +1231,7 @@ private:
     BandSnapshot captureCurrentBandState() const;
     void restoreBandState(const BandSnapshot& snap);
     void startSwrSweep(int requestedSliceId = -1, int sweepPowerWatts = 1,
-                       double customLowMhz = 0.0, double customHighMhz = 0.0,
-                       bool forceLicenseConfirm = false);
+                       double customLowMhz = 0.0, double customHighMhz = 0.0);
     void clearSwrSweepPlot();
     void saveSwrSweepCsv();
     void advanceSwrSweep();
@@ -1311,6 +1304,7 @@ private:
     RadioModel&       m_radioModel;
     DxccColorProvider m_dxccProvider;
     AudioEngine*      m_audio{nullptr};
+    MonitorAudioRouter* m_monitorRouter{nullptr};
     AetherDspModePolicy m_aetherDspModePolicy;
     QThread*          m_audioThread{nullptr};
     QMediaDevices*    m_audioDeviceMonitor{nullptr};
@@ -1434,6 +1428,9 @@ private:
     EibiClient*          m_eibiClient{nullptr};
     QHash<QString, int>  m_eibiSpotKeyToId;
     N1MMSpotClient*      m_n1mmSpotClient{nullptr};
+    // The WSPR receiver on the radio (tools/wspr-agent): its spots for
+    // SpotHub and the panadapter. Main thread; it only polls HTTP.
+    WsprSpotFeed*        m_wsprFeed{nullptr};
     PropForecastClient*  m_propForecast{nullptr};
 #ifdef HAVE_WEBSOCKETS
     FreeDvClient*      m_freedvClient{nullptr};
@@ -1796,6 +1793,8 @@ private:
     QPointer<MultiFlexDialog> m_multiFlexDialog;
     QPointer<FlexControlDialog> m_flexControlDialog;
     QPointer<WhatsNewDialog> m_whatsNewDialog;
+    QHash<QString, QPointer<HelpDialog>> m_helpDialogs;   // by resource path
+    QPointer<SupportDialog> m_supportDialog;
     QPointer<CanonWindow> m_aboutWindow;
     QPointer<AetherRxDialog> m_rxDialog;
     QPointer<Nr2WisdomDialog> m_nr2WisdomDialog;
@@ -2010,6 +2009,10 @@ private:
     bool m_shuttingDown{false};
     bool m_panadapterUiPreparedForShutdown{false};
     void preparePanadapterUiForShutdown();
+    void showStationWorkspace();
+    void closeStationWorkspace();
+    void showStationRadioSetup(const QString& id);
+    void configureStationSetupDialog(RadioSetupDialog* dialog, const QString& id);
     void toggleConnectionDialog();
     bool m_useSystemClock{true};     // true when no GPS installed
     bool m_paTempUseFahrenheit{true};
@@ -2437,9 +2440,7 @@ bool MainWindow::showOrRaiseCanon(QPointer<T>& slot, Create&& create)
         window->setAttribute(Qt::WA_DeleteOnClose);
         slot = window;
     }
-    slot->show();
-    slot->raise();
-    slot->activateWindow();
+    slot->showAndActivate();
     return created;
 }
 

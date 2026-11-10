@@ -45,6 +45,7 @@ and radio pair.
 | **−** / **+** | Tune by the receiver's current tuning step |
 | **Mute** | Mute the selected receiver |
 | **Lock** | Lock frequency changes; unlock before tuning |
+| **Radios** | Add independent receivers and select which radio you hear |
 | **Receiver** | Adjust audio level, AGC threshold, and tuning step |
 | **Noise reduction** | Select NR2, RN2, NR4, NNR, or MNR; open **NR4 settings** |
 | **Copy Assist** | Show or hide the received-speech transcript |
@@ -113,3 +114,16 @@ recenter and fit the available screen when the iPad rotates.
 Radio Setup places its scrollable category list above the settings in portrait,
 and beside them in landscape. Forms retain readable field widths; narrow
 multitasking windows can also scroll horizontally when needed.
+
+## Multiple radios
+
+Tap **Radios** in the bottom toolbar, then **Add receiver…** to connect up to
+two additional receivers without disconnecting the primary radio. Each has its
+own tuning controls and waterfall. Swipe a receiver's control row horizontally
+when it does not fit in portrait. **Listen to** selects one radio for speaker
+audio, or **Off**; **PC Audio** must also be enabled. **Done** closes the panel
+while the receivers remain connected.
+
+Additional receivers cannot transmit. Transmitting on the primary radio requires
+explicitly selecting **Allow transmit on primary radio**; permission clears when
+the primary disconnects. Selecting an audio source does not enable transmission.

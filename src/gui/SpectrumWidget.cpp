@@ -1,5 +1,6 @@
 #include "SpectrumWidget.h"
 #include "TabletUi.h"
+#include "SpectrumTraceBins.h"
 #include "SpectrumChromeGeometry.h"
 #include "SpectrumSquelchLogic.h"
 #include "ScopedChildWidget.h"
@@ -1817,6 +1818,44 @@ QVariantMap SpectrumWidget::automationDisplaySettingsSnapshot() const
     return snap;
 }
 
+void SpectrumWidget::noteTraceGeometryRequest(double centerMhz, double bandwidthMhz)
+{
+    if (panGeometryConfirmationRequired()) {
+        m_traceCapture.noteRequestSent(centerMhz, bandwidthMhz);
+    } else {
+        noteTraceGeometryChange();
+    }
+}
+
+bool SpectrumWidget::traceGeometryInFlight() const
+{
+    return m_draggingPan || m_draggingBandwidth || m_panDragPendingCenterValid
+        || m_frequencyRangeSettlePending || m_frequencyRangeCommandThrottle.hasPending();
+}
+
+QVariantMap SpectrumWidget::traceBinsSnapshot() const
+{
+    // The last decoded radio frame as received (never smoothed, reprojected or
+    // cropped) with the geometry shown when it arrived, or a refusal while
+    // that geometry cannot be trusted. It stays the radio's frame while a
+    // Kiwi source is displayed.
+    const bool panAnimationRunning =
+        m_panCenterAnim && m_panCenterAnim->state() != QAbstractAnimation::Stopped;
+    const QString refusal = m_traceCapture.refusal(m_centerMhz, m_bandwidthMhz,
+                                                   panAnimationRunning,
+                                                   traceGeometryInFlight());
+    QVariantMap m;
+    if (refusal.isEmpty()) {
+        m = m_traceCapture.snapshot();
+    } else {
+        m[QStringLiteral("refusal")] = refusal;
+    }
+    m[QStringLiteral("panIndex")] = m_panIndex;
+    m[QStringLiteral("name")] = objectName();
+    m[QStringLiteral("kiwiWaterfallActive")] = m_kiwiSdrWaterfallActive;
+    return m;
+}
+
 QVariantMap SpectrumWidget::traceDebugSnapshot()
 {
     const auto vectorStats = [this](const QVector<float>& bins) {
@@ -1958,8 +1997,8 @@ void SpectrumWidget::applyNativeWindowIsolationPolicy()
 #endif
 }
 
-SpectrumWidget::SpectrumWidget(QWidget* parent)
-    : SPECTRUM_BASE_CLASS(parent)
+SpectrumWidget::SpectrumWidget(QWidget* parent, SettingsPersistence persistence)
+    : SPECTRUM_BASE_CLASS(parent), m_settingsPersistence(persistence)
 {
     if (tabletUiEnabled()) {
         grabGesture(Qt::PinchGesture);
@@ -1971,6 +2010,22 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
     theme::setContainer(this, QStringLiteral("spectrum"));
 
     m_panStats.clock.start();  // panstats rates are meaningless without an epoch
+
+    // A requested range can reach the radio before the widget shows it.
+    connect(this, &SpectrumWidget::frequencyRangeChangeRequested, this,
+            [this](double centerMhz, double bandwidthMhz) {
+                noteTraceGeometryRequest(centerMhz, bandwidthMhz);
+            });
+    connect(this, &SpectrumWidget::centerChangeRequested, this,
+            [this](double centerMhz) { noteTraceGeometryRequest(centerMhz, m_bandwidthMhz); });
+    // An unchanged centre is a slice tune only (driveVfoDragTune); MainWindow
+    // sends no pan command for it, so it is no geometry request.
+    connect(this, &SpectrumWidget::edgePanTuneRequested, this,
+            [this](double centerMhz, double) {
+                if (!qFuzzyCompare(centerMhz, m_centerMhz)) {
+                    noteTraceGeometryRequest(centerMhz, m_bandwidthMhz);
+                }
+            });
 
     setMinimumHeight(100);
     setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Expanding);
@@ -2332,6 +2387,7 @@ SpectrumWidget::SpectrumWidget(QWidget* parent)
         }
         m_centerMhz = newCenter;
         m_bandwidthMhz = newBw;
+        noteTraceGeometryChange();
         resetNoiseFloorBaseline();
         if (previewed) {
             scheduleFrequencyPreviewFrame();
@@ -2515,6 +2571,14 @@ bool SpectrumWidget::vfoFlagOnLeftForSlice(
     return flagDirectionOnLeft(dir);
 }
 
+void SpectrumWidget::saveDisplaySetting(const QString& key, const QVariant& value)
+{
+    if (!hasPersistentDisplaySettings()) { return; }
+    auto& settings = AppSettings::instance();
+    settings.setValue(key, value);
+    settings.save();
+}
+
 QString SpectrumWidget::settingsKey(const QString& base) const
 {
     if (m_panIndex == 0)
@@ -2525,20 +2589,26 @@ QString SpectrumWidget::settingsKey(const QString& base) const
 void SpectrumWidget::setPanIndex(int idx)
 {
     m_panIndex = idx;
-    m_wfTimeMarkerSeconds = DisplaySettings::waterfallTimeMarkerSeconds(idx);
+    if (hasPersistentDisplaySettings()) {
+        m_wfTimeMarkerSeconds = DisplaySettings::waterfallTimeMarkerSeconds(idx);
+    }
     update();
     // Let the overlay menu (the +RX/+TNF/Band/ANT/Display/Memory/DAX button
     // rail) key its persisted collapsed/expanded state to this slot.
     if (m_overlayMenu) {
-        m_overlayMenu->setPanSlotIndex(idx);
+        m_overlayMenu->setPanSlotIndex(hasPersistentDisplaySettings() ? idx : -1);
     }
 }
 
 void SpectrumWidget::loadSettings()
 {
+    if (!hasPersistentDisplaySettings() && m_settingsLoaded) { return; }
+    m_settingsLoaded = true;
     m_wfTimeMarkerSeconds = DisplaySettings::waterfallTimeMarkerSeconds(m_panIndex);
     auto& s = AppSettings::instance();
-    DisplaySettings::retireRadioOwnedPanSettings(m_panIndex);
+    if (hasPersistentDisplaySettings()) {
+        DisplaySettings::retireRadioOwnedPanSettings(m_panIndex);
+    }
 
     m_spectrumFrac   = std::clamp(s.value(settingsKey("SpectrumSplitRatio"), "0.40").toFloat(), 0.10f, 0.90f);
     m_fftFillAlpha   = s.value(settingsKey("DisplayFftFillAlpha"), "0.70").toFloat();
@@ -2872,10 +2942,8 @@ void SpectrumWidget::saveFftTraceShaping()
     obj.insert(QStringLiteral("decombHz"), m_fftDecombHz);
 
     // One setValue + save for the whole object (Principle XIV).
-    auto& s = AppSettings::instance();
-    s.setValue(fftTraceShapingKey(), QString::fromUtf8(
+    saveDisplaySetting(fftTraceShapingKey(), QString::fromUtf8(
         QJsonDocument(obj).toJson(QJsonDocument::Compact)));
-    s.save();
 }
 
 QString SpectrumWidget::display3DSettingsKey() const
@@ -2941,10 +3009,8 @@ void SpectrumWidget::saveDisplay3DSettings()
 
     // One setValue + save for the whole object (Principle XIV): a crash cannot
     // leave the 3D view half-configured the way per-key writes could.
-    auto& s = AppSettings::instance();
-    s.setValue(display3DSettingsKey(), QString::fromUtf8(
+    saveDisplaySetting(display3DSettingsKey(), QString::fromUtf8(
         QJsonDocument(obj).toJson(QJsonDocument::Compact)));
-    s.save();
 }
 
 void SpectrumWidget::resetDisplay3DSettings()
@@ -3031,10 +3097,8 @@ void SpectrumWidget::saveDisplaySourceTraceSettings()
     obj.insert(QStringLiteral("kiwi"),
                sourceObject(m_kiwiNoiseFloorPosition, m_kiwiDssFloorDepth));
 
-    auto& s = AppSettings::instance();
-    s.setValue(displaySourceTraceSettingsKey(), QString::fromUtf8(
+    saveDisplaySetting(displaySourceTraceSettingsKey(), QString::fromUtf8(
         QJsonDocument(obj).toJson(QJsonDocument::Compact)));
-    s.save();
 }
 
 void SpectrumWidget::setNoiseFloorPositionForSource(bool kiwiSource,
@@ -3104,9 +3168,7 @@ void SpectrumWidget::setNoiseFloorEnable(bool on) {
     if (on) {
         refreshNoiseFloorTarget();
     }
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayNoiseFloorEnable"), on ? "True" : "False");
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayNoiseFloorEnable"), on ? "True" : "False");
 }
 void SpectrumWidget::reacquireNoiseFloorLock() {
     m_dssFloorAnchorDbm = -1000.0f;
@@ -3260,43 +3322,33 @@ void SpectrumWidget::setFftFps(int fps) {
 }
 void SpectrumWidget::setFftHeatMap(bool on) {
     m_fftHeatMap = on;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFftHeatMap"), on ? "True" : "False");
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayFftHeatMap"), on ? "True" : "False");
 }
 void SpectrumWidget::setShowGrid(bool on) {
     m_showGrid = on;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayShowGrid"), on ? "True" : "False");
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayShowGrid"), on ? "True" : "False");
     markOverlayDirty();
 }
 void SpectrumWidget::setFreqGridSpacing(int khz) {
     m_freqGridSpacingKhz = khz;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFreqGridSpacing"), QString::number(khz));
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayFreqGridSpacing"), QString::number(khz));
     markOverlayDirty();
 }
 void SpectrumWidget::setFreqScaleFontPt(int pt) {
     m_freqScaleFontPt = std::clamp(pt, 8, 14);
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFreqScaleFontPt"), QString::number(m_freqScaleFontPt));
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayFreqScaleFontPt"), QString::number(m_freqScaleFontPt));
     markOverlayDirty();
     update();
 }
 void SpectrumWidget::setShowFpsMeters(bool on) {
     applyFpsMeterVisibility(on);
-    auto& s = AppSettings::instance();
-    s.setValue("DisplayFpsMeters", on ? "True" : "False");
-    s.save();
+    saveDisplaySetting("DisplayFpsMeters", on ? "True" : "False");
 
     // Keep FPS meters global across docked and sibling panadapters.
-    if (QWidget* top = window()) {
+    if (QWidget* top = window(); top && hasPersistentDisplaySettings()) {
         const auto siblings = top->findChildren<SpectrumWidget*>();
         for (SpectrumWidget* sw : siblings) {
-            if (sw != this)
+            if (sw != this && sw->hasPersistentDisplaySettings())
                 sw->applyFpsMeterVisibility(on);
         }
     }
@@ -4354,9 +4406,7 @@ void SpectrumWidget::setShowTuneGuides(bool on) {
         m_tuneGuideVisible = false;
         m_tuneGuideTimer->stop();
     }
-    auto& s = AppSettings::instance();
-    s.setValue("ShowTuneGuides", on ? "True" : "False");
-    s.save();
+    saveDisplaySetting("ShowTuneGuides", on ? "True" : "False");
     markOverlayDirty();
 
     // Turning the guides off has to tear down each sibling's in-flight guide
@@ -4381,8 +4431,9 @@ void SpectrumWidget::propagateGlobalDisplayToggle(
     const char* cause,
     const std::function<void(SpectrumWidget*)>& onApplied)
 {
+    if (!hasPersistentDisplaySettings()) { return; }
     const auto applyToSibling = [&](SpectrumWidget* sw) {
-        if (!sw || sw == this || sw->*flag == on) {
+        if (!sw || sw == this || !sw->hasPersistentDisplaySettings() || sw->*flag == on) {
             return;
         }
         sw->*flag = on;
@@ -4402,9 +4453,7 @@ void SpectrumWidget::propagateGlobalDisplayToggle(
 
 void SpectrumWidget::setExtendedFrequencyLine(bool on) {
     m_extendedFrequencyLine = on;
-    auto& s = AppSettings::instance();
-    s.setValue("ExtendedFrequencyLine", on ? "True" : "False");
-    s.save();
+    saveDisplaySetting("ExtendedFrequencyLine", on ? "True" : "False");
     markOverlayDirty();
     propagateGlobalDisplayToggle(&SpectrumWidget::m_extendedFrequencyLine, on,
                                  "extendedFrequencyLineSibling");
@@ -4412,7 +4461,7 @@ void SpectrumWidget::setExtendedFrequencyLine(bool on) {
 
 void SpectrumWidget::setExtendedPassband(bool on) {
     m_extendedPassband = on;
-    DisplaySettings::setExtendedPassband(on);
+    if (hasPersistentDisplaySettings()) { DisplaySettings::setExtendedPassband(on); }
     markOverlayDirty();
     propagateGlobalDisplayToggle(&SpectrumWidget::m_extendedPassband, on,
                                  "extendedPassbandSibling");
@@ -4423,7 +4472,7 @@ void SpectrumWidget::setExtendedTnf(bool on) {
         return;
     }
     m_extendedTnf = on;
-    DisplaySettings::setExtendedTnf(on);
+    if (hasPersistentDisplaySettings()) { DisplaySettings::setExtendedTnf(on); }
     markOverlayDirty("extendedTnf");
     propagateGlobalDisplayToggle(&SpectrumWidget::m_extendedTnf, on,
                                  "extendedTnfSibling");
@@ -4435,7 +4484,7 @@ void SpectrumWidget::setThreeDSliceDepth(bool on)
         return;
     }
     m_threeDSliceDepth = on;
-    DisplaySettings::setThreeDSliceDepth(on);
+    if (hasPersistentDisplaySettings()) { DisplaySettings::setThreeDSliceDepth(on); }
     markOverlayDirty("threeDSliceDepth");
 
     propagateGlobalDisplayToggle(&SpectrumWidget::m_threeDSliceDepth, on,
@@ -4444,9 +4493,7 @@ void SpectrumWidget::setThreeDSliceDepth(bool on)
 
 void SpectrumWidget::setFftLineWidth(float w) {
     m_fftLineWidth = std::clamp(w, 0.0f, 5.0f);
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFftLineWidth"), QString::number(m_fftLineWidth, 'f', 1));
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayFftLineWidth"), QString::number(m_fftLineWidth, 'f', 1));
     update();
 }
 void SpectrumWidget::setFftSmoothing(int halfWidthPx) {
@@ -4469,32 +4516,24 @@ void SpectrumWidget::setFftDecombHz(int hz) {
 }
 void SpectrumWidget::setFftFillAlpha(float a) {
     m_fftFillAlpha = std::clamp(a, 0.0f, 1.0f);
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFftFillAlpha"), QString::number(m_fftFillAlpha, 'f', 2));
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayFftFillAlpha"), QString::number(m_fftFillAlpha, 'f', 2));
     markOverlayDirty();
 }
 void SpectrumWidget::setFftFillColor(const QColor& c) {
     m_fftFillColor = c;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFftFillColor"), c.name());
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayFftFillColor"), c.name());
     markOverlayDirty();
 }
 void SpectrumWidget::setFftLineColor(const QColor& c) {
     m_fftLineColor = c;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayFftLineColor"), c.name());
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayFftLineColor"), c.name());
     markOverlayDirty();
 }
 void SpectrumWidget::setWfColorGain(int gain) {
     int clamped = std::clamp(gain, 0, 100);
     if (clamped != m_wfColorGain) {
         m_wfColorGain = clamped;
-        auto& s = AppSettings::instance();
-        s.setValue(settingsKey("DisplayWfColorGain"), QString::number(m_wfColorGain));
-        s.save();
+        saveDisplaySetting(settingsKey("DisplayWfColorGain"), QString::number(m_wfColorGain));
     }
     update();
 }
@@ -4502,26 +4541,20 @@ void SpectrumWidget::setWfBlackLevel(int level) {
     int clamped = std::clamp(level, 0, 100);
     if (clamped != m_wfBlackLevel) {
         m_wfBlackLevel = clamped;
-        auto& s = AppSettings::instance();
-        s.setValue(settingsKey("DisplayWfBlackLevel"), QString::number(m_wfBlackLevel));
-        s.save();
+        saveDisplaySetting(settingsKey("DisplayWfBlackLevel"), QString::number(m_wfBlackLevel));
     }
     update();
 }
 void SpectrumWidget::setWfAutoBlack(bool on) {
     m_wfAutoBlack = on;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayWfAutoBlack"), on ? "True" : "False");
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayWfAutoBlack"), on ? "True" : "False");
     update();
 }
 void SpectrumWidget::setWfAutoBlackOffset(int level) {
     int clamped = std::clamp(level, 0, 100);
     if (clamped != m_wfAutoBlackOffset) {
         m_wfAutoBlackOffset = clamped;
-        auto& s = AppSettings::instance();
-        s.setValue(settingsKey("DisplayWfAutoBlackOffset"), QString::number(m_wfAutoBlackOffset));
-        s.save();
+        saveDisplaySetting(settingsKey("DisplayWfAutoBlackOffset"), QString::number(m_wfAutoBlackOffset));
     }
     update();
 }
@@ -4554,9 +4587,7 @@ void SpectrumWidget::setWfAutoBlackRadioSide(bool radioSide) {
         return;
     }
     m_wfAutoBlackRadioSide = radioSide;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("DisplayWfAutoBlackRadioSide"), radioSide ? "True" : "False");
-    s.save();
+    saveDisplaySetting(settingsKey("DisplayWfAutoBlackRadioSide"), radioSide ? "True" : "False");
     // Drop any stale radio level when switching back to client-side so the
     // client estimate takes over immediately; a fresh tile repopulates it.
     if (!radioSide) {
@@ -4897,9 +4928,7 @@ void SpectrumWidget::setWfColorScheme(int scheme) {
         std::clamp(scheme, 0, static_cast<int>(WfColorScheme::Count) - 1));
     if (clamped != m_wfColorScheme) {
         m_wfColorScheme = clamped;
-        auto& s = AppSettings::instance();
-        s.setValue(settingsKey("DisplayWfColorScheme"), QString::number(static_cast<int>(m_wfColorScheme)));
-        s.save();
+        saveDisplaySetting(settingsKey("DisplayWfColorScheme"), QString::number(static_cast<int>(m_wfColorScheme)));
         recolorWaterfallViewport();
     }
     update();
@@ -4994,10 +5023,8 @@ void SpectrumWidget::setSpectrumRenderMode(int mode) {
     if (clamped != m_spectrumRenderMode) {
         commitFrequencyPreview();
         m_spectrumRenderMode = clamped;
-        auto& s = AppSettings::instance();
-        s.setValue(settingsKey("DisplaySpectrumRenderMode"),
+        saveDisplaySetting(settingsKey("DisplaySpectrumRenderMode"),
                    QString::number(static_cast<int>(m_spectrumRenderMode)));
-        s.save();
         if (m_spectrumRenderMode == SpectrumRenderMode::Mode3D) {
             // Allocate retained DSS scrollback only while it can be displayed.
             ensureWaterfallHistory();
@@ -5026,9 +5053,7 @@ void SpectrumWidget::setSpectrumRenderMode(int mode) {
 void SpectrumWidget::setWfBlankerEnabled(bool on)
 {
     m_wfBlankerEnabled = on;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("WaterfallBlankingEnabled"), on ? "True" : "False");
-    s.save();
+    saveDisplaySetting(settingsKey("WaterfallBlankingEnabled"), on ? "True" : "False");
     if (!on) {
         resetWfBlankerState();
     }
@@ -5046,18 +5071,14 @@ void SpectrumWidget::resetWfBlankerState()
 void SpectrumWidget::setWfBlankerThreshold(float t)
 {
     m_wfBlankerThreshold = std::clamp(t, 1.05f, 2.0f);
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("WaterfallBlankingThreshold"),
+    saveDisplaySetting(settingsKey("WaterfallBlankingThreshold"),
               QString::number(m_wfBlankerThreshold, 'f', 2));
-    s.save();
 }
 
 void SpectrumWidget::setWfBlankerMode(int mode)
 {
     m_wfBlankerMode = qBound(0, mode, 1);
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("WaterfallBlankingMode"), QString::number(m_wfBlankerMode));
-    s.save();
+    saveDisplaySetting(settingsKey("WaterfallBlankingMode"), QString::number(m_wfBlankerMode));
 }
 
 void SpectrumWidget::resetWfTimeScale() {
@@ -6746,6 +6767,7 @@ void SpectrumWidget::clearDisplay()
     clearFrequencyPreview();
     m_bins.clear();
     m_smoothed.clear();
+    m_traceCapture.clear();
     clearWaterfallRows();
     m_hasNativeWaterfall = false;
     m_lastNativeTileMs = 0;
@@ -7791,6 +7813,7 @@ void SpectrumWidget::cancelPanGeometryRequests()
     m_frequencyRangePendingValid = false;
     m_frequencyRangeCommandThrottle.clear();
     m_frequencyRangeCommandClock.invalidate();
+    m_traceCapture.cancelRequest();
     for (QTimer* timer : {m_panDragSettleTimer, m_frequencyRangeSettleTimer,
                          m_frequencyRangeCommandTimer, m_vfoDragEdgePanTimer}) {
         if (timer) { timer->stop(); }
@@ -7853,6 +7876,7 @@ void SpectrumWidget::setFrequencyRangeInternal(double centerMhz, double bandwidt
                                                bool animateSmallNudges,
                                                bool confirmedObservation)
 {
+    m_traceCapture.noteRangeObserved(centerMhz, bandwidthMhz);
     if (centerMhz == m_centerMhz && bandwidthMhz == m_bandwidthMhz)
         return;
 
@@ -7938,6 +7962,7 @@ void SpectrumWidget::setFrequencyRangeInternal(double centerMhz, double bandwidt
 
     if (bwChanged) {
         m_bandwidthMhz = bandwidthMhz;
+        noteTraceGeometryChange();
     }
 
     if (largeShift || !animateSmallNudges) {
@@ -7964,6 +7989,7 @@ void SpectrumWidget::setFrequencyRangeInternal(double centerMhz, double bandwidt
         }
         m_centerMhz       = centerMhz;
         m_panCenterTarget = centerMhz;
+        noteTraceGeometryChange();
         resetNoiseFloorBaseline();
         if (m_radioOwnsDbmScale && !m_panBinsAbsolute && !m_kiwiSdrWaterfallActive) {
             prepareForFftScaleChange();
@@ -8016,11 +8042,13 @@ void SpectrumWidget::setFrequencyRangeInternal(double centerMhz, double bandwidt
         connect(m_panCenterAnim, &QVariantAnimation::valueChanged, this,
             [this](const QVariant& v) {
                 m_centerMhz = v.toDouble();
+                noteTraceGeometryChange();
                 markOverlayDirty();
             });
         connect(m_panCenterAnim, &QVariantAnimation::finished, this,
             [this]() {
                 m_centerMhz = m_panCenterTarget;  // land exactly on target
+                noteTraceGeometryChange();
                 markOverlayDirty();
             });
     }
@@ -8033,6 +8061,7 @@ void SpectrumWidget::setFrequencyRangeInternal(double centerMhz, double bandwidt
     m_panCenterAnim->setStartValue(m_centerMhz);
     m_panCenterAnim->setEndValue(centerMhz);
     m_panCenterAnim->setDuration(110);
+    noteTraceGeometryChange();
     m_panCenterAnim->start();
     emit frequencyRangeChanged(centerMhz, m_bandwidthMhz);
 }
@@ -8040,9 +8069,7 @@ void SpectrumWidget::setFrequencyRangeInternal(double centerMhz, double bandwidt
 void SpectrumWidget::setSpectrumFrac(float f)
 {
     m_spectrumFrac = std::clamp(f, 0.10f, 0.90f);
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("SpectrumSplitRatio"), QString::number(m_spectrumFrac, 'f', 3));
-    s.save();
+    saveDisplaySetting(settingsKey("SpectrumSplitRatio"), QString::number(m_spectrumFrac, 'f', 3));
     positionFpsMeterLabels();
     if (width() >= 100 && spectrumPixelHeight() >= 20) {
         emit dimensionsChanged(width(), spectrumPixelHeight());
@@ -8618,7 +8645,8 @@ void SpectrumWidget::setSliceInfo(int sliceId, bool isTxSlice)
     if (idx >= 0) { m_sliceOverlays[idx].isTxSlice = isTxSlice; markOverlayDirty(); }
 }
 
-void SpectrumWidget::updateSpectrum(const QVector<float>& binsDbm, const SpectrumDecodeScale& decodeScale)
+void SpectrumWidget::updateSpectrum(const QVector<float>& binsDbm, const SpectrumDecodeScale& decodeScale,
+                                    bool heldForPresentation)
 {
     ++m_fftFrameSequence;
     PerfUpdateScope perfScope(PerfUpdateScope::Kind::Panadapter);
@@ -8688,6 +8716,16 @@ void SpectrumWidget::updateSpectrum(const QVector<float>& binsDbm, const Spectru
             }
         }
     }
+
+    // The frame's own decode scale when the stream reports one, else the
+    // encoder range the widget holds as the frame arrives.
+    const SpectrumTraceBins::FrameCapture::Encoder traceEncoder = decodeScale.valid()
+        ? SpectrumTraceBins::FrameCapture::Encoder{true, decodeScale.minDbm,
+                                                   decodeScale.maxDbm, m_encoderYPixels}
+        : SpectrumTraceBins::FrameCapture::Encoder{m_encoderRangeValid, m_encoderMinDbm,
+                                                   m_encoderMaxDbm, m_encoderYPixels};
+    m_traceCapture.ingest(binsDbm, m_fftFrameSequence, m_centerMhz, m_bandwidthMhz,
+                          spectrumBins == &adjustedBins, traceEncoder, heldForPresentation);
 
     if (m_resetFftSmoothingOnNextFrame || !m_clientFftSmoothing) {
         m_smoothed = *spectrumBins;
@@ -10446,6 +10484,7 @@ void SpectrumWidget::mousePressEvent(QMouseEvent* ev)
                     [this, freq = so.freqMhz]{
                         if (!panGeometryConfirmationRequired()) {
                             m_centerMhz = freq;
+                            noteTraceGeometryChange();
                             markOverlayDirty();
                         }
                         emit centerChangeRequested(freq);
@@ -10908,6 +10947,7 @@ void SpectrumWidget::edgePanVelocityStep()
     if (!panGeometryConfirmationRequired()) {
         reprojectWaterfall(m_centerMhz, m_bandwidthMhz, newCenter, m_bandwidthMhz);
         m_centerMhz = newCenter;
+        noteTraceGeometryChange();
         markOverlayDirty();
     }
 
@@ -11050,6 +11090,7 @@ void SpectrumWidget::applyPanDragCenter(double newCenterMhz, bool force)
         }
 
         m_centerMhz = newCenterMhz;
+        noteTraceGeometryChange();
         if (previewed) {
             scheduleFrequencyPreviewFrame();
         } else {
@@ -11333,6 +11374,7 @@ void SpectrumWidget::mouseMoveEvent(QMouseEvent* ev)
         }
         m_bandwidthMhz = newBw;
         m_centerMhz = zoomCenter;
+        noteTraceGeometryChange();
         resetNoiseFloorBaseline();
         if (previewed) {
             scheduleFrequencyPreviewFrame();
@@ -11621,9 +11663,7 @@ void SpectrumWidget::mouseReleaseEvent(QMouseEvent* ev)
     if (m_draggingDivider) {
         m_draggingDivider = false;
         setSpectrumCursor(Qt::CrossCursor);
-        auto& s = AppSettings::instance();
-        s.setValue(settingsKey("SpectrumSplitRatio"), QString::number(m_spectrumFrac, 'f', 3));
-        s.save();
+        saveDisplaySetting(settingsKey("SpectrumSplitRatio"), QString::number(m_spectrumFrac, 'f', 3));
         if (width() >= 100 && spectrumPixelHeight() >= 20) {
             emit dimensionsChanged(width(), spectrumPixelHeight());
         }
@@ -11878,8 +11918,10 @@ void SpectrumWidget::showAddSpotDialog(double freqMhz)
     const bool forward = forwardCheck->isChecked();
 
     // Remember preferences
-    as.setValue("ManualSpotLifetime", QString::number(lifetimeSec));
-    as.setValue("SpotForwardToCluster", forward ? "True" : "False");
+    if (hasPersistentDisplaySettings()) {
+        as.setValue("ManualSpotLifetime", QString::number(lifetimeSec));
+        as.setValue("SpotForwardToCluster", forward ? "True" : "False");
+    }
 
     emit spotAddRequested(finalFreqMhz, callsign, comment, lifetimeSec, forward);
 }
@@ -12031,9 +12073,7 @@ void SpectrumWidget::setBackgroundFillColor(const QColor& c)
 {
     if (!c.isValid() || c == m_bgFillColor) return;
     m_bgFillColor = c;
-    auto& s = AppSettings::instance();
-    s.setValue(settingsKey("BackgroundFillColor"), m_bgFillColor.name());
-    s.save();
+    saveDisplaySetting(settingsKey("BackgroundFillColor"), m_bgFillColor.name());
     markOverlayDirty();
 }
 
@@ -12143,6 +12183,7 @@ bool SpectrumWidget::applyAnchoredZoom(double bandwidthFactor,
     }
     m_bandwidthMhz = newBw;
     m_centerMhz = newCenter;
+    noteTraceGeometryChange();
     resetNoiseFloorBaseline();
     if (previewed) {
         scheduleFrequencyPreviewFrame();
@@ -12343,6 +12384,7 @@ void SpectrumWidget::wheelEvent(QWheelEvent* ev)
         }
         m_centerMhz    = newCenter;
         m_bandwidthMhz = newBw;
+        noteTraceGeometryChange();
         resetNoiseFloorBaseline();
         if (previewed) {
             scheduleFrequencyPreviewFrame();

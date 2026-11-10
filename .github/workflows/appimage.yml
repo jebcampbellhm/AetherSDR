@@ -113,7 +113,7 @@ jobs:
             libfuse2 file desktop-file-utils imagemagick \
             python3-pip autoconf automake libtool libasound2-dev \
             libfftw3-dev libudev-dev libhidapi-dev portaudio19-dev \
-            libsecret-1-dev
+            libsecret-1-dev libssl-dev
 
       # glslc — the SPIR-V shader compiler whisper's Vulkan backend needs at
       # BUILD time (CMake resolves it via find_package(Vulkan COMPONENTS glslc),

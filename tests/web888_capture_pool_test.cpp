@@ -280,6 +280,39 @@ int main(int argc, char** argv)
     }
     CHECK(routedJob && routedJob->current() && routedJob->mode == QStringLiteral("FT8"));
     CHECK(routedJob->period.startUtcTicks == 0 && routedJob->period.audio.mono.size() == 180000);
+    CHECK(monitoring.applyDigitalProfile({b}, 24000, 4)); // admission pending; old capture stays live
+    auto* pendingReplacement = monitoring.pool->opened.last().data();
+    digital->data(24000);
+    CHECK(monitored.last().sliceId == a.slice.id && !monitored.last().discontinuity);
+    CHECK(routedJob->current());
+    pendingReplacement->refuse();
+    digital->data(24000);
+    CHECK(monitored.last().sliceId == a.slice.id && !monitored.last().discontinuity);
+    CHECK(routedJob->current() && monitoring.digitalCaptureCount() == 1);
+    // A station TX hold invalidates queued PCM and already-issued decoder jobs,
+    // without disconnecting any capture or consuming additional RX slots.
+    const auto beforeHold = monitored.last();
+    const int beforeHoldCount = monitored.size();
+    monitoring.setReceiveInterrupted(true);
+    CHECK(!beforeHold.current() && !routedJob->current());
+    digital->data(24000);
+    CHECK(monitored.size() == beforeHoldCount && !monitoring.takeDigitalDecoderJob());
+    CHECK(monitoring.digitalCaptureCount() == 1 && digital->running() && monitoring.isConnected());
+    monitoring.setReceiveInterrupted(false);
+    digital->data(24000);
+    CHECK(monitored.size() == beforeHoldCount + 1 && monitored.last().discontinuity);
+    CHECK(monitored.last().firstSampleIndex > beforeHold.firstSampleIndex && !beforeHold.current());
+    for (int n = 0; n < 400; ++n) { digital->data(24000); }
+    CHECK(!monitoring.takeDigitalDecoderJob()); // fresh qualified anchor is mandatory
+    armNext = true; anchorAccepted = false;
+    digital->data(24000);
+    CHECK(anchorAccepted); // profile/budget survived the disarm
+    routedJob.reset();
+    for (int n = 0; n < 400 && !routedJob; ++n) {
+        digital->data(24000);
+        routedJob = monitoring.takeDigitalDecoderJob();
+    }
+    CHECK(routedJob && routedJob->current());
     monitoring.stopDigitalProfile();
     CHECK(!routedJob->current() && !monitoring.takeDigitalDecoderJob());
     CHECK(monitoring.isConnected() && !digitalFrame.current());

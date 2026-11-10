@@ -2,6 +2,7 @@
 #include "RadioModel.h"
 #include "core/backends/TuneOutputPolicy.h"
 #include <QScopedValueRollback>
+#include "core/backends/RadioBackendFactory.h"
 #include "TxController.h"
 #include "models/AprsDigipeaterModel.h"
 #include <QPointer>
@@ -1358,7 +1359,9 @@ void RadioModel::setupBackend(const QString& family)
                 }
             });
     connect(m_backend.get(), &IRadioBackend::keyingStateConfirmed,
-            this, &RadioModel::radioTransmitConfirmed);
+            this, [this, generation](bool keyed) {
+                if (generation == m_backendReceiverGeneration) { emit radioTransmitConfirmed(keyed); }
+            });
 
     // aetherd 2.4 (#4094): power-amp status decoded in the backend drives AmpModel.
     connect(m_backend.get(), &IRadioBackend::amplifierChanged, this,
@@ -2181,10 +2184,15 @@ RadioModel::RadioModel(QObject* parent)
     connect(this, &RadioModel::sliceAdded, this, [this](SliceModel* slice) {
         connect(slice, &SliceModel::modeChanged, this, &RadioModel::updateTuneAvailability);
         connect(slice, &SliceModel::txSliceChanged, this, &RadioModel::updateTuneAvailability);
+        connect(slice, &SliceModel::txSliceChanged, this, &RadioModel::updateAtuAvailability);
+        connect(slice, &SliceModel::txAntennaChanged, this, &RadioModel::updateAtuAvailability);
         updateTuneAvailability();
+        updateAtuAvailability();
     });
     connect(this, &RadioModel::sliceRemoved, this, &RadioModel::updateTuneAvailability);
     connect(this, &RadioModel::capabilitiesChanged, this, &RadioModel::updateTuneAvailability);
+    connect(this, &RadioModel::sliceRemoved, this, &RadioModel::updateAtuAvailability);
+    connect(this, &RadioModel::capabilitiesChanged, this, &RadioModel::updateAtuAvailability);
     qRegisterMetaType<PcmFrame>();
     qRegisterMetaType<SpectrumCoverage>();
     qRegisterMetaType<SpectrumDecodeScale>();
@@ -3172,28 +3180,48 @@ int RadioModel::activeTxSliceNum() const
     return -1;
 }
 
+namespace {
+// Called on the producer thread, before any Qt queue. Only the shared atomic
+// is read there; model state and stream gates remain on the model's thread.
+template<typename Deliver>
+void deliverStationPcm(QObject* receiver, const std::shared_ptr<std::atomic<quint64>>& revision,
+                       Deliver deliver)
+{
+    const auto emittedRevision = revision->load(std::memory_order_acquire);
+    if (emittedRevision & 1) { return; }
+    QMetaObject::invokeMethod(receiver, [revision, emittedRevision, deliver = std::move(deliver)] {
+        if (revision->load(std::memory_order_acquire) == emittedRevision) { deliver(); }
+    }, Qt::AutoConnection);
+}
+}
+
 void RadioModel::wireBackendPcm()
 {
+    m_backend->setReceiveInterrupted(m_stationReceiveGate.interrupted());
     const quint64 generation = m_backendReceiverGeneration;
     connect(m_backend.get(), &IRadioBackend::audioFrameReady, this,
-            [this, generation](const PcmFrame& frame) {
-        if (generation != m_backendReceiverGeneration
-            || frame.stream().purpose != PcmPurpose::Speaker
-            || !m_backendPcmGate.accept(frame)) {
-            return;
-        }
-        m_lastAudioMs = QDateTime::currentMSecsSinceEpoch();
-        emit backendAudioFrameReady(frame);
-    });
+            [this, generation, revision = m_stationReceiveRevision](const PcmFrame& frame) {
+        deliverStationPcm(this, revision, [this, generation, frame] {
+            if (generation != m_backendReceiverGeneration
+                || frame.stream().purpose != PcmPurpose::Speaker
+                || !m_backendPcmGate.accept(frame)) {
+                return;
+            }
+            m_lastAudioMs = QDateTime::currentMSecsSinceEpoch();
+            if (const auto received = m_stationReceiveGate.forward(frame)) { emit backendAudioFrameReady(*received); }
+        });
+    }, Qt::DirectConnection);
     connect(m_backend.get(), &IRadioBackend::sliceAudioFrameReady, this,
-            [this, generation](int sliceId, const PcmFrame& frame) {
-        if (generation != m_backendReceiverGeneration
-            || frame.stream().purpose != PcmPurpose::Slice
-            || frame.stream().sliceId != sliceId || !m_slicePcmGate.accept(frame)) {
-            return;
-        }
-        emit backendSliceAudioFrameReady(sliceId, frame);
-    });
+            [this, generation, revision = m_stationReceiveRevision](int sliceId, const PcmFrame& frame) {
+        deliverStationPcm(this, revision, [this, generation, sliceId, frame] {
+            if (generation != m_backendReceiverGeneration
+                || frame.stream().purpose != PcmPurpose::Slice
+                || frame.stream().sliceId != sliceId || !m_slicePcmGate.accept(frame)) {
+                return;
+            }
+            if (const auto received = m_stationReceiveGate.forward(frame)) { emit backendSliceAudioFrameReady(sliceId, *received); }
+        });
+    }, Qt::DirectConnection);
 }
 
 void RadioModel::wireRxDemodAudioBus()
@@ -3219,17 +3247,28 @@ void RadioModel::wireRxDemodAudioBus()
         return;
     }
     if (m_panStream) {
-        // Flex: the VITA-49 slice audio, unchanged and still feeding the engine
-        // by its own existing connection. This is an ADDITIONAL subscriber to
-        // the same signal, so the audible path is untouched.
+        // Flex: publish the VITA-49 speaker stream through the same bus as
+        // seam-native audio. Speaker selection and decoder taps subscribe here.
         m_rxDemodBusConn = connect(m_panStream, &PanadapterStream::pcmFrameReady,
-                                   this, [this](const PcmFrame& frame) {
-            if (!m_demodPcmGate.accept(frame)) {
-                return;
-            }
-            emit rxDemodAudioReady(frame);
-        });
+                                   this, [this, generation = m_backendReceiverGeneration,
+                                          revision = m_stationReceiveRevision](const PcmFrame& frame) {
+            deliverStationPcm(this, revision, [this, generation, frame] {
+                if (generation != m_backendReceiverGeneration) { return; }
+                if (!m_demodPcmGate.accept(frame)) {
+                    return;
+                }
+                if (const auto received = m_stationReceiveGate.forward(frame)) { emit rxDemodAudioReady(*received); }
+            });
+        }, Qt::DirectConnection);
     }
+}
+
+void RadioModel::setStationReceiveInterrupted(bool interrupted)
+{
+    if (QThread::currentThread() != thread() || interrupted == m_stationReceiveGate.interrupted()) { return; }
+    m_stationReceiveRevision->fetch_add(1, std::memory_order_acq_rel);
+    m_stationReceiveGate.setInterrupted(interrupted);
+    if (m_backend) { m_backend->setReceiveInterrupted(interrupted); }
 }
 
 // See the header for why this falls back and why the key is station-wide.
@@ -4438,41 +4477,6 @@ bool RadioModel::requestAmCarrierLevel(int level)
     return true;
 }
 
-void RadioModel::recallBandStackReceiveDsp(SliceModel* slice,
-                                           const BandStackEntry& entry)
-{
-    if (!slice) {
-        return;
-    }
-    // Under KiwiSDR external receive the AGC setters address the KiwiSDR AGC
-    // (its own dB range), but the bookmark holds the RADIO's AGC: only in that
-    // case the caller sends it as wire text. Otherwise the slice setters below
-    // are the one route, through the receive-intent dispatcher to the backend.
-    if (!slice->externalReceiveReplacementActive()) {
-        if (!entry.agcMode.isEmpty() && entry.agcMode != slice->agcMode()) {
-            slice->recallAgcMode(entry.agcMode);
-        }
-        if (entry.agcThreshold != slice->agcThreshold()) {
-            slice->recallAgcThreshold(entry.agcThreshold);
-        }
-    }
-    if (entry.nbOn != slice->nbOn()) {
-        slice->setNb(entry.nbOn);
-    }
-    if (entry.nbLevel != slice->nbLevel()) {
-        slice->setNbLevel(entry.nbLevel);
-    }
-    if (!radioSideNoiseReductionAvailable()) {
-        return;
-    }
-    if (entry.nrOn != slice->nrOn()) {
-        slice->setNr(entry.nrOn);
-    }
-    if (entry.nrLevel != slice->nrLevel()) {
-        slice->setNrLevel(entry.nrLevel);
-    }
-}
-
 void RadioModel::setTransmitFrequencyCheck(bool on)
 {
     if (!m_backend || !isConnected()) {
@@ -4705,6 +4709,14 @@ void RadioModel::updateTuneAvailability()
     const bool cwMode = slice && slice->mode().startsWith(QLatin1String("CW"));
     m_transmitModel.setTuneAvailable(!isConnected() || !cwMode
                                      || backendCapabilities().hasCwTune);
+}
+
+void RadioModel::updateAtuAvailability()
+{
+    const SliceModel* slice = txSlice();
+    // XVTA/XVTB (and the 6000-series XVTR port) bypass the internal ATU.
+    m_transmitModel.setAtuAvailable(!isConnected() || !slice
+        || !slice->txAntenna().startsWith(QLatin1String("XVT"), Qt::CaseInsensitive));
 }
 
 void RadioModel::publishCapabilities(bool connected)

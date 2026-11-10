@@ -8,6 +8,7 @@
 #include "core/DeepFilterFilter.h"
 #include "core/SpecbleachFilter.h"
 #include "core/SpectralNR.h"
+#include "models/MonitorAudioRouter.h"
 
 #include <QBuffer>
 #include <QCoreApplication>
@@ -269,11 +270,86 @@ public:
         std::lock_guard<std::recursive_mutex> lock(engine.m_dspMutex);
         return engine.m_mainPcmFrame.has_value();
     }
+
+    static bool mainSourceMatches(AudioEngine& engine, const PcmFrame& frame)
+    {
+        return engine.m_mainPcmFrame && engine.m_mainPcmFrame->current()
+            && engine.m_mainPcmFrame->stream() == frame.stream()
+            && engine.m_mainPcmFrame->firstSample() == frame.firstSample();
+    }
 };
 
 } // namespace AetherSDR
 
 namespace {
+
+bool checkStationReceiveInterruption()
+{
+    using namespace AetherSDR;
+    AudioEngine engine;
+    AudioEngineRatesTestAccess::stopTimer(engine);
+    QBuffer output;
+    output.open(QIODevice::ReadWrite);
+    AudioEngineRatesTestAccess::attachMemoryOutput(engine, output);
+    PcmProducer producer;
+    producer.start();
+    PcmReceiveGate receive;
+    const auto input = producer.produce(QVector<float>(960, 0.25f));
+    const auto received = receive.forward(*input);
+    engine.feedPcmFrame(*received);
+    const bool accepted = AudioEngineRatesTestAccess::mainSourceMatches(engine, *received);
+    receive.setInterrupted(true);
+    AudioEngineRatesTestAccess::drain(engine, 960 * sizeof(float));
+    const bool retired = !AudioEngineRatesTestAccess::mainPcmFrameHeld(engine)
+        && engine.rxBufferBytes() == 0 && output.data().isEmpty() && input->current();
+    receive.setInterrupted(false);
+    const auto resumed = receive.forward(*producer.produce(QVector<float>(960, 0.125f)));
+    engine.feedPcmFrame(*resumed);
+    const bool fresh = resumed->discontinuity() && !received->current()
+        && AudioEngineRatesTestAccess::mainSourceMatches(engine, *resumed);
+    AudioEngineRatesTestAccess::detachMemoryOutput(engine);
+    std::printf("%s: station receive hold clears converted speaker buffers without stopping the producer\n",
+                accepted && retired && fresh ? "PASS" : "FAIL");
+    return accepted && retired && fresh;
+}
+
+bool checkMonitorSelection()
+{
+    using namespace AetherSDR;
+    AudioEngine engine;
+    AudioEngineRatesTestAccess::stopTimer(engine);
+    QBuffer output;
+    output.open(QIODevice::ReadWrite);
+    AudioEngineRatesTestAccess::attachMemoryOutput(engine, output);
+    MonitorAudioRouter router;
+    QObject::connect(&router, &MonitorAudioRouter::pcmReady,
+                     &engine, &AudioEngine::feedPcmFrame, Qt::QueuedConnection);
+    PcmProducer primary, additional;
+    primary.start();
+    additional.start(PcmPurpose::Speaker, -1, {48000, PcmLayout::Mono});
+    const auto first = primary.produce(QVector<float>(960, 0.25f));
+    const auto second = additional.produce(QVector<float>(960, 0.5f));
+    router.feedPrimary(*first);
+    router.selectSource(1);
+    router.feed(1, *second);
+    QCoreApplication::processEvents();
+    const bool queuedSwitch = AudioEngineRatesTestAccess::mainSourceMatches(engine, *second);
+    router.selectSource(0);
+    const auto next = primary.produce(QVector<float>(960, 0.125f));
+    router.feedPrimary(*next);
+    QCoreApplication::processEvents();
+    const bool returnToPrimary = AudioEngineRatesTestAccess::mainSourceMatches(engine, *next);
+    router.selectSource(-1);
+    AudioEngineRatesTestAccess::drain(engine, 960 * sizeof(float));
+    const bool offClears = !AudioEngineRatesTestAccess::mainPcmFrameHeld(engine)
+        && engine.rxBufferBytes() == 0 && output.data().isEmpty();
+    AudioEngineRatesTestAccess::detachMemoryOutput(engine);
+    const bool passed = queuedSwitch && returnToPrimary && offClears
+        && first->current() && second->current() && next->current();
+    std::printf("%s: monitor switches reject queued old audio, adopt new rate, clear buffers on Off and preserve decoder epochs\n",
+                passed ? "PASS" : "FAIL");
+    return passed;
+}
 
 // A producer revoked WHILE the drain is mixing must not reach the device. The
 // top-of-drain retirement cannot see it — the epoch is still live when the drain
@@ -588,6 +664,8 @@ int main(int argc, char** argv)
     }
     qputenv("AETHER_AUTOMATION", "1");
     QCoreApplication app(argc, argv);
+    const bool monitorChecks = checkMonitorSelection();
+    const bool receiveChecks = checkStationReceiveInterruption();
     const bool durationChecks = checkAggregateDurations();
     const bool invalidProcessingChecks = checkInvalidProcessingWithheld();
     const bool revocationDuringDspChecks = checkRevocationDuringDspWithheld();
@@ -654,7 +732,7 @@ int main(int argc, char** argv)
     const bool prepared = AetherSDR::AudioEngineRatesTestAccess::initializeSource(engine, sourceId)
         && AetherSDR::AudioEngineRatesTestAccess::sourcePrepared(engine, sourceId);
     const unsigned initializations = completedInitializations.load(std::memory_order_relaxed);
-    const bool passed = durationChecks && invalidProcessingChecks && revocationDuringDspChecks
+    const bool passed = monitorChecks && receiveChecks && durationChecks && invalidProcessingChecks && revocationDuringDspChecks
         && deviceRateNrChecks && meterChecks && singleFeedChecks
         && initialized.load(std::memory_order_relaxed)
         && initializations == kRetirementCycles && retiredEpochs == kRetirementCycles && prepared;

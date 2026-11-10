@@ -408,6 +408,26 @@ int main(int argc, char** argv)
 {
     QCoreApplication application(argc, argv);
     QObject receiver;
+    {
+        PcmProducer source;
+        source.start(PcmPurpose::Speaker, -1, {48000, PcmLayout::Mono});
+        PcmReceiveGate receive;
+        DecoderPcmAdapter decoder;
+        decoder.selectRoute(Lane::RxDemod, 0);
+        const auto before = decoder.accept(*receive.forward(*source.produce(QVector<float>(4096, 0.5f))));
+        check(before && before->current(), "receive-qualified decoder segment admitted");
+        receive.setInterrupted(true);
+        check(before && !before->current(), "receive hold revokes already converted decoder samples");
+        source.produce(QVector<float>(4096, 1.0f)); // discarded TX interval, same producer epoch
+        receive.setInterrupted(false);
+        const auto after = decoder.accept(*receive.forward(*source.produce(QVector<float>(4096, 0.0f))));
+        check(after && after->current() && after->discontinuity
+              && after->segmentFirstInputSample == 8192 && after->firstOutputSample == 0,
+              "confirmed RX starts a fresh resampler segment without compressing the sample gap");
+        check(after && std::all_of(after->samples.begin(), after->samples.end(),
+                                  [](float v) { return std::abs(v) < 1e-6f; }),
+              "pre-TX resampler history cannot bleed into the resumed decoder period");
+    }
     passthroughAndAdmission(receiver);
     sharedRxDemodLane();
     continuousConversion();
