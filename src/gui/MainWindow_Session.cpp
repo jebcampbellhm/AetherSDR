@@ -11,6 +11,7 @@
 // at its original constructor position.
 
 #include "MainWindow.h"
+#include "gui/TabletUi.h"
 #include "models/AntennaAnalyzerModel.h"
 
 #include "MeterApplet.h"
@@ -3620,6 +3621,15 @@ void MainWindow::showStationWorkspace()
         dock->setObjectName(QStringLiteral("additionalReceiversDock"));
         dock->setAllowedAreas(Qt::BottomDockWidgetArea | Qt::RightDockWidgetArea);
         dock->setFeatures(QDockWidget::DockWidgetClosable | QDockWidget::DockWidgetMovable);
+        if (tabletUiEnabled()) {
+            dock->setFeatures(QDockWidget::NoDockWidgetFeatures);
+            dock->setTitleBarWidget(new QWidget(dock));
+            // The desktop dock's 300-point default leaves no useful waterfall
+            // space on iPad. Present it as a full-area page with its Done action.
+            connect(dock, &QDockWidget::visibilityChanged, this, [this](bool visible) {
+                centralWidget()->setVisible(!visible);
+            });
+        }
         auto* workspace = new StationWorkspace(&m_radioModel, dock);
         connect(workspace, &CanonSurface::closeRequested, dock, &QDockWidget::hide);
         connect(workspace, &StationWorkspace::receiversChanged, this, [this] {

@@ -9,6 +9,7 @@ class QLabel;
 class QComboBox;
 class QCheckBox;
 class QMenu;
+class QTabWidget;
 namespace AetherSDR {
 class ConnectionPanel;
 class StationReceiverPanel;
@@ -46,7 +47,8 @@ private:
     QMap<int, StationReceiverPanel*> m_panels;
     QPointer<ConnectionPanel> m_connection;
     int m_connectionSession = -1;
-    QVBoxLayout* m_receivers;
+    QVBoxLayout* m_receivers = nullptr;
+    QTabWidget* m_receiverTabs = nullptr;
     QLabel* m_hint;
     QComboBox* m_monitor;
 };

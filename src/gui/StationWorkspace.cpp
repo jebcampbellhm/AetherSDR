@@ -1,10 +1,13 @@
 #include "gui/StationWorkspace.h"
 #include "gui/TabletUi.h"
+#include "core/AppSettings.h"
 #include "gui/StationReceiverPanel.h"
 #include "gui/ConnectionPanel.h"
 #include "models/SliceModel.h"
 #include "models/PanadapterModel.h"
 #include <QMenu>
+#include <QTabWidget>
+#include <QTabBar>
 #include <QAction>
 #include <QLabel>
 #include <QPushButton>
@@ -23,7 +26,9 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
     setObjectName(QStringLiteral("stationWorkspace"));
     setCloseButtonVisible(false);
     auto* layout = new QVBoxLayout(bodyWidget());
-    auto* header = new QHBoxLayout;
+    auto* headerWidget = new QWidget(bodyWidget());
+    auto* header = new QHBoxLayout(headerWidget);
+    header->setContentsMargins(0, 0, 0, 0);
     auto* add = new QPushButton(tr("Add receiver…"), bodyWidget());
     add->setAccessibleName(tr("Add independent receiver"));
     add->setAccessibleDescription(tr("Connect another receiver without disconnecting the primary radio."));
@@ -43,16 +48,16 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
     m_hint = new QLabel(tr("Use your transmit radio as primary and add receivers here. Additional receivers cannot transmit. Listen to changes audio only."), bodyWidget());
     m_hint->setWordWrap(true);
     if (tabletUiEnabled()) {
-        header->addStretch();
+        header->setStretch(header->indexOf(m_monitor), 1);
         auto* done = new QPushButton(tr("Done"), bodyWidget());
         done->setAccessibleName(tr("Close additional receivers"));
         connect(done, &QPushButton::clicked, this, &CanonSurface::closeRequested);
         header->addWidget(done);
-        layout->addLayout(header);
+        layout->addWidget(headerWidget);
         layout->addWidget(m_hint);
     } else {
         header->addWidget(m_hint, 1);
-        layout->addLayout(header);
+        layout->addWidget(headerWidget);
     }
     auto* receiveStatus = new QLabel(tr("Station receive audio active"), bodyWidget());
     receiveStatus->setWordWrap(true);
@@ -82,15 +87,27 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
         emit primaryTransmitPermissionChanged(m_primary && m_primary->stationTransmitAllowed());
     });
     refreshTransmitPermission();
-    auto* scroll = new QScrollArea(bodyWidget()); scroll->setWidgetResizable(true);
-    auto* content = new QWidget(scroll); m_receivers = new QVBoxLayout(content);
-    m_receivers->addStretch(); scroll->setWidget(content); layout->addWidget(scroll, 1);
     if (tabletUiEnabled()) {
-        scroll->setFrameShape(QFrame::NoFrame);
-        scroll->viewport()->setAutoFillBackground(false);
-        content->setAutoFillBackground(false);
-        styleTabletSurface(this);
-        prepareTabletControls(this);
+        // Give each receiver a usable display area in both iPad orientations.
+        m_receiverTabs = new QTabWidget(bodyWidget());
+        m_receiverTabs->setObjectName(QStringLiteral("stationReceiverTabs"));
+        m_receiverTabs->setAccessibleName(tr("Additional receivers"));
+        m_receiverTabs->tabBar()->setStyleSheet(QStringLiteral(
+            "QTabBar::tab { min-height: 48px; min-width: 100px; padding: 0 12px; }"));
+        m_receiverTabs->tabBar()->setExpanding(true);
+        layout->addWidget(m_receiverTabs, 1);
+        styleTabletSurface(headerWidget);
+        styleTabletSurface(m_transmitPrimary);
+        prepareTabletControls(headerWidget);
+        m_transmitPrimary->setMinimumHeight(48);
+    } else {
+        auto* scroll = new QScrollArea(bodyWidget());
+        scroll->setWidgetResizable(true);
+        auto* content = new QWidget(scroll);
+        m_receivers = new QVBoxLayout(content);
+        m_receivers->addStretch();
+        scroll->setWidget(content);
+        layout->addWidget(scroll, 1);
     }
     connect(add, &QPushButton::clicked, this, [this] { showConnect(); });
     connect(&m_station, &RadioStation::sessionRemoved, this, [this](int id) {
@@ -99,7 +116,12 @@ StationWorkspace::StationWorkspace(RadioModel* primary, QWidget* parent)
         const QSignalBlocker blocker(m_monitor);
         m_monitor->removeItem(m_monitor->findData(id + 1));
         auto* panel = m_panels.take(id);
-        if (panel) { panel->detach(); m_receivers->removeWidget(panel); panel->hide(); panel->deleteLater(); }
+        if (panel) {
+            panel->detach();
+            if (m_receiverTabs) { m_receiverTabs->removeTab(m_receiverTabs->indexOf(panel)); }
+            else { m_receivers->removeWidget(panel); }
+            panel->hide(); panel->deleteLater();
+        }
         emit receiversChanged();
     });
     connect(&m_station, &RadioStation::audioFrameReady, this,
@@ -145,6 +167,9 @@ void StationWorkspace::showConnect(int receiverId)
     }
     if (!m_connection) {
         m_connection = new ConnectionPanel(this);
+        if (AppSettings::instance().value("ShowDemoRadio", "True").toString() == "True") {
+            m_connection->addDemoRadio();
+        }
         m_connectionSession = receiverId;
         m_connection->setAttribute(Qt::WA_DeleteOnClose);
         m_connection->setWindowTitle(receiver
@@ -181,7 +206,13 @@ void StationWorkspace::addReceiver(const RadioInfo& info, const QVariantMap& opt
     connect(&session->radioModel(), &RadioModel::infoChanged, this, &StationWorkspace::receiversChanged);
     m_monitor->addItem(session->label(), id + 1);
     auto* panel = new StationReceiverPanel(session, this);
-    m_panels.insert(id, panel); m_receivers->insertWidget(m_receivers->count() - 1, panel, 1);
+    m_panels.insert(id, panel);
+    if (m_receiverTabs) {
+        m_receiverTabs->addTab(panel, tr("Receiver %1").arg(id + 1));
+        m_receiverTabs->setCurrentWidget(panel);
+    } else {
+        m_receivers->insertWidget(m_receivers->count() - 1, panel, 1);
+    }
     panel->setMinimumHeight(340);
     connect(panel, &StationReceiverPanel::removeRequested, this, [this](int removeId) { m_station.removeSession(removeId); });
     connect(panel, &StationReceiverPanel::reconnectRequested, this, &StationWorkspace::showConnect);
@@ -254,7 +285,8 @@ bool StationWorkspace::activateReceiver(const QString& tabId)
     for (const int id : m_station.sessionIds()) {
         if (tabId != QStringLiteral("station:%1").arg(id)) { continue; }
         if (auto* panel = m_panels.value(id)) {
-            if (auto* scroll = findChild<QScrollArea*>()) { scroll->ensureWidgetVisible(panel); }
+            if (m_receiverTabs) { m_receiverTabs->setCurrentWidget(panel); }
+            else if (auto* scroll = findChild<QScrollArea*>()) { scroll->ensureWidgetVisible(panel); }
             panel->setFocus(Qt::OtherFocusReason);
             return true;
         }

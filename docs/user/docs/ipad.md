@@ -118,11 +118,14 @@ multitasking windows can also scroll horizontally when needed.
 ## Multiple radios
 
 Tap **Radios** in the bottom toolbar, then **Add receiver…** to connect up to
-two additional receivers without disconnecting the primary radio. Each has its
-own tuning controls and waterfall. Swipe a receiver's control row horizontally
+two additional receivers without disconnecting the primary radio. The workspace
+fills the display; select a **Receiver** tab to see that receiver's tuning
+controls and waterfall. Swipe a receiver's control row horizontally
 when it does not fit in portrait. **Listen to** selects one radio for speaker
-audio, or **Off**; **PC Audio** must also be enabled. **Done** closes the panel
-while the receivers remain connected.
+audio, or **Off**; **PC Audio** must also be enabled. **Done** returns to the
+primary radio while the additional receivers remain connected. With
+**Show the AetherSDR demo simulator** enabled, the receiver picker includes the
+built-in Demo without rescanning.
 
 Additional receivers cannot transmit. Transmitting on the primary radio requires
 explicitly selecting **Allow transmit on primary radio**; permission clears when

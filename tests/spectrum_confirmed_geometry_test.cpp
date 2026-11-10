@@ -13,6 +13,8 @@
 #include <QMenu>
 #include <QScrollArea>
 #include <QScrollBar>
+#include <QTabWidget>
+#include <QTabBar>
 #include <QContextMenuEvent>
 #include <QTreeWidget>
 #include <QTreeWidgetItemIterator>
@@ -889,6 +891,7 @@ static int runStationReconnect()
     StationWorkspaceTestAccess::open(workspace, -1);
     auto* firstForm = StationWorkspaceTestAccess::form(workspace);
     if (!firstForm) { return 1; }
+    check(!firstForm->automationLocalRadios().isEmpty(), "new receiver picker honors the enabled Demo preference");
     emit firstForm->connectRequested(firstInfo);
     emit firstForm->connectRequested(firstInfo);
     check(station.sessionIds().size() == 1, "a submitted form cannot create a duplicate receiver from a late reply");
@@ -1114,6 +1117,41 @@ static int runTabletStationLayout()
                   "tablet receiver preview saved");
         }
     }
+    ConnectionPanel discovery;
+    discovery.addDemoRadio();
+    const auto radios = discovery.automationLocalRadios();
+    if (radios.isEmpty()) { return 1; }
+    RadioInfo info = radios.first();
+    StationWorkspaceTestAccess::add(workspace, info);
+    info.address = QHostAddress(QStringLiteral("127.0.0.2"));
+    StationWorkspaceTestAccess::add(workspace, info);
+    auto* tabs = workspace.findChild<QTabWidget*>(QStringLiteral("stationReceiverTabs"));
+    check(tabs && tabs->count() == 2, "tablet receivers have separate display pages");
+    if (!tabs || tabs->count() != 2) { return 1; }
+    const auto receiverTabs = workspace.receiverTabs();
+    auto* monitor = workspace.findChild<QComboBox*>(QStringLiteral("stationMonitorSource"));
+    monitor->setCurrentIndex(2);
+    for (const QSize size : {QSize(820, 1000), QSize(1180, 720)}) {
+        workspace.resize(size);
+        for (const auto& receiverTab : receiverTabs) {
+            check(workspace.activateReceiver(receiverTab.id), "receiver identity selects its tablet page");
+            QCoreApplication::processEvents();
+            check(monitor->width() >= monitor->fontMetrics().horizontalAdvance(monitor->currentText()) + 32,
+                  "selected receiver audio label fits in both orientations");
+            check(tabs->tabBar()->tabRect(tabs->currentIndex()).height() >= 44,
+                  "receiver tab itself meets the touch target, not only its container");
+            check(tabs->currentWidget()->mapTo(&workspace, QPoint()).y()
+                      >= tabs->tabBar()->mapTo(&workspace, QPoint(0, tabs->tabBar()->height())).y(),
+                  "receiver content does not overlap the tab bar");
+            check(tabs->currentWidget()->height() >= 340,
+                  "selected receiver retains usable height in both orientations");
+        }
+    }
+    auto& station = StationWorkspaceTestAccess::station(workspace);
+    station.removeSession(station.sessionIds().first());
+    QCoreApplication::sendPostedEvents(nullptr, QEvent::DeferredDelete);
+    check(tabs->count() == 1 && workspace.activateReceiver(receiverTabs.last().id),
+          "closing one receiver preserves the other tablet page");
     return failures ? 1 : 0;
 }
 

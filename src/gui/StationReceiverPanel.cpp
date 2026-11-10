@@ -1,6 +1,7 @@
 #include "gui/StationReceiverPanel.h"
 #include "gui/TabletUi.h"
 #include <QScrollArea>
+#include <QScroller>
 #include "gui/SpectrumWidget.h"
 #include "gui/SpectrumOverlayMenu.h"
 #include "models/RadioSession.h"
@@ -23,7 +24,9 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
 {
     setObjectName(QStringLiteral("stationReceiver_%1").arg(m_sessionId));
     auto* layout = new QVBoxLayout(bodyWidget());
-    auto* header = new QHBoxLayout;
+    auto* headerWidget = new QWidget(bodyWidget());
+    auto* header = new QHBoxLayout(headerWidget);
+    header->setContentsMargins(0, 0, 0, 0);
     auto* title = new QLabel(session->label(), bodyWidget());
     title->setTextFormat(Qt::PlainText);
     title->setWordWrap(true);
@@ -42,7 +45,7 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
         }
     });
     placeCloseButtonIn(header);
-    layout->addLayout(header);
+    layout->addWidget(headerWidget);
     connect(this, &CanonSurface::closeRequested, this, [this] { emit removeRequested(m_sessionId); });
     auto* controls = new QHBoxLayout;
     m_slice = new QComboBox(bodyWidget());
@@ -80,8 +83,11 @@ StationReceiverPanel::StationReceiverPanel(RadioSession* session, QWidget* paren
         scroll->setFrameShape(QFrame::NoFrame);
         scroll->viewport()->setAutoFillBackground(false);
         row->setAutoFillBackground(false);
-        styleTabletSurface(this);
-        prepareTabletControls(this);
+        styleTabletSurface(headerWidget);
+        prepareTabletControls(headerWidget);
+        styleTabletSurface(row);
+        prepareTabletControls(row);
+        QScroller::grabGesture(scroll->viewport(), QScroller::TouchGesture);
         for (int i = 0; i < controls->count(); ++i) {
             if (auto* control = controls->itemAt(i)->widget()) {
                 control->ensurePolished();
@@ -263,6 +269,12 @@ void StationReceiverPanel::addPan(PanadapterModel* pan)
 {
     if (!m_model || !pan || m_pans.contains(pan->panId())) { return; }
     auto* spectrum = new SpectrumWidget(bodyWidget(), SpectrumWidget::SettingsPersistence::SessionOnly);
+#if defined(Q_OS_IOS) && defined(AETHER_GPU_SPECTRUM)
+    // Dynamically added receiver surfaces need their own native Metal view;
+    // otherwise Qt renders their texture but does not composite it on iPad.
+    spectrum->setAttribute(Qt::WA_DontCreateNativeAncestors);
+    spectrum->setAttribute(Qt::WA_NativeWindow);
+#endif
     spectrum->setMinimumHeight(180);
     if (auto* menu = spectrum->overlayMenu()) {
         menu->setEnabled(false);
