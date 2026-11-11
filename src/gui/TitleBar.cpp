@@ -422,12 +422,16 @@ TitleBar::TitleBar(QWidget* parent)
         "QSlider::handle:horizontal { background: {{color.slider.handle}};"
         " width: 10px; height: 10px; margin: -4px 0; border-radius: 5px; }"
         "QSlider::sub-page:horizontal { background: {{color.accent}};"
-        " border-radius: 1px; }");
+        " border-radius: 1px; }"
+        "QSlider::groove:horizontal:disabled { background: {{color.slider.background.disabled}}; }"
+        "QSlider::sub-page:horizontal:disabled { background: {{color.slider.foreground.disabled}}; }"
+        "QSlider::handle:horizontal:disabled { background: {{color.slider.handle.disabled}}; }");
     // JetBrains Mono for the numeric readouts — the house mono face for any
     // value the operator reads rather than reads *about*.
     const QString barValueStyle = QStringLiteral(
         "QLabel { color: {{color.text.secondary}}; font-size: 11px; background: transparent;"
-        " font-family: \"{{font.family.mono}}\", \"JetBrains Mono\", monospace; }");
+        " font-family: \"{{font.family.mono}}\", \"JetBrains Mono\", monospace; }"
+        "QLabel:disabled { color: {{color.text.disabled}}; }");
     const QString iconBtnStyle = QStringLiteral(
         "QPushButton { background: transparent; border: none; padding: 0;"
         " border-radius: 4px; }"
