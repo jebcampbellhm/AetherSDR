@@ -441,6 +441,31 @@ int main(int argc, char** argv)
                 const QString tooltip = slider->toolTip();
                 slider->setToolTip(QString());
                 checkClientControl(slider);
+                const QPoint point = slider->mapToGlobal(slider->rect().center());
+                check(!tipBar->isSystemMoveAreaAt(point),
+                      "volume sliders never belong to the window move area");
+                slider->setEnabled(false);
+                checkClientControl(slider);
+                check(!tipBar->isSystemMoveAreaAt(point),
+                      "unavailable volume sliders never become window drag handles");
+                // Disabled children propagate mouse presses to their parent.
+                // Deliver that same press to the bar and check the whole gesture.
+                const QPoint start = tipHost.pos();
+                const QPoint local = tipBar->mapFromGlobal(point);
+                QTest::mousePress(tipBar, Qt::LeftButton, Qt::NoModifier, local);
+                QMouseEvent move(QEvent::MouseMove, local + QPoint(30, 10),
+                                 point + QPoint(30, 10), Qt::NoButton,
+                                 Qt::LeftButton, Qt::NoModifier);
+                QApplication::sendEvent(tipBar, &move);
+                QTest::mouseRelease(tipBar, Qt::LeftButton, Qt::NoModifier,
+                                    local + QPoint(30, 10));
+                check(tipHost.pos() == start,
+                      "dragging an unavailable volume slider leaves the window in place");
+                const Qt::WindowStates windowState = tipHost.windowState();
+                QTest::mouseDClick(tipBar, Qt::LeftButton, Qt::NoModifier, local);
+                check(tipHost.windowState() == windowState,
+                      "double-clicking an unavailable slider leaves the window state unchanged");
+                slider->setEnabled(true);
                 slider->setToolTip(tooltip);
             }
         }

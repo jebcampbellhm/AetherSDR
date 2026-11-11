@@ -4284,17 +4284,16 @@ bool AudioEngine::openRxSinkDevice(int producerRate)
         noteRxAttempt(candidate);
         auto* sink = new QAudioSink(dev, candidate, this);
         sink->setVolume(m_muted.load() ? 0.0f : m_rxVolume.load());
-#ifdef Q_OS_WIN
-        // Constrain the WASAPI shared-mode ring buffer (#3193). Without an explicit
-        // size, class-compliant USB interfaces (Scarlett, Focusrite, etc.) inherit
-        // their driver's default ring of 100-300 ms, which stacks on top of the
-        // app-side m_rxBufferCapMs cap and produces 300-500 ms+ speaker latency.
-        // A 50 ms device buffer is comfortably fed by the 10 ms RX drain timer and
-        // mirrors the explicit buffers already used for the sidetone/Quindar sinks.
-        constexpr int kWinRxDeviceBufferMs = 50;
-        const qint64 winRxBufBytes = candidate.bytesForDuration(kWinRxDeviceBufferMs * 1000LL);
-        if (winRxBufBytes > 0)
-            sink->setBufferSize(static_cast<qsizetype>(winRxBufBytes));
+#if defined(Q_OS_WIN) || defined(Q_OS_MACOS)
+        // Bound the device queue as well as the network/DSP queues: CoreAudio
+        // defaults to 250 ms and WASAPI devices can also retain 100-300 ms.
+        // The 10 ms drain timer feeds this 50 ms ring; transport jitter remains
+        // buffered separately by the receiver's startup/refill policy.
+        constexpr int kRxDeviceBufferMs = 50;
+        const qint64 rxBufBytes = candidate.bytesForDuration(kRxDeviceBufferMs * 1000LL);
+        if (rxBufBytes > 0) {
+            sink->setBufferSize(static_cast<qsizetype>(rxBufBytes));
+        }
 #endif
         QIODevice* io = sink->start();   // push-mode
         if (io) {

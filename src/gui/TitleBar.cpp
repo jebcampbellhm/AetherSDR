@@ -444,9 +444,10 @@ TitleBar::TitleBar(QWidget* parent)
     // navigation, where it is the only thing showing where focus sits.
     m_speakerBtn->setFocusPolicy(Qt::TabFocus);
     AetherSDR::ThemeManager::instance().applyStyleSheet(m_speakerBtn, iconBtnStyle);
-    m_speakerBtn->setToolTip("Click to mute/unmute line out");
-    m_speakerBtn->setAccessibleName("Line out mute");
-    m_speakerBtn->setAccessibleDescription("Mute or unmute line out speaker audio");
+    m_speakerBtn->setToolTip(tr("Mute or unmute computer playback when PC Audio is on,\n"
+                               "or the radio's line out when PC Audio is off."));
+    m_speakerBtn->setAccessibleName("Master mute");
+    m_speakerBtn->setAccessibleDescription(m_speakerBtn->toolTip());
     applyAudioIcon(m_speakerBtn, AudioIcon::Speaker, false);
     connect(m_speakerBtn, &QPushButton::toggled, this, [this](bool muted) {
         applyAudioIcon(m_speakerBtn, AudioIcon::Speaker, muted);
@@ -462,7 +463,9 @@ TitleBar::TitleBar(QWidget* parent)
     m_masterSlider->setFixedHeight(16);
     m_masterSlider->setCursor(Qt::ArrowCursor);   // not the cluster's drag hand
     m_masterSlider->setAccessibleName("Master volume");
-    m_masterSlider->setAccessibleDescription("Line out volume level, 0 to 100 percent");
+    m_masterSlider->setToolTip(tr("PC Audio on: volume for this computer's speakers or headphones.\n"
+                                 "PC Audio off: volume for the radio's line out."));
+    m_masterSlider->setAccessibleDescription(m_masterSlider->toolTip());
     AetherSDR::ThemeManager::instance().applyStyleSheet(m_masterSlider, barSliderStyle);
     audio->addWidget(m_masterSlider);
 
@@ -486,9 +489,9 @@ TitleBar::TitleBar(QWidget* parent)
     // Tab-only focus — see the line-out button above.
     m_headphoneBtn->setFocusPolicy(Qt::TabFocus);
     AetherSDR::ThemeManager::instance().applyStyleSheet(m_headphoneBtn, iconBtnStyle);
-    m_headphoneBtn->setToolTip("Click to mute/unmute headphones");
+    m_headphoneBtn->setToolTip("Click to mute/unmute the radio's headphones");
     m_headphoneBtn->setAccessibleName("Headphone mute");
-    m_headphoneBtn->setAccessibleDescription("Mute or unmute headphone audio");
+    m_headphoneBtn->setAccessibleDescription("Mute or unmute the radio's headphone audio");
     applyAudioIcon(m_headphoneBtn, AudioIcon::Headphone, false);
     connect(m_headphoneBtn, &QPushButton::toggled, this, [this](bool muted) {
         applyAudioIcon(m_headphoneBtn, AudioIcon::Headphone, muted);
@@ -503,7 +506,8 @@ TitleBar::TitleBar(QWidget* parent)
     m_hpSlider->setFixedHeight(16);
     m_hpSlider->setCursor(Qt::ArrowCursor);   // not the cluster's drag hand
     m_hpSlider->setAccessibleName("Headphone volume");
-    m_hpSlider->setAccessibleDescription("Headphone volume level, 0 to 100 percent");
+    m_hpSlider->setToolTip("Radio headphone volume, 0 to 100 percent");
+    m_hpSlider->setAccessibleDescription(m_hpSlider->toolTip());
     AetherSDR::ThemeManager::instance().applyStyleSheet(m_hpSlider, barSliderStyle);
     audio->addWidget(m_hpSlider);
 
@@ -835,6 +839,11 @@ bool TitleBar::isSystemMoveAreaAt(const QPoint& globalPos) const
 
     for (QWidget* widget = child; widget && widget != this;
          widget = widget->parentWidget()) {
+        // Disabled controls still occupy client input space. Their ignored
+        // mouse events must not turn the surrounding audio cluster into a drag.
+        if (qobject_cast<QAbstractButton*>(widget) || qobject_cast<QAbstractSlider*>(widget)) {
+            return false;
+        }
         if (isDragHandle(widget)) {
             return true;
         }
@@ -1061,10 +1070,13 @@ void TitleBar::updateMaximizeIcon()
 
 void TitleBar::mousePressEvent(QMouseEvent* ev)
 {
-    // Bare title-bar gaps arrive here; non-interactive child widgets are
-    // tagged in markDragHandle() and routed through eventFilter().
-    if (startWindowMove(ev))
+    if (ev->button() == Qt::LeftButton) {
+        if (isSystemMoveAreaAt(ev->globalPosition().toPoint())) {
+            startWindowMove(ev);
+        }
+        ev->accept();
         return;
+    }
     QWidget::mousePressEvent(ev);
 }
 
@@ -1084,11 +1096,13 @@ void TitleBar::mouseReleaseEvent(QMouseEvent* ev)
 
 void TitleBar::mouseDoubleClickEvent(QMouseEvent* ev)
 {
-    // Standard Linux/Windows convention: double-click the title bar to
-    // toggle maximize.  Same child-passthrough rule as mousePressEvent.
-    handleTitleDoubleClick(ev);
-    if (ev->isAccepted())
+    if (ev->button() == Qt::LeftButton) {
+        if (isSystemMoveAreaAt(ev->globalPosition().toPoint())) {
+            handleTitleDoubleClick(ev);
+        }
+        ev->accept();
         return;
+    }
     QWidget::mouseDoubleClickEvent(ev);
 }
 
@@ -1300,12 +1314,11 @@ void TitleBar::setHeadphoneAvailable(bool available)
     m_hpLabel->setEnabled(available);
     if (available) {
         // The constructor's wording, verbatim.
-        m_headphoneBtn->setToolTip(QStringLiteral("Click to mute/unmute headphones"));
+        m_headphoneBtn->setToolTip(QStringLiteral("Click to mute/unmute the radio's headphones"));
         m_headphoneBtn->setAccessibleDescription(
-            QStringLiteral("Mute or unmute headphone audio"));
-        m_hpSlider->setToolTip(QString());
-        m_hpSlider->setAccessibleDescription(
-            QStringLiteral("Headphone volume level, 0 to 100 percent"));
+            QStringLiteral("Mute or unmute the radio's headphone audio"));
+        m_hpSlider->setToolTip(QStringLiteral("Radio headphone volume, 0 to 100 percent"));
+        m_hpSlider->setAccessibleDescription(m_hpSlider->toolTip());
         return;
     }
     const QString muteReason = QString::fromLatin1(kHeadphoneMuteUnavailableReason);

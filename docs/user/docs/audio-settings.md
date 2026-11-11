@@ -46,6 +46,10 @@ bursty WebSocket delivery. Its queue capacity accommodates that reserve even
 when the configured Audio Buffer is smaller. This adds about 0.36 seconds to speaker startup;
 it does not delay the receiver's per-slice decoder export.
 
+On macOS and Windows, AetherSDR requests a **50 ms** device playback buffer
+to keep the computer's output queue responsive. The audio driver may round
+that request; it is separate from the network reserve described above.
+
 ## Volume and mute
 
 - **AF slider** (VFO flag or RX applet): the slice's audio level, 0–100.
@@ -54,7 +58,7 @@ it does not delay the receiver's per-slice decoder export.
 - **Title-bar speaker icon and master slider** always show the path you are actually hearing. With **PC Audio** on, they show and control the computer's mute and level. With PC Audio off, they show the radio's Line Out mute and level, including changes made by another Multi-Flex client.
 - **Clicking the title-bar speaker** mutes or unmutes this computer's output and, on a radio with a line out AetherSDR can control, the radio's Line Out as well. On a radio with no such line out and PC Audio off, there is nothing to mute: the click is refused and the icon stays as it was.
 - The volume keyboard shortcuts, FlexControl and HID controllers, and TCI `volume` all adjust the same level the master slider shows: the computer's level with PC Audio on, the radio's Line Out level with it off. MIDI **Master Volume** has its own rules; see [MIDI Controller Mapping](./midi-controller-mapping.md#using-midi-with-non-flex-radios).
-- The title-bar headphone controls follow the radio's headphone output, and are dimmed on radios that have none.
+- The title-bar headphone controls follow the radio's headphone output, and are dimmed on radios that have none, such as Web-888. Use the speaker icon and master slider for headphones connected to your computer. Dragging or double-clicking an unavailable audio control leaves the window in place.
 
 ## Recording QSOs
 
@@ -149,7 +153,8 @@ The panadapter and waterfall run but nothing comes out of the computer's speaker
 1. Check that **PC Audio** is on in the title bar.
 2. Check the **Output** device on the **Audio** page.
 3. Check that the slice is not muted, and that the title-bar speaker and master slider are not muted or at zero.
-4. Turn on the **Audio** log category in **Help → Support & Diagnostics...** and look for device-open errors. See [Support and Logging](./support-and-logging.md).
+4. Check the operating system's output volume and mute setting too. The title-bar speaker controls AetherSDR's playback level; it does not clear macOS or Windows system mute.
+5. Turn on the **Audio** log category in **Help → Support & Diagnostics...** and look for device-open errors. See [Support and Logging](./support-and-logging.md).
 
 More causes are listed in [Troubleshooting](./troubleshooting.md).
 

@@ -441,7 +441,9 @@ endif()
 # so find_package resolves it before any system install. This EXISTS-guarded
 # prepend supersedes the earlier WIN32-only one (#3634): Windows stages into the
 # same dir, so the general form covers both platforms.
-if(EXISTS "${CMAKE_SOURCE_DIR}/third_party/qtkeychain")
+# The setup script stages a desktop library; an iPad build in the same checkout
+# must find an iOS-built package through its own toolchain instead.
+if(NOT IOS AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/qtkeychain")
     list(PREPEND CMAKE_PREFIX_PATH "${CMAKE_SOURCE_DIR}/third_party/qtkeychain")
 endif()
 # REQUIRE_KEYCHAIN makes a missing Qt6Keychain a hard build failure rather than
@@ -2932,7 +2934,7 @@ if(Qt6Keychain_FOUND)
     # rpath keeps the ad-hoc signature valid — no install_name_tool).
     # macdeployqt still handles release DMGs; copy_if_different is a no-op
     # for it.
-    if(APPLE AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/qtkeychain/lib/libqt6keychain.1.dylib")
+    if(APPLE AND NOT IOS AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/qtkeychain/lib/libqt6keychain.1.dylib")
         set_property(TARGET AetherSDR APPEND PROPERTY
             BUILD_RPATH "@executable_path/../Frameworks")
         add_custom_command(TARGET AetherSDR POST_BUILD
@@ -3834,7 +3836,7 @@ if(APPLE)
     if(TARGET aether-dv-waveform)
         list(APPEND _aether_development_nested_code "$<TARGET_FILE:aether-dv-waveform>")
     endif()
-    if(Qt6Keychain_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/qtkeychain/lib/libqt6keychain.1.dylib")
+    if(NOT IOS AND Qt6Keychain_FOUND AND EXISTS "${CMAKE_SOURCE_DIR}/third_party/qtkeychain/lib/libqt6keychain.1.dylib")
         list(APPEND _aether_development_nested_code
             "$<TARGET_BUNDLE_CONTENT_DIR:AetherSDR>/Frameworks/libqt6keychain.1.dylib")
     endif()
