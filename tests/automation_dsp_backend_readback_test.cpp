@@ -32,15 +32,19 @@
 #include "models/SliceModel.h"
 
 #include <QCoreApplication>
+#include <QElapsedTimer>
 #include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
+#include <QSemaphore>
+#include <QThread>
 #include <QVariantList>
 #include <QVariantMap>
 
 #include <cstdio>
 #include <memory>
+#include <thread>
 #include <utility>
 
 namespace AetherSDR {
@@ -351,6 +355,48 @@ int main(int argc, char** argv)
         check(command("nr off").value(QStringLiteral("ok")).toBool()
                   && source->requests.size() == 1,
               "legacy unsupported NR can still be switched off");
+    }
+
+    // Device opens can stall the audio thread. Diagnostics must not also
+    // freeze the GUI thread that serves the bridge.
+    {
+        QThread worker;
+        auto* delayed = new AudioEngine;
+        delayed->moveToThread(&worker);
+        QObject::connect(&worker, &QThread::finished, delayed, &QObject::deleteLater);
+        server.setAudioEngine(delayed);
+        worker.start();
+        QSemaphore entered, release, cancelRescue;
+        QMetaObject::invokeMethod(delayed, [&] {
+            entered.release();
+            release.acquire();
+        }, Qt::QueuedConnection);
+        check(entered.tryAcquire(1, 2000), "audio worker is deliberately stalled");
+        // Bound the pre-fix failure too, without relying on GUI events.
+        std::thread rescue([&] {
+            if (!cancelRescue.tryAcquire(1, 2000)) release.release();
+        });
+        QElapsedTimer elapsed;
+        elapsed.start();
+        const auto unavailableAudio = get(server, QStringLiteral("audio"), {});
+        const auto unavailableDsp = get(server, QStringLiteral("dsp"), {});
+        check(!unavailableAudio.value(QStringLiteral("ok")).toBool(),
+              "busy audio diagnostics return unavailable rather than waiting for the driver");
+        check(!unavailableDsp.value(QStringLiteral("ok")).toBool(),
+              "busy DSP diagnostics also return unavailable");
+        check(elapsed.elapsed() < 1500, "diagnostics cannot hold the GUI through a stalled driver");
+        cancelRescue.release();
+        release.release();
+        rescue.join();
+        // Follow-up requests drain expired callbacks, exercising their lifetime
+        // after the original requests have returned.
+        check(get(server, QStringLiteral("audio"), {}).value(QStringLiteral("ok")).toBool(),
+              "audio diagnostics recover after the worker resumes");
+        check(get(server, QStringLiteral("dsp"), {}).value(QStringLiteral("ok")).toBool(),
+              "DSP diagnostics recover after the worker resumes");
+        server.setAudioEngine(&engine);
+        worker.quit();
+        worker.wait();
     }
 
     if (failures > 0) {

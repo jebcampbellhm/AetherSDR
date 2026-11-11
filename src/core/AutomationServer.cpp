@@ -64,6 +64,7 @@
 #include <QCoreApplication>
 #include <QRegularExpression>
 #include <QSet>
+#include <QSemaphore>
 #include <QThread>
 #include <QTimer>
 #include <QDateTime>
@@ -71,10 +72,12 @@
 #include <QVariantMap>
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <cmath>
 #include <cstring>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <utility>
 
@@ -2011,7 +2014,9 @@ QJsonObject audioSnapshot(const AudioEngine* audio)
     };
 }
 
-QJsonObject audioSnapshotOnObjectThread(AudioEngine* audio, bool* ok)
+QJsonObject audioSnapshotOnObjectThread(
+    AudioEngine* audio, bool* ok,
+    QJsonObject (*readSnapshot)(const AudioEngine*) = audioSnapshot)
 {
     *ok = false;
     if (!audio) {
@@ -2020,18 +2025,35 @@ QJsonObject audioSnapshotOnObjectThread(AudioEngine* audio, bool* ok)
 
     if (!audio->thread() || audio->thread() == QThread::currentThread()) {
         *ok = true;
-        return audioSnapshot(audio);
+        return readSnapshot(audio);
+    }
+    if (!audio->thread()->isRunning()) {
+        return {};
     }
 
-    QJsonObject snapshot;
+    // A native device open can stall the audio worker. A diagnostic request
+    // must not turn that into an indefinite GUI freeze. Keep the queued result
+    // alive after a timeout; never capture the caller's stack by reference.
+    struct PendingSnapshot {
+        QSemaphore ready;
+        QJsonObject value;
+        std::atomic_bool expired{false};
+    };
+    const auto pending = std::make_shared<PendingSnapshot>();
     const bool invoked = QMetaObject::invokeMethod(
         audio,
-        [audio, &snapshot]() {
-            snapshot = audioSnapshot(audio);
+        [audio, pending, readSnapshot]() {
+            if (pending->expired.load()) return;
+            pending->value = readSnapshot(audio);
+            pending->ready.release();
         },
-        Qt::BlockingQueuedConnection);
-    *ok = invoked;
-    return snapshot;
+        Qt::QueuedConnection);
+    if (!invoked || !pending->ready.tryAcquire(1, 250)) {
+        pending->expired.store(true);
+        return {};
+    }
+    *ok = true;
+    return pending->value;
 }
 
 // Client-side AetherDSP NR state (#3856): the six mutually exclusive AudioEngine
@@ -2111,19 +2133,7 @@ QJsonObject dspEngineSnapshot(const AudioEngine* a)
 
 QJsonObject dspSnapshotOnObjectThread(AudioEngine* audio, bool* ok)
 {
-    *ok = false;
-    if (!audio) return {};
-    if (!audio->thread() || audio->thread() == QThread::currentThread()) {
-        *ok = true;
-        return dspEngineSnapshot(audio);
-    }
-    QJsonObject snapshot;
-    const bool invoked = QMetaObject::invokeMethod(
-        audio,
-        [audio, &snapshot]() { snapshot = dspEngineSnapshot(audio); },
-        Qt::BlockingQueuedConnection);
-    *ok = invoked;
-    return snapshot;
+    return audioSnapshotOnObjectThread(audio, ok, dspEngineSnapshot);
 }
 
 // 8-band graphic EQ (RX + TX). Lets a scenario assert EQ-applet slider changes
