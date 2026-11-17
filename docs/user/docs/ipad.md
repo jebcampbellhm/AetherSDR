@@ -52,6 +52,11 @@ and radio pair.
 | **Settings** | Open the existing Radio Setup pages |
 | **All controls** | Show or hide the existing desktop applet panel |
 
+Drag the receive window across the spectrum to tune in **1 kHz** increments,
+including when holding it at an edge to scroll farther. For finer adjustment,
+choose a smaller **Tuning step** in **Receiver** and use **−** / **+**, or enter
+an exact frequency with the keypad.
+
 Pinch the spectrum to zoom around the point between your fingers. The bottom
 toolbar scrolls horizontally if its controls do not fit. The main tuning and
 receiver sheets have large touch controls; advanced desktop dialogs still

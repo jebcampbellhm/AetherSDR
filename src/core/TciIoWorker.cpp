@@ -220,22 +220,7 @@ void TciIoWorker::acceptConnections()
         const quint64 id = client.lifetime->id;
         m_clients.insert(id, client);
         connect(socket, &QWebSocket::textMessageReceived, this, [this, id](const QString& text) {
-            auto it = m_clients.find(id);
-            if (it == m_clients.end() || !it->lifetime->live.load()) { return; }
-            const qsizetype bytes = text.size() * sizeof(QChar);
-            if (bytes > kTextBytes - it->textBytes || it->texts.size() >= 64) {
-                closeClient(id, QWebSocketProtocol::CloseCodeTooMuchData, QStringLiteral("TCI command backlog"));
-                return;
-            }
-            const QStringList commands = text.split(QLatin1Char(';'), Qt::SkipEmptyParts);
-            if (it->texts.size() + commands.size() > 64) {
-                closeClient(id, QWebSocketProtocol::CloseCodeTooMuchData, QStringLiteral("TCI command backlog"));
-                return;
-            }
-            for (const QString& command : commands) { it->texts.push_back({command + QLatin1Char(';'), {}}); }
-            if (it->activated) { captureTextInputs(*it); }
-            it->textBytes += bytes;
-            dispatchText(id);
+            receiveText(id, text);
         });
         connect(socket, &QWebSocket::binaryMessageReceived, this, [this, id](const QByteArray& data) {
             receiveBinary(id, data);
@@ -261,6 +246,28 @@ void TciIoWorker::acceptConnections()
         });
         emit clientOpened(client.lifetime, socket->peerAddress(), socket->peerPort());
     }
+}
+
+void TciIoWorker::receiveText(quint64 id, const QString& text)
+{
+    auto it = m_clients.find(id);
+    if (it == m_clients.end() || !it->lifetime->live.load()) { return; }
+    const qsizetype bytes = text.size() * sizeof(QChar);
+    if (bytes > kTextBytes - it->textBytes || it->texts.size() >= 64) {
+        closeClient(id, QWebSocketProtocol::CloseCodeTooMuchData, QStringLiteral("TCI command backlog"));
+        return;
+    }
+    const QStringList commands = text.split(QLatin1Char(';'), Qt::SkipEmptyParts);
+    if (it->texts.size() + commands.size() > 64) {
+        closeClient(id, QWebSocketProtocol::CloseCodeTooMuchData, QStringLiteral("TCI command backlog"));
+        return;
+    }
+    for (const QString& command : commands) {
+        it->texts.push_back({command + QLatin1Char(';'), {}, false, m_daxTxAudioPermit});
+    }
+    if (it->activated) { captureTextInputs(*it); }
+    it->textBytes += bytes;
+    dispatchText(id);
 }
 
 void TciIoWorker::activate(quint64 id, const TxCoordinator::Producer& producer)
@@ -305,7 +312,13 @@ void TciIoWorker::dispatchText(quint64 id)
     it->textInFlight = true;
     // Includes the in-flight message until acknowledgement; controller backlog
     // remains bounded while its event loop is busy.
-    emit textReceived(id, text.message, text.input);
+    emit textReceived(id, text.message, text.input, text.daxPermit);
+}
+
+void TciIoWorker::setDaxTxAudioPermit(const DaxTxAudioPermit& permit)
+{
+    Q_ASSERT(QThread::currentThread() == thread());
+    m_daxTxAudioPermit = permit;
 }
 
 void TciIoWorker::acknowledgeText(quint64 id)
@@ -340,10 +353,36 @@ qint64 TciIoWorker::sendBinary(quint64 id, const QByteArray& message)
     return it->socket->sendBinaryMessage(message);
 }
 
+// Host IQ uses at most a quarter of the socket backlog. Drop a frame that
+// cannot fit, preserving room for text and RX audio under their existing
+// close-on-overrun policy.
+qint64 TciIoWorker::sendStreamFrame(quint64 id, const QByteArray& message)
+{
+    const auto it = m_clients.find(id);
+    if (it == m_clients.end() || !it->socket || !it->lifetime->live.load()) { return -1; }
+    const qint64 pending = it->socket->bytesToWrite();
+    if (pending > 0 && pending + message.size() > kMaxStreamBacklogBytes) {
+        ++it->droppedStreamFrames;
+        // Logged by time, not by count: the frame cadence depends on the rate.
+        if (!it->streamDropLog.isValid() || it->streamDropLog.elapsed() >= kStreamDropLogMs) {
+            it->streamDropLog.start();
+            qCWarning(lcCat) << "TCI: IQ frame dropped, socket behind: client=" << id
+                             << "pending_bytes=" << pending << "dropped=" << it->droppedStreamFrames;
+        }
+        return 0;
+    }
+    return it->socket->sendBinaryMessage(message);
+}
+
 void TciIoWorker::closeClient(quint64 id, QWebSocketProtocol::CloseCode code, const QString& reason)
 {
     const auto it = m_clients.find(id);
     if (it == m_clients.end()) { return; }
+    // The server's disconnect line cannot tell this from a network drop.
+    if (code != QWebSocketProtocol::CloseCodeNormal) {
+        qCWarning(lcCat) << "TCI: closing client=" << id << "code=" << int(code) << "reason=" << reason
+                         << "pending_bytes=" << (it->socket ? it->socket->bytesToWrite() : -1);
+    }
     it->lifetime->live.store(false, std::memory_order_release);
     it->producer.invalidate();
     if (m_txClient == id) { stopChrono(); }

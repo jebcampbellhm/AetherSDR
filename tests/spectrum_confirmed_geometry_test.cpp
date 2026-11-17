@@ -150,6 +150,7 @@ struct SpectrumOffscreenTestAccess {
     }
     // One in-window slice-drag tune step: edgePanTuneRequested with the
     // centre unchanged.
+    static int carrierX(const SpectrumWidget& widget, double mhz) { return widget.mhzToX(mhz); }
     static void sliceDragTuneStep(SpectrumWidget& widget, int x) {
         widget.driveVfoDragTune(x, "test");
     }
@@ -1155,6 +1156,59 @@ static int runTabletStationLayout()
     return failures ? 1 : 0;
 }
 
+int runReceiveWindowDragSteps()
+{
+    int failures = 0;
+    const auto check = [&](bool ok, const char* name) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", name);
+        failures += !ok;
+    };
+    const QByteArray originalTablet = qgetenv("AETHER_TABLET_UI");
+    for (bool tablet : {false, true}) {
+        qputenv("AETHER_TABLET_UI", tablet ? "1" : "0");
+        for (const QSize size : {QSize(820, 1000), QSize(1180, 700)}) {
+            for (int radioStep : {100, 25}) {
+                auto storage = std::make_unique<SpectrumWidget>();
+                auto& pan = *storage;
+                pan.resize(size);
+                pan.setFrequencyRangeImmediate(14.2003, 0.040);
+                pan.setSliceOverlay(0, 14.2003, -5000, 5000, false, true, "AM");
+                pan.setStepSize(radioStep);
+                QVector<double> requests;
+                QObject::connect(&pan, &SpectrumWidget::edgePanTuneRequested, &pan,
+                    [&](double, double mhz) { requests.append(mhz); });
+                const int x = SpectrumOffscreenTestAccess::carrierX(pan, 14.2003);
+                mouse(pan, QEvent::MouseButtonPress, x, 150);
+                for (int delta : {17, 39, 73, 22, -51}) {
+                    mouse(pan, QEvent::MouseMove, x + delta, 150);
+                }
+                const int inWindowCount = requests.size();
+                check(inWindowCount >= 5, "receive-window drag requests tuning in both directions");
+                mouse(pan, QEvent::MouseMove, size.width() - 2, 150);
+                wait(150);
+                check(requests.size() > inWindowCount, "holding the receive window at the edge continues tuning");
+                mouse(pan, QEvent::MouseButtonRelease, size.width() - 2, 150);
+                const int step = tablet ? 1000 : radioStep;
+                bool onGrid = !requests.empty();
+                bool usesFineGrid = false;
+                for (double mhz : requests) {
+                    const double hz = mhz * 1.0e6;
+                    onGrid = onGrid && std::abs(hz - std::round(hz / step) * step) < 0.001;
+                    usesFineGrid = usesFineGrid || std::abs(hz - std::round(hz / 1000) * 1000) > 1;
+                }
+                check(onGrid, tablet ? "tablet drag and edge scrolling snap to 1 kHz"
+                                     : "desktop dragging respects the receiver tuning step");
+                check(tablet || usesFineGrid, "desktop dragging retains sub-kHz precision");
+                check(pan.stepSize() == radioStep, "dragging preserves the receiver's fine-tuning step");
+                pan.prepareForShutdown();
+            }
+        }
+    }
+    if (originalTablet.isNull()) { qunsetenv("AETHER_TABLET_UI"); }
+    else { qputenv("AETHER_TABLET_UI", originalTablet); }
+    return failures ? 1 : 0;
+}
+
 int main(int argc, char** argv)
 {
     TestSettingsProfile profile("spectrum-confirmed-geometry");
@@ -1164,6 +1218,9 @@ int main(int argc, char** argv)
         if (QFontDatabase::addApplicationFont(QString::fromLatin1(font)) < 0) { return 1; }
     }
     QApplication::setFont(QFont(QStringLiteral("Inter"), 10));
+    if (app.arguments().contains(QStringLiteral("--receive-window-drag-steps"))) {
+        return runReceiveWindowDragSteps();
+    }
     if (app.arguments().contains(QStringLiteral("--tablet-station-layout"))) {
         return runTabletStationLayout();
     }

@@ -96,6 +96,8 @@ signals:
     void stationRadioSelected(const QString& id);
     void txBandSettingsRequested();
     void serialSettingsChanged();
+    // The LP-100A poll interval the connection now uses, for the applet tooltip.
+    void lpMeterPollIntervalChanged(int ms);
     // Fired when the user toggles SliceLetterDisplay mode in the Themes
     // tab so MainWindow can push a refresh through all slice-letter
     // widgets (the AppSettings value is what's actually consulted at

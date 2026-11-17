@@ -1,6 +1,7 @@
 #pragma once
 #ifdef HAVE_WEBSOCKETS
 
+#include "DaxTxAudioPermit.h"
 #include "PcmFrame.h"
 #include "TciClient.h"
 #include "TciRxConverter.h"
@@ -69,6 +70,7 @@ public:
     void acknowledgeText(quint64 id);
     void sendText(quint64 id, const QString& message);
     qint64 sendBinary(quint64 id, const QByteArray& message);
+    qint64 sendStreamFrame(quint64 id, const QByteArray& message);
     void closeClient(quint64 id, QWebSocketProtocol::CloseCode code, const QString& reason);
     void configureClient(const TciStreamConfig& config);
     void configureLineOut(const TciLineOutConfig& config);
@@ -80,6 +82,7 @@ public:
     void retireRxRoute(quint64 key);
     void setRxGain(int channel, float gain);
     void setTxGain(float gain, int overflowMode);
+    void setDaxTxAudioPermit(const DaxTxAudioPermit& permit);
     void prepareTx(quint64 id, const TxCoordinator::Context& context);
     void startChrono(quint64 id, int trx, const TxCoordinator::Context& context);
     void stopChrono();
@@ -97,7 +100,8 @@ signals:
     void lineOutStopped(quint64 id, quint64 generation);
     void clientOpened(std::shared_ptr<TciClientLifetime> lifetime, QHostAddress address, quint16 port);
     void clientClosed(quint64 id, int closeCode, int error, const QString& errorText);
-    void textReceived(quint64 id, const QString& text, const AetherSDR::TxCoordinator::Request& input);
+    void textReceived(quint64 id, const QString& text, const AetherSDR::TxCoordinator::Request& input,
+                      const AetherSDR::DaxTxAudioPermit& daxPermit);
     void rxLevel(int channel, float rms);
     void txLevel(float rms);
     void txPcmReady(const QByteArray& pcm, const AetherSDR::TxCoordinator::Context& context);
@@ -109,9 +113,16 @@ private:
         TxCoordinator::Producer producer;
         bool activated{false};
         bool textInFlight{false};
-        struct Text { QString message; TxCoordinator::Request input; bool captured{false}; };
+        struct Text {
+            QString message;
+            TxCoordinator::Request input;
+            bool captured{false};
+            DaxTxAudioPermit daxPermit{DaxTxAudioPermit::blocked()};
+        };
         std::deque<Text> texts;
         qsizetype textBytes{0};
+        quint64 droppedStreamFrames{0};
+        QElapsedTimer streamDropLog;
         int error{-1};
         QString errorText;
     };
@@ -141,6 +152,7 @@ private:
     mutable QMutex m_diagnosticsMutex;
     QJsonObject m_diagnostics;
     void dispatchText(quint64 id);
+    void receiveText(quint64 id, const QString& text);
     void captureTextInputs(Client& client);
     void drain();
     void resetRxRoute(quint64 key);
@@ -168,6 +180,8 @@ private:
     std::function<qint64(quint64)> m_rxBacklog;
     std::function<void(quint64, QWebSocketProtocol::CloseCode, const QString&)> m_rxClose;
     static constexpr qint64 kMaxRxBacklogBytes = 256 * 1024;
+    static constexpr qint64 kMaxStreamBacklogBytes = kMaxRxBacklogBytes / 4;  // IQ's share of the backlog
+    static constexpr qint64 kStreamDropLogMs = 5000;   // at most one IQ-drop warning per interval
     float m_rxChannelGain[8]{1,1,1,1,1,1,1,1};
     qint64 m_rxAudioFramesSent{0};
     QMutex m_mailboxMutex;
@@ -181,6 +195,7 @@ private:
     quint64 m_txClient{0};
     int m_txChronoTrx{0};
     TxCoordinator::Context m_tciTxContext;
+    DaxTxAudioPermit m_daxTxAudioPermit{DaxTxAudioPermit::blocked()};
     std::unique_ptr<Resampler> m_txResampler;
     QElapsedTimer m_txChronoClock;
     QElapsedTimer m_txChronoSessionClock;

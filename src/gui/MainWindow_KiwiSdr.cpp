@@ -1015,8 +1015,6 @@ void MainWindow::syncFlexRxPanToAudioEngine()
         return;
     }
     const auto caps = m_radioModel.backendCapabilities();
-    m_audio->setRxJitterTargetMs(caps.receiveAudioBuffering
-            ? caps.receiveAudioBuffering->jitterTargetMs : 0);
     const auto audioControl = caps.receiveAudioControl;
     if (audioControl && audioControl->speakerPan == ReceiveAudioControl::SpeakerPan::Backend) {
         // The backend has already applied its per-receiver monitor pan.

@@ -134,7 +134,7 @@ stale frames, repeated recovery, unchanged viewport and reconnect reset.
 ## Standalone connection (local fork, October 2026)
 
 The native speaker path declares a 360 ms host startup/refill reserve through
-`ReceiveAudioBuffering`. Qualification observed occasional incoming-frame gaps
+`ReceiveAudioPlayout`. Qualification observed occasional incoming-frame gaps
 longer than the ordinary 100 ms native queue cap, including a 215 ms gap, and
 brief sink-idle periods. The common audio engine holds initial audio, then
 consumes the reserve across delivery gaps; it refills only after exhaustion.

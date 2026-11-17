@@ -64,7 +64,7 @@ RadioCapabilities Web888Backend::capabilities() const
     caps.sliceFrequencyControl = SliceFrequencyControl{Authority::Engine, 0, 0};
     caps.receiveModeControl = ReceiveModeControl{Authority::Engine, kModes};
     caps.receiveAudioControl = ReceiveAudioControl{Authority::Engine, ReceiveAudioControl::SpeakerPan::Backend};
-    caps.receiveAudioBuffering = ReceiveAudioBuffering{360};
+    caps.receiveAudioPlayout = ReceiveAudioPlayout{360, 460};
     return caps;
 }
 

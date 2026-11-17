@@ -99,6 +99,17 @@ Use a WSJT-X build with TCI support (WSJT-X Improved, or WSJT-X 3.x).
 
 WSJT-X takes CAT, PTT **and audio** over TCI, so there are no sound-card devices to set up. WSJT-X's **Pwr** slider attenuates the transmitted audio. See [WSJT-X Integration](./wsjt-x-integration.md).
 
+On FlexRadio, the first TCI audio transmission can create AetherSDR's DAX TX
+stream when none exists. AetherSDR waits for both the creation reply and radio
+status confirming that its stream is selected before continuing the original
+request. A refused, cancelled or timed-out request cannot resume later. If the
+stream already exists but is not selected, select it with **TX stream** in
+**DAX Audio** while the radio is idle, then initiate a new transmission.
+
+On a slow link, such as SmartLink, that first transmission can time out in
+WSJT-X or JTDX, which wait one second for the `trx` reply. Key again; the
+stream now exists.
+
 ### MSHV
 
 **Settings → Interface**, select **TCI**, enter `localhost` and port `50001`, and enable audio streaming if wanted.
@@ -116,6 +127,10 @@ slice.
 ### CW Skimmer and SDC
 
 Point SDC or CW Skimmer at AetherSDR's TCI port. IQ flows as DAX IQ at 24, 48, 96 or 192 kHz within the connected model’s [DAX IQ limits](./dax-iq-streaming.md#limits) (SDC negotiates 96 kHz), and `dds:` follows the panadapter center. Up to **four** IQ subscriptions can run at once, so several skimmers can share one server. Receivers on the same panadapter share its IQ stream, so four independent bands need four panadapters. IQ is not offered as int16 or over `wss`. Requests outside an identified model’s supported `iq_samplerate` rates leave the rate unchanged and return the current rate. A valid rate negotiated before model identification is remembered without starting IQ streams; it is applied within the model’s limits once the model is known. A retained 192 kHz subscription uses 96 kHz on a model limited to 96 kHz, then returns to 192 kHz when a capable model is connected.
+
+### IQ on a Hermes-Lite 2
+
+On a Hermes-Lite 2 there is no DAX IQ: the IQ comes straight from the receiver chain in AetherSDR. `iq_samplerate` accepts 24, 48, 96 or 192 kHz, and a client that does not ask gets 48 kHz. When the HL2 runs at a higher rate, the IQ is decimated to the requested rate; when it runs lower, the IQ stays at the radio’s rate and that is the rate in the frame header. Changing `iq_samplerate` while IQ is running gives a short transient in the stream. When the network cannot keep up (a 192 kHz stream is about 1.5 MB/s), IQ frames are dropped instead of the connection being closed, so a skimmer on a slow link sees gaps rather than a disconnect.
 
 ### JTDX
 
@@ -138,6 +153,7 @@ Several TCI programs can be connected at once, and each keys the slice it asked 
 - An externally selected TX slice only wins when split was requested, or when VFO B set up a route for that exact receiver, so satellite and cross-band split still work.
 - A receiver that cannot be resolved is **declined**, never keyed on slice A instead.
 - **Every refused PTT is answered with `trx:<n>,false;`**, including a second client trying to key while another holds TCI PTT. WSJT-X shows this as "TCI failed to set ptt".
+- After a refusal, a new request uses its own microphone or transmit-audio source. On FlexRadio, a TCI transmit-audio request also requires AetherSDR’s **TX stream** to be **Selected** in **DAX Audio** (see [DAX Virtual Audio](./dax-virtual-audio.md#the-dax-audio-applet)).
 - **Receiver numbers are stable.** If a slice closes mid-session, the other slices keep their receiver numbers, and the freed number goes to the next new slice.
 - A VFO B request from one client does not retune another client's slice.
 
@@ -246,7 +262,7 @@ AetherSDR implements the TCI 2.0 command set, including:
 | Audio | `volume`, `mute`, `rx_volume`, `rx_mute`, `rx_balance`, `mon_enable`, `mon_volume`, `mic_level` |
 | AGC / SQL | `agc_mode`, `agc_gain`, `sql_enable`, `sql_level`, `lock` |
 | DSP | `rx_nb_enable/param`, `rx_nr_enable`, `rx_anf_enable`, `rx_apf_enable`, `rx_bin_enable`, `rx_anc_enable`, `rx_dse_enable`, `rx_nf_enable` |
-| CW | `cw_macros_speed`, `cw_keyer_speed`, `cw_macros_delay`, `cw_msg`, `cw_macros`, `cw_macros_stop`, `cw_terminal`, `keyer` |
+| CW | `cw_macros_speed`, `cw_keyer_speed`, `cw_msg`, `cw_macros`, `cw_macros_stop`, `cw_terminal`, `keyer` |
 | Audio streaming | `audio_start/stop`, `audio_samplerate`, `audio_stream_sample_type`, `audio_stream_channels`, `audio_stream_samples` |
 | IQ | `iq_start/stop`, `iq_samplerate` |
 | Spots | `spot`, `spot_delete`, `spot_clear`, `clicked_on_spot` |
@@ -255,6 +271,9 @@ AetherSDR implements the TCI 2.0 command set, including:
 
 Notes:
 
+- `cw_macros_delay` is unsupported and produces no value or confirmation. It
+  specifies a delay before transmission; the radio's CW break-in delay is a
+  different setting and is unaffected.
 - `rx_ctun_ex:<trx>,<bool>;` is accepted as a Thetis extension. It switches center lock on that receiver's slice, inverted: `true` (click-tune on) turns center lock off, `false` turns it on. TCI Remote sends `rx_ctun_ex:0,true;` on connect.
 - `volume` is in dB, as the spec defines it; the older percent form is still accepted. It is the same master level as the title-bar slider: the computer's level with PC Audio on, the radio's Line Out level with it off. `mic_level` is a global 0–100 %.
 - `sql_level` is a threshold in dB, −140 to 0, as the spec defines it. A positive value (the 0–100 level older builds took) is ignored. −140 dB, or any value at or below what the lowest level is reported as, opens the squelch fully. The slice stores a 0–100 level, so the reply states the threshold that level really gives: on a Flex the top of the scale is −60 dB, and any higher value is answered as −60.
@@ -279,7 +298,7 @@ Notes:
 
 ```
 rx_sensors_enable:true;    # S-meter updates
-tx_sensors_enable:true;    # power, SWR, mic and ALC while transmitting
+tx_sensors_enable:true;    # power, SWR, mic and ALC while transmitting or tuning
 ```
 
 RX sensors broadcast each receiver's S-meter in dBm:
@@ -288,7 +307,9 @@ RX sensors broadcast each receiver's S-meter in dBm:
 rx_channel_sensors:0,0,-97.3;
 ```
 
-TX sensors broadcast during transmit, including ALC.
+TX sensors broadcast during transmit and tune, including ALC. They follow this
+station's own transmission only: on a multiFLEX radio, another station's
+transmission sends none.
 
 The SWR field is the same trusted SWR the S-meter shows. A reading taken
 without measurable forward power, for example in a speech pause, does not

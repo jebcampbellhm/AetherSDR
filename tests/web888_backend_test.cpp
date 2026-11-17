@@ -199,7 +199,8 @@ int main(int argc, char** argv)
     CHECK(speakerCount == 0 && sliceCount == 0); // pending auth/audio readiness
     emit backend.client->stateChanged(KiwiSdrClient::State::Connected, {});
     CHECK(backend.isConnected() && connects == 1 && slice.frequency == 7.1);
-    CHECK(caps.receiveAudioBuffering && caps.receiveAudioBuffering->jitterTargetMs == 360);
+    CHECK(caps.receiveAudioPlayout && caps.receiveAudioPlayout->prefillMs == 360
+          && caps.receiveAudioPlayout->bufferCapMs == 460);
     CHECK(caps.receiveAudioControl->speakerPan == ReceiveAudioControl::SpeakerPan::Backend);
     CHECK(ReceiveAudioControl{}.speakerPan == ReceiveAudioControl::SpeakerPan::Host);
     int versions = 0;

@@ -31,6 +31,7 @@
 #include <QCoreApplication>
 #include <QHostAddress>
 #include <QJsonArray>
+#include <QJsonDocument>
 #include <QJsonObject>
 #include <QString>
 
@@ -109,6 +110,17 @@ public:
         lastTarget = hostOrIp;
         lastFamily = family;
         return true;
+    }
+
+    QJsonObject automationConnectionProfiles() const override
+    {
+        return QJsonObject{
+            {QStringLiteral("accounts"), QJsonArray{QJsonObject{
+                {QStringLiteral("label"), QStringLiteral("Home account")},
+                {QStringLiteral("email"), QStringLiteral("op@example.invalid")}}}},
+            {QStringLiteral("stations"), QJsonArray{QJsonObject{{QStringLiteral("connections"), QJsonArray{QJsonObject{
+                {QStringLiteral("host"), QStringLiteral("192.0.2.40")},
+                {QStringLiteral("username"), QStringLiteral("rsba1-user")}}}}}}}};
     }
 
     bool automationDisconnect(QString* = nullptr) override { return true; }
@@ -296,6 +308,22 @@ int main(int argc, char** argv)
     settle();
     check(!refused.value(QStringLiteral("ok")).toBool() && conn.byIpCalls == 0,
           "unknown family refused before deferred connection");
+    // ── connect profiles: account identities only for a controlling client ──
+    {
+        const auto profilesText = [&server] {
+            const QJsonObject reply = AutomationServerTestAccess::connect(server, QStringLiteral("profiles"), QString());
+            return QString::fromUtf8(QJsonDocument(reply.value(QStringLiteral("profiles")).toObject()).toJson(QJsonDocument::Compact));
+        };
+        const QString full = profilesText();
+        check(full.contains(QStringLiteral("op@example.invalid")) && full.contains(QStringLiteral("rsba1-user")),
+              "a controlling client sees account identities in connect profiles");
+        server.setReadOnly(true);
+        const QString observed = profilesText();
+        check(!observed.contains(QStringLiteral("op@example.invalid")) && !observed.contains(QStringLiteral("rsba1-user"))
+                  && observed.contains(QStringLiteral("Home account")) && observed.contains(QStringLiteral("192.0.2.40")),
+              "an observe-only client gets the workspace shape without emails or user names");
+        server.setReadOnly(false);
+    }
 
     if (failures > 0) {
         std::printf("\n%d check(s) failed\n", failures);

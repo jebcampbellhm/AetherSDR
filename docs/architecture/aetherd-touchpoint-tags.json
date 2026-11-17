@@ -1,31 +1,37 @@
 {
- "core/backends/nrsp/NrspSession.h": {
-  "tag": "vendor(nrsp)",
-  "note": "Private nRSP-ST authentication, receiver lifecycle and shared-source wire state machine.",
+ "core/RemoteSession.h": {
+  "tag": "universal",
+  "note": "isRemoteRadioSession(): whether a session is remote (WAN, routed, or a radio at a tailnet address), shared by the connection panel and RadioModel for the Radio Setup IP gate, network-quality thresholds, NTP gate, discovery socket and low-bandwidth default. Reads only RadioInfo's core-profile address and isRouted; no protocol message, no vendor ties.",
   "split": "",
   "confidence": "high"
  },
- "core/backends/nrsp/NrspWorker.h": {
-  "tag": "vendor(nrsp)",
-  "note": "Private nRSP-ST TCP acquisition and source readback worker below IRadioBackend.",
+ "core/ReceiveData.h": {
+  "tag": "universal",
+  "note": "Backend-neutral receive payloads: spectrum frames, waterfall rows, meter batches, leases and per-category stream counters. No vendor surface; Flex fills them below the seam (FlexReceiveData).",
   "split": "",
   "confidence": "high"
  },
- "core/backends/nrsp/NrspProtocol.h": {
-  "tag": "vendor(nrsp)",
-  "note": "nRSP-ST TCP framing, integer encoding, session keys and source-state parsing. Private to the direct receiver backend; protocol evidence and provenance are in docs/nrsp-st-protocol.md.",
+ "core/backends/NtpSourceRequest.h": {
+  "tag": "universal",
+  "note": "Seam vocabulary for a radio-held NTP time source list: the definition and request types with the firmware's id/address/description allowlists, the reported source state and its present-only delta. No wire text; FlexBackend encodes and decodes it (SmartSDR 4.3.16) and capabilities().ntpSourceControl gates it.",
   "split": "",
   "confidence": "high"
  },
- "core/backends/nrsp/NrspAuthentication.h": {
-  "tag": "vendor(nrsp)",
-  "note": "nRSP-ST nonce challenge and RSA server verification, private to the receiver session.",
+ "core/backends/WaveformEnvRequest.h": {
+  "tag": "universal",
+  "note": "Seam vocabulary for a radio-held waveform container environment: the typed clear/stage/recreate request with its validation, and the apply outcome. No wire text; FlexBackend encodes it (SmartSDR 4.3.16) and capabilities().waveformEnvControl gates it.",
   "split": "",
   "confidence": "high"
  },
- "core/backends/nrsp/NrspData.h": {
-  "tag": "vendor(nrsp)",
-  "note": "Bounded nRSP-ST IQ Lite and display decompression and receiver-id decoding, below the radio seam.",
+ "core/RigExpertHidTransport.h": {
+  "tag": "peripheral(rigexpert)",
+  "note": "Independent Stick Pro HID instrument transport; no radio backend, audio or transceiver commands. USB proof of concept under RFC #6471.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/AntennaAnalyzerModel.h": {
+  "tag": "peripheral(rigexpert)",
+  "note": "Independent antenna analyzer state and finite-sweep model, exposed to the GUI and automation bridge. Does not use RadioModel or IRadioBackend.",
   "split": "",
   "confidence": "high"
  },
@@ -74,6 +80,42 @@
  "core/TailnetShimRelease.h": {
   "tag": "peripheral(tailnet-shim)",
   "note": "Pinned version, URL, size and SHA-256 of the tailnet shim Docker waveform image (RFC #6271 D2). Not SmartSDR wire: AetherSDR's own HTTP API to a separate service (the shim) that happens to run in the radio's container runtime, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/PgxlConnection.h).",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/AetherGpsPackage.h": {
+  "tag": "peripheral(aether-gps)",
+  "note": "Pinned version, Qt resource paths, sizes and SHA-256s of the AetherGPS relay packages (tools/aether-gps: a FLEX-6000 legacy waveform and a FLEX-8000/Aurora container) that ship in AetherSDR, and the writer that hands one to the installer. Not SmartSDR wire: AetherSDR's own radio-side app, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/RadioHealthPackage.h).",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/GpsdSkyClient.h": {
+  "tag": "peripheral(aether-gps)",
+  "note": "A gpsd client for the AetherGPS relay on the radio (tools/aether-gps): watches SKY on TCP 2947 at the radio's LAN or tailnet-shim address and parses each satellite for AetherGPS's Sky View. Not SmartSDR wire: gpsd's public JSON protocol, served by AetherSDR's own relay that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/RadioHealthClient.h).",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/RadioHealthClient.h": {
+  "tag": "peripheral(radio-health)",
+  "note": "Reads one JSON line from the radio health agent on the radio's LAN address (TCP 48994) and summarizes free storage, memory and CPU for the Waveforms window's health bar. Not SmartSDR wire: AetherSDR's own TCP service (the radio health agent, tools/radio-health) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/TailnetShimClient.h).",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/RadioHealthPackage.h": {
+  "tag": "peripheral(radio-health)",
+  "note": "Pinned version, Qt resource path, size and SHA-256 of the radio health agent package that ships inside AetherSDR, plus its waveform name and port. Not SmartSDR wire: AetherSDR's own TCP service (the radio health agent, tools/radio-health) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/TailnetShimClient.h).",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/WsprAgent.h": {
+  "tag": "peripheral(wspr-agent)",
+  "note": "The WSPR receiver's status, spots and settings (types, bounded JSON parsing, the settings body, the SpotHub DxSpot) and its pinned package. Not SmartSDR wire: AetherSDR's own HTTP service on TCP 48995 (the WSPR receiver, tools/wspr-agent) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/RadioHealthClient.h).",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/WsprAgentClient.h": {
+  "tag": "peripheral(wspr-agent)",
+  "note": "Polls the WSPR receiver's /v1/status and reads and saves its /v1/config at the radio's LAN or tailnet-shim address. Not SmartSDR wire: AetherSDR's own HTTP service on TCP 48995 (the WSPR receiver, tools/wspr-agent) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/RadioHealthClient.h).",
   "split": "",
   "confidence": "high"
  },
@@ -203,12 +245,6 @@
   "split": "",
   "confidence": "high"
  },
- "core/ClientDeEss.h": {
-  "tag": "universal",
-  "note": "Client TX DSP de-esser (sidechain bandpass + dynamics, meters); radio-agnostic engine DSP chain stage",
-  "split": "",
-  "confidence": "high"
- },
  "core/ClientDisplaySettings.h": {
   "tag": "ui-support",
   "note": "Radio-scoped client persistence for locally shaped display state (waterfall cadence, FFT FPS, the dBm range) under the ClientDisplay feature document; UI settings plumbing, not radio-owned display state.",
@@ -229,7 +265,7 @@
  },
  "core/ClientGate.h": {
   "tag": "universal",
-  "note": "Client TX-chain downward expander/noise gate DSP (thresh/ratio/hold + meters) — radio-agnostic engine DSP.",
+  "note": "Client RX-chain downward expander/noise gate DSP (thresh/ratio/hold + meters); the TX gate is retired (RN2 replaces it) — radio-agnostic engine DSP.",
   "split": "",
   "confidence": "high"
  },
@@ -331,7 +367,7 @@
  },
  "core/DvkWavTransfer.h": {
   "tag": "vendor(flex)",
-  "note": "DVK WAV upload/download via SmartSDR 'dvk' verbs + ad-hoc TCP port streaming; FlexLib 5MB limit baked in",
+  "note": "DVK WAV conversion and bounded byte transport; typed file-transfer requests delegate slot selection and Flex wire negotiation to the backend.",
   "split": "",
   "confidence": "high"
  },
@@ -344,6 +380,12 @@
  "core/DxccColorProvider.h": {
   "tag": "universal",
   "note": "DXCC worked-status from ADIF log, colors cluster spots by call/freq/mode; radio-agnostic spot/logging feature",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/ExternalFilePath.h": {
+  "tag": "ui-support",
+  "note": "Resolves an existing AppData log or support-bundle file to the physical MSIX LocalCache location for display and for external applications (Explorer, mail client). Presentation-path plumbing, not radio state.",
   "split": "",
   "confidence": "high"
  },
@@ -361,7 +403,7 @@
  },
  "core/FirmwareUploader.h": {
   "tag": "vendor(flex)",
-  "note": "SmartSDR firmware upload: 'file upload' cmd, .ssdr files, Flex TCP ports 4995/42607 — pure Flex protocol",
+  "note": "Firmware bytes and radio-confirmed outcome handling; typed negotiation delegates Flex commands and port parsing to the backend.",
   "split": "",
   "confidence": "high"
  },
@@ -539,12 +581,6 @@
   "split": "",
   "confidence": "high"
  },
- "core/NetworkReceiverCredentials.h": {
-  "tag": "ui-support",
-  "note": "Endpoint-bound process-session and OS-keychain credential handoff for standalone network receive connections. Contains no wire commands or radio-state fields; connection UI submits a secret and the backend loads it asynchronously.",
-  "split": "",
-  "confidence": "high"
- },
  "core/NetworkPathResolver.h": {
   "tag": "ui-support",
   "note": "Local NIC/IPv4 enumeration + interface-pick helper for connection setup; host networking plumbing, not radio state",
@@ -637,7 +673,7 @@
  },
  "core/ProfileTransfer.h": {
   "tag": "vendor(flex)",
-  "note": "SmartSDR .ssdr_cfg database import/export over Flex TCP transfer protocol (meta_subset, ports 4995/42607)",
+  "note": "SmartSDR profile package preparation and staged ZIP validation; typed file-transfer requests delegate Flex wire negotiation to the backend.",
   "split": "",
   "confidence": "high"
  },
@@ -731,6 +767,12 @@
   "split": "",
   "confidence": "high"
  },
+ "core/ShuttleRateIntegrator.h": {
+  "tag": "ui-support",
+  "note": "pure shuttle-ring rate arithmetic for the desktop HID surface, no radio state",
+  "split": "",
+  "confidence": "high"
+ },
  "core/SignalClassifier.h": {
   "tag": "universal",
   "note": "ONNX CNN voice/carrier classifier over spectrogram patches; radio-agnostic engine DSP/analysis feature",
@@ -752,12 +794,6 @@
  "core/SpectrogramBuffer.h": {
   "tag": "universal",
   "note": "Ring buffer of FFT frames per panadapter feeding CNN classifier patches; pure spectrum data, radio-agnostic.",
-  "split": "",
-  "confidence": "high"
- },
- "core/SpotCollectorClient.h": {
-  "tag": "ui-support",
-  "note": "UDP listener for DXLab SpotCollector desktop app; external integration feeding DxSpot, not radio state",
   "split": "",
   "confidence": "high"
  },
@@ -827,6 +863,12 @@
   "split": "",
   "confidence": "high"
  },
+ "core/UpdateController.h": {
+  "tag": "ui-support",
+  "note": "App self-update: Install update and Restart to update, owning UpdateStager and the helper hand-off for the Updates window and title bar; pure client plumbing, no radio state.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/UpdateInstaller.h": {
   "tag": "ui-support",
   "note": "App self-update: hands a staged release to AetherSDRUpdater.exe and reads its result at start; pure client plumbing, no radio state.",
@@ -871,14 +913,14 @@
  },
  "core/WaveformInstaller.h": {
   "tag": "vendor(flex)",
-  "note": "Uploads Docker waveform images via SmartSDR fw 4.2.18 'file upload' TCP protocol — Flex-only ecosystem.",
+  "note": "Waveform package preparation and byte transport; typed file-transfer requests delegate Flex wire negotiation to the backend.",
   "split": "",
   "confidence": "high"
  },
  "core/WfmDemodulator.h": {
   "tag": "mixed(flex)",
-  "note": "WFM demod around WfmDsp: demod/Doppler-offset intent is core; IQ source is DAX IQ + SmartSDR cmds (flex)",
-  "split": "WFM demod capability + freq-offset/volume intent = core-profile; DAX IQ capture device/channel, DaxIqModel wiring, SmartSDR commandReady = flex",
+  "note": "WFM demod around WfmDsp: demod/Doppler-offset intent is core; IQ source remains Flex DAX IQ, with typed pan binding",
+  "split": "WFM demod capability + freq-offset/volume intent = core-profile; DAX IQ capture device/channel and DaxIqModel wiring = flex. Command encoding is behind IRadioBackend.",
   "confidence": "high"
  },
  "core/WfmSettings.h": {
@@ -1009,25 +1051,25 @@
  },
  "models/DaxIqModel.h": {
   "tag": "vendor(flex)",
-  "note": "Flex DAX IQ streams: dax_iq stream create/rate cmds, 4-ch DAX model, pipes to SDR apps — DAX is Flex-only",
+  "note": "Flex DAX IQ streams: typed create/remove/rate requests, four-channel model and pipes to SDR apps; Flex status parsing remains in the model",
   "split": "",
   "confidence": "high"
  },
  "models/DvkModel.h": {
   "tag": "mixed(flex)",
-  "note": "Voice keyer slots/commands are core-profile; status parsing + FlexLib SsdrErrors mapping are flex.",
-  "split": "Core: voice-keyer slots/status + rec/preview/playback intent. Vendor: SmartSDR status parsing, SsdrErrors code mapping, reply correlation.",
+  "note": "Typed voice-keyer requests and session-scoped reply identities are core-profile; SmartSDR status parsing and SsdrErrors mapping remain flex.",
+  "split": "Core: voice-keyer slots/status and typed recording/preview/playback intent. Backend: command encoding. Remaining vendor work: SmartSDR status parsing and SsdrErrors code mapping.",
   "confidence": "high"
  },
  "models/EqualizerModel.h": {
   "tag": "universal",
-  "note": "8-band TX/RX audio EQ state (enable + band gains) — core capability; SmartSDR wire parsing/cmds move to flex adapter",
+  "note": "8-band TX/RX audio EQ state and typed enable/band-gain intent are universal; Flex encoding is backend-owned, legacy status parsing remains",
   "split": "",
   "confidence": "high"
  },
  "models/FlexWaveformModel.h": {
   "tag": "vendor(flex)",
-  "note": "FlexLib waveform/WFP container management: parses SmartSDR waveform status, emits Flex protocol commands",
+  "note": "Flex waveform/WFP status mirror with typed management intents; the backend encodes commands.",
   "split": "",
   "confidence": "high"
  },
@@ -1065,6 +1107,12 @@
   "tag": "mixed(flex)",
   "note": "Meter registry+values are core-profile; VITA-49 raw scaling, TGXL/PGXL amp routing, COMPPEAK quirks are Flex",
   "split": "Core: meter defs/values, S-meter, TX pwr/SWR, mic/ALC, telemetry. Flex: VITA-49 scaling, TGXL/PGXL handles, COMPPEAK slice quirks",
+  "confidence": "high"
+ },
+ "models/RadioSwrValidityFilter.h": {
+  "tag": "universal",
+  "note": "Trust gate for a radio's SWR stream against instantaneous forward power (attack-immediately/timed-release envelope, low-SWR and below-unity confirmation). Pure value logic, no vendor ties; consumed by the S-meter and by TCI tx_sensors.",
+  "split": "",
   "confidence": "high"
  },
  "models/NetEntry.h": {
@@ -1361,24 +1409,6 @@
   "split": "",
   "confidence": "high"
  },
- "core/backends/web888/Web888Backend.h": {
-  "tag": "vendor(web888)",
-  "note": "Local experimental native RX backend. Owns the Web-888 session below IRadioBackend; selected through the neutral factory.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/RadioBackendFactory.h": {
-  "tag": "universal",
-  "note": "Backend composition boundary. Accepts a family key and returns IRadioBackend; concrete vendor types stay below the seam.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/kiwi/KiwiSessionId.h": {
-  "tag": "vendor(kiwi)",
-  "note": "Shared Kiwi/Web-888 wire-session identifier allocator; server timestamp namespace and signed-parser bounds.",
-  "split": "",
-  "confidence": "high"
- },
  "core/tnc/Ax25Connection.h": {
   "tag": "universal",
   "note": "Single-peer AX.25 v2.0 connected-mode (LAPB) data-link state machine, mod-8 sequence space, backing the Personal Mailbox System. Radio-agnostic packet layer above whatever modem or backend carries the audio.",
@@ -1445,6 +1475,12 @@
   "split": "",
   "confidence": "high"
  },
+ "core/TxOffDelaySettings.h": {
+  "tag": "ui-support",
+  "note": "Client-side persistence for the phone-mode TX off delay (one nested AppSettings object, Principle V). The radio interlock stores key-on delays only, so there is no radio-owned value to defer to; no wire commands or vendor coupling.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/ShutdownTrace.h": {
   "tag": "ui-support",
   "note": "Process-local shutdown diagnostics and support-log breadcrumbs; lifecycle plumbing, not radio state.",
@@ -1454,6 +1490,12 @@
  "core/SpeProtocol.h": {
   "tag": "peripheral(spe)",
   "note": "Wire codec for standalone SPE Expert amplifiers over serial/ser2net. The accessory connects independently of the radio and stays outside IRadioBackend, matching the ACOM/VKAMP peripheral precedent.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/SpeLegacyProtocol.h": {
+  "tag": "peripheral(spe)",
+  "note": "Wire codec for the original SPE Expert 1K-FA (Rev 2.0 legacy protocol) over serial/ser2net. Same standalone-accessory precedent as core/SpeProtocol.h; not radio-family wire and not behind IRadioBackend. See docs/architecture/spe-expert-amplifier-design.md §12.",
   "split": "",
   "confidence": "high"
  },
@@ -1631,66 +1673,6 @@
   "split": "Core: receiver selection, epochs, bounded backlog, rate conversion and decoder resets. Flex compatibility: DAX channel selection and central consumer holds; no wire commands are generated here.",
   "confidence": "high"
  },
- "core/backends/kiwi/KiwiIqBlock.h": {
-  "tag": "vendor(kiwi)",
-  "note": "Bounded filtered SND IQ wire payload, opt-in below the backend seam.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888IqSplitter.h": {
-  "tag": "vendor(web888)",
-  "note": "Streaming USB decoder channelization of one filtered Web-888 IQ capture.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888IqCapture.h": {
-  "tag": "vendor(web888)",
-  "note": "Sound-only IQ session lifetime and revocable decoder outputs.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888CapturePlan.h": {
-  "tag": "vendor(web888)",
-  "note": "Pure receive-window planning and explicit listening capacity reservation.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888CapturePool.h": {
-  "tag": "vendor(web888)",
-  "note": "Owner-thread capture admission, listening budget, rollback and source lifetime below the backend seam.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888DecoderPeriod.h": {
-  "tag": "vendor(web888)",
-  "note": "Bounded decoder period assembly requiring an explicit verified sample-time anchor.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888DecoderRouter.h": {
-  "tag": "vendor(web888)",
-  "note": "Bounded per-mode decoder period routing, aggregate sample budget and revocable jobs below the backend seam.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888DecoderProcess.h": {
-  "tag": "vendor(web888)",
-  "note": "Bounded local decoder process handoff for Web-888 routed audio jobs.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888DecoderWav.h": {
-  "tag": "vendor(web888)",
-  "note": "Bounded PCM16 WAV serialization of current complete decoder jobs; no file or device effects.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/web888/Web888IqProcessor.h": {
-  "tag": "vendor(web888)",
-  "note": "Bounded shared IQ DSP worker and owner-thread result delivery below the backend seam.",
-  "split": "",
-  "confidence": "high"
- },
  "models/Ax25ReceiveModel.h": {
   "tag": "universal",
   "note": "Selected AX.25 receive model over the existing typed decoder route; continuous mono24 conversion and bounded modem worker results retain source leases and generation retirement. Existing transmit ownership is separate.",
@@ -1718,24 +1700,6 @@
  "core/AudioDevicePreferencePolicy.h": {
   "tag": "ui-support",
   "note": "Header-only policy over PC audio device ids: whether a device-list change keeps the engine's device, falls back to the system default or returns to the saved device, and whether a selection is written to the saved id (#6040); also which enumerable ids count as present and which as arrivals. Host audio, no radio state.",
-  "split": "",
-  "confidence": "high"
- },
- "models/DigitalMonitoringModel.h": {
-  "tag": "universal",
-  "note": "Capability-declared digital monitoring extension request correlation and session lifecycle; no vendor transport or sample UTC inference.",
-  "split": "",
-  "confidence": "high"
- },
- "core/ShuttleRateIntegrator.h": {
-  "tag": "ui-support",
-  "note": "pure shuttle-ring rate arithmetic for the desktop HID surface, no radio state",
-  "split": "",
-  "confidence": "high"
- },
- "core/SpeLegacyProtocol.h": {
-  "tag": "peripheral(spe)",
-  "note": "Wire codec for the original SPE Expert 1K-FA (Rev 2.0 legacy protocol) over serial/ser2net. Same standalone-accessory precedent as core/SpeProtocol.h; not radio-family wire and not behind IRadioBackend. See docs/architecture/spe-expert-amplifier-design.md §12.",
   "split": "",
   "confidence": "high"
  },
@@ -1799,6 +1763,12 @@
   "split": "",
   "confidence": "high"
  },
+ "core/LinuxInstall.h": {
+  "tag": "ui-support",
+  "note": "App self-update on Linux: the install --install makes and the switch to a staged release after its self-test; pure client plumbing, no radio state.",
+  "split": "",
+  "confidence": "high"
+ },
  "core/LocalWavPlayer.h": {
   "tag": "ui-support",
   "note": "Plays a voice-keyer slot's WAV on this computer's speakers (RFC #4214 PREV) through the output device the operator chose, fed via core/AudioOutputRouter.h. Never touches the radio or the transmitter: OS playback-device plumbing, no radio state, same precedent as core/AudioOutputRouter.h itself.",
@@ -1847,96 +1817,6 @@
   "split": "",
   "confidence": "high"
  },
- "core/NrspCredentials.h": {
-  "tag": "ui-support",
-  "note": "Endpoint-and-username-bound OS-keychain credential handoff. Contains no vendor protocol or radio state; UI forgets credentials and backend loads and saves accepted credentials.",
-  "split": "",
-  "confidence": "high"
- },
- "models/MonitorAudioRouter.h": {
-  "tag": "universal",
-  "note": "Selected speaker source model; revokes queued and converted PCM without retiring original decoder epochs. No device, vendor protocol or transmit authority.",
-  "split": "",
-  "confidence": "high"
- },
- "models/RadioStation.h": {
-  "tag": "universal",
-  "note": "Independent RadioSession ownership and selected PCM routing with session identity and selection-generation fences; no vendor protocol or transmit authority.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/NtpSourceRequest.h": {
-  "tag": "universal",
-  "note": "Seam vocabulary for a radio-held NTP time source list: the definition and request types with the firmware's id/address/description allowlists, the reported source state and its present-only delta. No wire text; FlexBackend encodes and decodes it (SmartSDR 4.3.16) and capabilities().ntpSourceControl gates it.",
-  "split": "",
-  "confidence": "high"
- },
- "core/backends/WaveformEnvRequest.h": {
-  "tag": "universal",
-  "note": "Seam vocabulary for a radio-held waveform container environment: the typed clear/stage/recreate request with its validation, and the apply outcome. No wire text; FlexBackend encodes it (SmartSDR 4.3.16) and capabilities().waveformEnvControl gates it.",
-  "split": "",
-  "confidence": "high"
- },
- "core/RigExpertHidTransport.h": {
-  "tag": "peripheral(rigexpert)",
-  "note": "Independent Stick Pro HID instrument transport; no radio backend, audio or transceiver commands. USB proof of concept under RFC #6471.",
-  "split": "",
-  "confidence": "high"
- },
- "models/AntennaAnalyzerModel.h": {
-  "tag": "peripheral(rigexpert)",
-  "note": "Independent antenna analyzer state and finite-sweep model, exposed to the GUI and automation bridge. Does not use RadioModel or IRadioBackend.",
-  "split": "",
-  "confidence": "high"
- },
- "core/RadioHealthClient.h": {
-  "tag": "peripheral(radio-health)",
-  "note": "Reads one JSON line from the radio health agent on the radio's LAN address (TCP 48994) and summarizes free storage, memory and CPU for the Waveforms window's health bar. Not SmartSDR wire: AetherSDR's own TCP service (the radio health agent, tools/radio-health) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/TailnetShimClient.h).",
-  "split": "",
-  "confidence": "high"
- },
- "core/RadioHealthPackage.h": {
-  "tag": "peripheral(radio-health)",
-  "note": "Pinned version, Qt resource path, size and SHA-256 of the radio health agent package that ships inside AetherSDR, plus its waveform name and port. Not SmartSDR wire: AetherSDR's own TCP service (the radio health agent, tools/radio-health) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/TailnetShimClient.h).",
-  "split": "",
-  "confidence": "high"
- },
- "core/WsprAgent.h": {
-  "tag": "peripheral(wspr-agent)",
-  "note": "The WSPR receiver's status, spots and settings (types, bounded JSON parsing, the settings body, the SpotHub DxSpot) and its pinned package. Not SmartSDR wire: AetherSDR's own HTTP service on TCP 48995 (the WSPR receiver, tools/wspr-agent) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/RadioHealthClient.h).",
-  "split": "",
-  "confidence": "high"
- },
- "core/WsprAgentClient.h": {
-  "tag": "peripheral(wspr-agent)",
-  "note": "Polls the WSPR receiver's /v1/status and reads and saves its /v1/config at the radio's LAN or tailnet-shim address. Not SmartSDR wire: AetherSDR's own HTTP service on TCP 48995 (the WSPR receiver, tools/wspr-agent) that happens to run on the radio as a legacy waveform, so a direct-transport peripheral, NOT behind the IRadioBackend radio seam (same shape as core/RadioHealthClient.h).",
-  "split": "",
-  "confidence": "high"
- },
- "core/ExternalFilePath.h": {
-  "tag": "ui-support",
-  "note": "Resolves an existing AppData log or support-bundle file to the physical MSIX LocalCache location for display and for external applications (Explorer, mail client). Presentation-path plumbing, not radio state.",
-  "split": "",
-  "confidence": "high"
- },
- "core/UpdateController.h": {
-  "tag": "ui-support",
-  "note": "App self-update: Install update and Restart to update, owning UpdateStager and the helper hand-off for the Updates window and title bar; pure client plumbing, no radio state.",
-  "split": "",
-  "confidence": "high"
- },
- "models/RadioSwrValidityFilter.h": {
-  "tag": "universal",
-  "note": "Trust gate for a radio's SWR stream against instantaneous forward power (attack-immediately/timed-release envelope, low-SWR and below-unity confirmation). Pure value logic, no vendor ties; consumed by the S-meter and by TCI tx_sensors.",
-  "split": "",
-  "confidence": "high"
- },
- "core/LinuxInstall.h": {
-  "tag": "ui-support",
-  "note": "App self-update on Linux: the install --install makes and the switch to a staged release after its self-test; pure client plumbing, no radio state.",
-  "split": "",
-  "confidence": "high"
- },
  "core/backends/CwTextRequest.h": {
   "tag": "universal",
   "note": "Typed desktop buffered-keyer intents, capability fields and normalized queue replies. Plain text and original caller identity; no vendor command grammar or daemon TX permission.",
@@ -1946,6 +1826,24 @@
  "core/backends/flex/FlexCwxControls.h": {
   "tag": "vendor(flex)",
   "note": "FlexLib-authoritative CWX command encoding and bounded queue-reply decoding. Only backend implementations and socket-free wire fixtures consume it.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/ConnectionWorkspace.h": {
+  "tag": "ui-support",
+  "note": "Local connection memberships, credential references and operator audio/layout preferences; no radio operating state.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/Data2gReceiveModel.h": {
+  "tag": "universal",
+  "note": "Receive-only Data2G monitor fed mono 24 kHz audio from the AX.25 receive model's existing tap; decode runs on its own worker with a bounded queue and generation retirement. No radio protocol, no audio source of its own and no transmit authority.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/backends/flex/VitaRxReorder.h": {
+  "tag": "vendor(flex)",
+  "note": "Bounded Flex VITA count/timestamp receive ordering and loss resolution; private to the Flex stream path.",
   "split": "",
   "confidence": "high"
  },
@@ -1982,6 +1880,12 @@
  "core/NetworkReceiverCredentials.h": {
   "tag": "ui-support",
   "note": "Endpoint-bound process-session and OS-keychain credential handoff for standalone network receive connections. Contains no wire commands or radio-state fields; connection UI submits a secret and the backend loads it asynchronously.",
+  "split": "",
+  "confidence": "high"
+ },
+ "core/SpotCollectorClient.h": {
+  "tag": "ui-support",
+  "note": "UDP listener for DXLab SpotCollector desktop app; external integration feeding DxSpot, not radio state",
   "split": "",
   "confidence": "high"
  },
@@ -2072,6 +1976,18 @@
  "core/NrspCredentials.h": {
   "tag": "ui-support",
   "note": "Endpoint-and-username-bound OS-keychain credential handoff. Contains no vendor protocol or radio state; UI forgets credentials and backend loads and saves accepted credentials.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/MonitorAudioRouter.h": {
+  "tag": "universal",
+  "note": "Selected speaker source model; revokes queued and converted PCM without retiring original decoder epochs. No device, vendor protocol or transmit authority.",
+  "split": "",
+  "confidence": "high"
+ },
+ "models/RadioStation.h": {
+  "tag": "universal",
+  "note": "Independent RadioSession ownership and selected PCM routing with session identity and selection-generation fences; no vendor protocol or transmit authority.",
   "split": "",
   "confidence": "high"
  }
