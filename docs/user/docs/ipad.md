@@ -57,8 +57,10 @@ including when holding it at an edge to scroll farther. For finer adjustment,
 choose a smaller **Tuning step** in **Receiver** and use **−** / **+**, or enter
 an exact frequency with the keypad.
 
-Pinch the spectrum to zoom around the point between your fingers. The bottom
-toolbar scrolls horizontally if its controls do not fit. The main tuning and
+Spread two fingers on the spectrum to narrow the visible frequency range.
+Pinch them together to widen it. The frequency between your fingers stays in
+place as you zoom. The bottom toolbar scrolls horizontally if its controls do
+not fit. The main tuning and
 receiver sheets have large touch controls; advanced desktop dialogs still
 vary in their suitability for touch.
 NR2 may show an FFT optimization window the first time it is enabled. Let it

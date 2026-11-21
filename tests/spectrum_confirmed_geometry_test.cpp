@@ -42,6 +42,9 @@
 #include <QCheckBox>
 #include <QComboBox>
 #include <QPointer>
+#include <QGestureRecognizer>
+#include <QPinchGesture>
+#include <QSignalSpy>
 #include <QEvent>
 #include <QLineEdit>
 #include <QElapsedTimer>
@@ -1209,6 +1212,115 @@ int runReceiveWindowDragSteps()
     return failures ? 1 : 0;
 }
 
+// macOS Qt uses a trackpad recognizer. Replay iPad-style incremental pinch
+// updates through Qt's gesture manager so the widget receives real gesture
+// states in the offscreen test on any host.
+class PinchFrame : public QEvent {
+public:
+    static QEvent::Type eventType()
+    {
+        static const auto type = static_cast<QEvent::Type>(QEvent::registerEventType());
+        return type;
+    }
+    PinchFrame(QPointF center, qreal scale, bool finished)
+        : QEvent(eventType()), center(center), scale(scale), finished(finished) {}
+    QPointF center;
+    qreal scale;
+    bool finished;
+};
+
+class PinchReplay : public QGestureRecognizer {
+public:
+    QGesture* create(QObject*) override { return new QPinchGesture; }
+    Result recognize(QGesture* state, QObject*, QEvent* event) override
+    {
+        if (event->type() != PinchFrame::eventType()) {
+            return Ignore;
+        }
+        auto* frame = static_cast<PinchFrame*>(event);
+        if (frame->finished) {
+            return FinishGesture;
+        }
+        auto* pinch = static_cast<QPinchGesture*>(state);
+        pinch->setCenterPoint(frame->center);
+        pinch->setLastScaleFactor(pinch->scaleFactor());
+        pinch->setScaleFactor(frame->scale);
+        pinch->setChangeFlags(QPinchGesture::ScaleFactorChanged);
+        return TriggerGesture;
+    }
+};
+
+int runTabletPinchZoom()
+{
+    qputenv("AETHER_TABLET_UI", "1");
+    QGestureRecognizer::unregisterRecognizer(Qt::PinchGesture);
+    QGestureRecognizer::registerRecognizer(new PinchReplay);
+    int failures = 0;
+    const auto check = [&](bool ok, const char* message) {
+        std::printf("[%s] %s\n", ok ? "OK" : "FAIL", message);
+        failures += !ok;
+    };
+    for (const QSize& size : {QSize(820, 1000), QSize(1180, 700)}) {
+        SpectrumWidget pan;
+        pan.resize(size);
+        pan.move(75, 40);
+        pan.setFrequencyRangeImmediate(14.2, 0.2);
+        constexpr double anchorMhz = 14.16;
+        const int anchorX = SpectrumOffscreenTestAccess::carrierX(pan, anchorMhz);
+        const QPoint center = pan.mapToGlobal(QPoint(anchorX, 160));
+        QSignalSpy requests(&pan, &SpectrumWidget::frequencyRangeChangeRequested);
+        const auto requestedSpan = [&](double span) {
+            const auto matches = [&] {
+                return !requests.isEmpty() && near(requests.last().at(1).toDouble(), span);
+            };
+            return matches() || (requests.wait(500) && matches());
+        };
+        const auto sendPinch = [&](qreal scale, bool finished = false) {
+            PinchFrame event(center, scale, finished);
+            QApplication::sendEvent(&pan, &event);
+        };
+        sendPinch(1.0);
+        const double initialSpan = pan.bandwidthMhz();
+        sendPinch(1.25);
+        sendPinch(1.25);
+        const double zoomedSpan = initialSpan / (1.25 * 1.25);
+        check(near(pan.bandwidthMhz(), zoomedSpan) && requestedSpan(zoomedSpan),
+              "tablet pinch applies both incremental zoom steps");
+        check(std::abs(SpectrumOffscreenTestAccess::carrierX(pan, anchorMhz) - anchorX) <= 1,
+              "tablet pinch preserves the frequency under the fingers");
+        sendPinch(0.8);
+        const double finalSpan = zoomedSpan / 0.8;
+        check(near(pan.bandwidthMhz(), finalSpan) && requestedSpan(finalSpan),
+              "tablet pinch can widen the span again");
+        sendPinch(0.8, true);
+        check(near(pan.bandwidthMhz(), finalSpan),
+              "lifting both fingers does not apply the last zoom step again");
+        pan.prepareForShutdown();
+    }
+    return failures ? 1 : 0;
+}
+
+// Manual only: constructing MainWindow opens the app's discovery listener.
+int runSpotShutdown(QApplication& app, bool closeWindow)
+{
+    AppSettings::instance().setValue("AutoConnectToLastRadio", "False");
+    MainWindow window;
+    QThread* spots = window.findChild<QThread*>(QStringLiteral("SpotClients"));
+    if (!spots || !spots->isRunning()) {
+        std::fprintf(stderr, "The spot worker did not start\n");
+        return 1;
+    }
+    QTimer::singleShot(0, &window, [&window, spots, closeWindow] {
+        if (closeWindow && (!window.close() || spots->isRunning())) {
+            QCoreApplication::exit(1);
+            return;
+        }
+        // This bypasses closeEvent when testing the direct application exit.
+        QCoreApplication::exit(0);
+    });
+    return app.exec();
+}
+
 int main(int argc, char** argv)
 {
     TestSettingsProfile profile("spectrum-confirmed-geometry");
@@ -1218,6 +1330,12 @@ int main(int argc, char** argv)
         if (QFontDatabase::addApplicationFont(QString::fromLatin1(font)) < 0) { return 1; }
     }
     QApplication::setFont(QFont(QStringLiteral("Inter"), 10));
+    if (app.arguments().contains(QStringLiteral("--tablet-pinch-zoom"))) {
+        return runTabletPinchZoom();
+    }
+    if (app.arguments().contains(QStringLiteral("--spot-shutdown"))) {
+        return runSpotShutdown(app, app.arguments().contains(QStringLiteral("--close-window")));
+    }
     if (app.arguments().contains(QStringLiteral("--receive-window-drag-steps"))) {
         return runReceiveWindowDragSteps();
     }

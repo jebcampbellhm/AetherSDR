@@ -165,6 +165,7 @@
 #include "ThemeEditorDialog.h"
 #include "WhatsNewDialog.h"
 #include "models/SliceModel.h"
+#include "models/DiversityPairPolicy.h"
 #include "models/MeterModel.h"
 #include "models/BandDefs.h"
 #include "models/BandPlanManager.h"
@@ -570,19 +571,19 @@ bool sameAudioDeviceSelection(const QAudioDevice& lhs, const QAudioDevice& rhs)
 bool MainWindow::isSameDiversityReceivePair(const SliceModel* slice,
                                             const SliceModel* other)
 {
-    if (!slice || !other || slice == other
-        || !slice->diversity() || !other->diversity()) {
+    if (!slice || !other || slice == other)
         return false;
-    }
-
-    const bool parentChildPair =
-        (slice->isDiversityParent() && other->isDiversityChild())
-        || (slice->isDiversityChild() && other->isDiversityParent());
-    if (parentChildPair) {
-        return true;
-    }
-
-    return !slice->panId().isEmpty() && slice->panId() == other->panId();
+    auto view = [](const SliceModel* s) {
+        DiversityPairPolicy::SliceView v;
+        v.sliceId = s->sliceId();
+        v.diversity = s->diversity();
+        v.parent = s->isDiversityParent();
+        v.child = s->isDiversityChild();
+        v.diversityIndex = s->diversityIndex();
+        v.panId = s->panId();
+        return v;
+    };
+    return DiversityPairPolicy::isSamePair(view(slice), view(other));
 }
 
 // ─── Shortcut guard (file-scope for use as std::function<bool()>) ───────────
@@ -2665,6 +2666,8 @@ MainWindow::~MainWindow()
     ShutdownTrace destructorTrace("main_window.destructor_body");
     qApp->removeEventFilter(this);
 
+    stopSpotSubsystem();
+
     // The Runtime Monitor reads m_memoryHistory, m_cpuHistory and
     // m_uiTickLagMeter, which are unique_ptr members and so are gone before
     // ~QObject deletes the dialog (a WA_DeleteOnClose child). Its destructor
@@ -3822,7 +3825,7 @@ void MainWindow::applyWindowsCaptionStyles()
     }
     const LONG_PTR style = GetWindowLongPtr(hwnd, GWL_STYLE);
     const LONG_PTR desired = style | WS_SYSMENU | WS_MINIMIZEBOX | WS_MAXIMIZEBOX;
-    // On Windows 10 this frame change is also what routes WM_NCCALCSIZE
+    // On Windows this frame change is also what routes WM_NCCALCSIZE
     // through nativeEvent() before setFramelessWindow() and the startup
     // re-apply measure the client rect; Qt answered it at creation.
     if (style != desired) {
@@ -3897,26 +3900,20 @@ void MainWindow::restoreNativeClientRect(const QString& role)
 
 void MainWindow::applyNonClientBandInsets()
 {
-    // The band is only lost under the expanded client area: with native chrome
-    // the frame is outside the window rect entirely, and on Windows 10
-    // nativeEvent's WM_NCCALCSIZE branch already claims it back.
-    //
-    // Maximized is excluded: Windows pushes the band off-screen, so the client
-    // rect already covers the work area and an inset would leave a dead strip.
     QMargins insets;
-#ifdef Q_OS_WIN
-    if (windowFlags().testFlag(Qt::ExpandedClientAreaHint) && !isFullScreen()
-        && !isMaximized()
-        && !WindowChrome::claimsWholeWindowAsClient(windowFlags(),
-                                                    QOperatingSystemVersion::current())) {
-        if (const HWND hwnd = reinterpret_cast<HWND>(winId())) {
+    if (!isFullScreen()
+        && WindowChrome::reservesClientInsets(windowFlags(), QOperatingSystemVersion::current())) {
+        const HWND hwnd = reinterpret_cast<HWND>(winId());
+        if (isMaximized() && IsZoomed(hwnd)) {
+            insets = WindowChrome::maximizedClientInsets(size(), nativeClientRect().size(),
+                                                         devicePixelRatioF());
+        } else if (!isMaximized() && hwnd) {
             const UINT dpi = GetDpiForWindow(hwnd);
             const int band = GetSystemMetricsForDpi(SM_CXSIZEFRAME, dpi)
                            + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
             insets = WindowChrome::nonClientBandInsets(band, devicePixelRatioF());
         }
     }
-#endif
     if (contentsMargins() == insets) {
         // The margins are already right, but the grip may not be: showing it
         // from setFramelessWindow() changes no size and so sends no
@@ -3926,9 +3923,9 @@ void MainWindow::applyNonClientBandInsets()
     }
     // QMainWindow's layout honours the window's own margins, so this insets
     // the central widget — the title bar included, since it sits in the
-    // central widget's vbox — and the status bar. Only the top is left alone,
-    // for the caption's own row. The title bar's side bands are lost the same
-    // way, and nothing doubles: TitleBar::updateChromeLayout() adds
+    // central widget's vbox — and the status bar. The top is always left
+    // alone, for the caption's own row; maximized, only the right and bottom
+    // are inset. Nothing doubles: TitleBar::updateChromeLayout() adds
     // contentInsets(), which is safeAreaMargins() and 0 on those edges here.
     setContentsMargins(insets);
     // The window's size has not changed, so no resizeEvent re-places the grip,
@@ -4007,9 +4004,9 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
         const QPoint point(GET_X_LPARAM(msg->lParam), GET_Y_LPARAM(msg->lParam));
         const QRect rect(window.left, window.top,
                          window.right - window.left, window.bottom - window.top);
-        // The client area's top-left in screen pixels. GetWindowRect includes
-        // the invisible DWM resize border and Qt's geometry does not, so the
-        // caption gate anchors here instead — see logicalScreenPoint().
+        // The client area's top-left in screen pixels. Maximized, the client
+        // is inset from GetWindowRect and Qt's geometry follows the client, so
+        // the caption gate anchors here instead — see logicalScreenPoint().
         POINT clientOrigin{0, 0};
         ClientToScreen(msg->hwnd, &clientOrigin);
         // The bar's height is in logical pixels and WM_NCHITTEST is physical.
@@ -4026,11 +4023,11 @@ bool MainWindow::nativeEvent(const QByteArray& eventType, void* message, qintptr
             WindowChrome::expandedFrameHit(point, rect, borderX, borderY, captionHeight));
         return true;
     }
-    // The whole window is client area, inset only while maximized so nothing
+    // Claim the resize band so Windows cannot paint a light strip between
+    // the DWM border and the client. Inset only while maximized so nothing
     // sits past the screen edge; the WM_NCHITTEST above keeps the edges resizable.
     if (msg && result && msg->message == WM_NCCALCSIZE && msg->wParam
-        && WindowChrome::claimsWholeWindowAsClient(windowFlags(),
-                                                   QOperatingSystemVersion::current())) {
+        && WindowChrome::claimsWholeWindowAsClient(windowFlags())) {
         if (IsZoomed(msg->hwnd) && !isFullScreen()) {
             const UINT dpi = GetDpiForWindow(msg->hwnd);
             const int padded = GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi);
@@ -4182,6 +4179,13 @@ void MainWindow::reapplyStartupGeometryAfterShow()
 void MainWindow::resizeEvent(QResizeEvent* event)
 {
     QMainWindow::resizeEvent(event);
+#ifdef Q_OS_WIN
+    // A maximize can deliver the widget size after the window-state event.
+    if (isMaximized() && event->oldSize() != event->size()) {
+        applyNonClientBandInsets();
+        return;
+    }
+#endif
     positionSizeGrip();
 }
 
@@ -4191,7 +4195,8 @@ void MainWindow::positionSizeGrip()
     // overlaying the status bar.  Direct child of MainWindow so the
     // grip's native dotted-texture paint isn't suppressed by the
     // status-bar stylesheet.  Inside the contents margins, which hold the
-    // Windows 11 non-client band (applyNonClientBandInsets()) and are 0
+    // Windows 11 resize band while restored and Qt's excess over the native
+    // client while maximized (applyNonClientBandInsets()), and are 0
     // everywhere else.
     if (m_sizeGrip) {
         m_sizeGrip->move(WindowChrome::sizeGripOrigin(size(), m_sizeGrip->width(),
@@ -4214,8 +4219,7 @@ void MainWindow::changeEvent(QEvent* event)
     QMainWindow::changeEvent(event);
 
 #ifdef Q_OS_WIN
-    // The inset applies only while restored, so maximizing and restoring have
-    // to re-run it. A DPI change arrives at event(), not here.
+    // Restored and maximized windows reserve different margins.
     if (event && event->type() == QEvent::WindowStateChange) {
         applyNonClientBandInsets();
     }
@@ -4514,114 +4518,7 @@ void MainWindow::closeEvent(QCloseEvent* event)
     }
     audioStopRx();
 
-    // Stop spot client worker thread
-    if (m_spotThread) {
-        if (m_spotThread->isRunning()) {
-            DxClusterClient* dxCluster = m_dxCluster;
-            DxClusterClient* rbnClient = m_rbnClient;
-            WsjtxClient* wsjtxClient = m_wsjtxClient;
-            PotaClient* potaClient = m_potaClient;
-            EibiClient* eibiClient = m_eibiClient;
-            N1MMSpotClient* n1mmSpotClient = m_n1mmSpotClient;
-#ifdef HAVE_WEBSOCKETS
-            FreeDvClient* freedvClient = m_freedvClient;
-#endif
-            {
-                ShutdownTrace trace("spots.dx_cluster.disconnect");
-                QMetaObject::invokeMethod(dxCluster, [dxCluster] {
-                    ShutdownTrace workerTrace("spots.dx_cluster.disconnect.worker");
-                    dxCluster->disconnect();
-                },
-                                          Qt::BlockingQueuedConnection);
-            }
-            {
-                ShutdownTrace trace("spots.rbn.disconnect");
-                QMetaObject::invokeMethod(rbnClient, [rbnClient] {
-                    ShutdownTrace workerTrace("spots.rbn.disconnect.worker");
-                    rbnClient->disconnect();
-                },
-                                          Qt::BlockingQueuedConnection);
-            }
-            {
-                ShutdownTrace trace("spots.wsjtx.stop");
-                QMetaObject::invokeMethod(wsjtxClient, [wsjtxClient] {
-                    ShutdownTrace workerTrace("spots.wsjtx.stop.worker");
-                    wsjtxClient->stopListening();
-                },
-                                          Qt::BlockingQueuedConnection);
-            }
-            {
-                ShutdownTrace trace("spots.pota.stop");
-                QMetaObject::invokeMethod(potaClient, [potaClient] {
-                    ShutdownTrace workerTrace("spots.pota.stop.worker");
-                    potaClient->stopPolling();
-                },
-                                          Qt::BlockingQueuedConnection);
-            }
-            {
-                ShutdownTrace trace("spots.eibi.stop");
-                QMetaObject::invokeMethod(eibiClient, [eibiClient] {
-                    ShutdownTrace workerTrace("spots.eibi.stop.worker");
-                    eibiClient->setEnabled(false);
-                },
-                                          Qt::BlockingQueuedConnection);
-            }
-            {
-                ShutdownTrace trace("spots.n1mm.stop");
-                QMetaObject::invokeMethod(n1mmSpotClient,
-                                          [n1mmSpotClient] {
-                    ShutdownTrace workerTrace("spots.n1mm.stop.worker");
-                    n1mmSpotClient->stopListening();
-                },
-                                          Qt::BlockingQueuedConnection);
-            }
-#ifdef HAVE_WEBSOCKETS
-            {
-                ShutdownTrace trace("spots.freedv.stop");
-                QMetaObject::invokeMethod(freedvClient,
-                                          [freedvClient] {
-                    ShutdownTrace workerTrace("spots.freedv.stop.worker");
-                    freedvClient->stopConnection();
-                },
-                                          Qt::BlockingQueuedConnection);
-            }
-#endif
-            dxCluster->deleteLater();
-            rbnClient->deleteLater();
-            wsjtxClient->deleteLater();
-            potaClient->deleteLater();
-            eibiClient->deleteLater();
-            n1mmSpotClient->deleteLater();
-#ifdef HAVE_WEBSOCKETS
-            freedvClient->deleteLater();
-#endif
-            {
-                ShutdownTrace trace("spots.thread.join");
-                m_spotThread->quit();
-                if (!m_spotThread->wait(3000))
-                    trace.fail("thread_join_timeout");
-            }
-        } else {
-            delete m_dxCluster;
-            delete m_rbnClient;
-            delete m_wsjtxClient;
-            delete m_potaClient;
-            delete m_eibiClient;
-            delete m_n1mmSpotClient;
-#ifdef HAVE_WEBSOCKETS
-            delete m_freedvClient;
-#endif
-        }
-        m_dxCluster = nullptr;
-        m_rbnClient = nullptr;
-        m_wsjtxClient = nullptr;
-        m_potaClient = nullptr;
-        m_eibiClient = nullptr;
-        m_n1mmSpotClient = nullptr;
-#ifdef HAVE_WEBSOCKETS
-        m_freedvClient = nullptr;
-#endif
-    }
+    stopSpotSubsystem();
 
     // A staged update installs as AetherSDR quits (RFC #5304): the helper
     // waits for this process to exit. Not while radio firmware is being
@@ -6614,6 +6511,37 @@ void MainWindow::buildUI()
         vbox->addWidget(m_pgxlStateLabel);
     }
     hbox->addWidget(m_pgxlContainer);
+
+    // KPA500 main-window indicator — RFC #7092.
+    // Passive widget (no click / no aetherStateCycle): show/hide on detectedChanged only.
+    m_kpa500Separator = addSep();
+    m_kpa500Separator->setVisible(false);
+
+    m_kpa500Container = new QWidget;
+    m_kpa500Container->setObjectName(QStringLiteral("kpa500Indicator"));
+    m_kpa500Container->setToolTip("Elecraft KPA500");
+    m_kpa500Container->setAccessibleName("KPA500: Unknown");
+    m_kpa500Container->setVisible(false);
+    {
+        auto* vbox = new QVBoxLayout(m_kpa500Container);
+        vbox->setContentsMargins(0, 0, 0, 4);
+        vbox->setSpacing(0);
+        vbox->setAlignment(Qt::AlignVCenter);
+        m_kpa500Indicator = new QLabel("KPA");
+        m_kpa500Indicator->setAlignment(Qt::AlignCenter);
+        m_kpa500StateLabel = new QLabel(QStringLiteral("–"));
+        m_kpa500StateLabel->setAlignment(Qt::AlignCenter);
+        {
+            QFont f = m_kpa500StateLabel->font();
+            f.setPixelSize(11);
+            const int minW = QFontMetrics(f).horizontalAdvance("STANDBY") + 16;
+            m_kpa500StateLabel->setMinimumWidth(minW);
+            m_kpa500Container->setMinimumWidth(minW);
+        }
+        vbox->addWidget(m_kpa500Indicator);
+        vbox->addWidget(m_kpa500StateLabel);
+    }
+    hbox->addWidget(m_kpa500Container);
 
     addSep();
 
@@ -9618,6 +9546,9 @@ void MainWindow::routeCwDecoderOutput()
         // decoder target. Hide it before dropping ownership so a later refresh
         // cannot leave an orphaned CW dock on the old pan (#4409).
         m_cwDecoderApplet->setCwPanelVisible(false);
+        // Saved now, so the target below reads it rather than the value
+        // before the debounced save.
+        m_cwDecoderApplet->flushCwSens();
 #ifdef HAVE_CW_RX_BACKENDS
         disconnect(m_cwDecoderApplet, &PanadapterApplet::cwEngineChanged,
                    this, &MainWindow::selectCwRxBackend);
@@ -9665,9 +9596,11 @@ void MainWindow::routeCwDecoderOutput()
 
     // Connect to new applet
     if (m_cwDecoderApplet) {
-        // Each pan builds its own range sliders; the decoder's ranges are one
-        // shared setting, so the target shows the saved ones before they are pushed.
+        // Each pan builds its own range sliders and Sens slider; the decoder's
+        // ranges and Sens are saved settings, so the target shows the saved
+        // ones before they are pushed or used.
         m_cwDecoderApplet->restoreCwRanges();
+        m_cwDecoderApplet->restoreCwSens();
         connect(&m_cwDecoder, &CwRxModel::textDecoded,
                 m_cwDecoderApplet, &PanadapterApplet::appendCwText);
         // TX-side decoded text routes to a separate slot so the panel
@@ -10847,8 +10780,12 @@ void MainWindow::updateKeyerAvailability()
     if (m_dvkPanel) m_dvkPanel->setShortcutsEnabled(dvkAvailable, txIsSsb || !connected);
     // The local keyer is verified on FlexRadio; on a radio with no voice keyer
     // of its own (Hermes-Lite 2, Icom, ...) it is Beta until those radios have
-    // been tested on the air. hasVoiceKeyer() is permissive while disconnected,
-    // so the word appears only once such a radio is actually connected.
+    // been tested on the air. The family's capability decides it, not
+    // hasVoiceKeyer(): a FlexRadio whose firmware has no DVK API (#7156) still
+    // transmits the local keyer the verified way. Only once a radio is
+    // connected, since a disconnected capability set says nothing.
+    const bool familyHasVoiceKeyer = !connected
+        || m_radioModel.backendCapabilities().hasVoiceKeyer;
     if (m_dvkPanel) {
         // Offline the panel says so rather than blame the radio (the
         // capabilities are then a default-constructed set), and the local
@@ -10860,7 +10797,8 @@ void MainWindow::updateKeyerAvailability()
                 m_radioModel.licenseFeatureEnabled(kDvkLicenseFeature),
                 m_radioModel.dvkLicenseRefused()),
             voiceKeyerPanelSlotsEditableOffline(voiceKeyerSource(), connected));
-        m_dvkPanel->setSourceQualifier(voiceKeyerSource() == VoiceKeyerSource::Local && !hasVoiceKeyer
+        m_dvkPanel->setSourceQualifier(voiceKeyerSource() == VoiceKeyerSource::Local
+                                               && !familyHasVoiceKeyer
                                            ? QStringLiteral("Beta") : QString());
     }
 

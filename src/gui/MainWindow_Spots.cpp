@@ -15,6 +15,7 @@
 #include "models/TransmitModel.h"
 #include "core/N1MMSpotParser.h"
 #include "core/SpotCommandPolicy.h"
+#include "core/ShutdownTrace.h"
 #ifdef HAVE_MQTT
 #include "MqttApplet.h"
 #include "core/MqttAntennaAlias.h"
@@ -61,6 +62,106 @@ QString normalizeCallForMatch(QString c)
 } // namespace
 
 namespace AetherSDR {
+
+void MainWindow::stopSpotSubsystem()
+{
+    if (!m_spotThread) {
+        return;
+    }
+    if (m_spotThread->isRunning()) {
+        DxClusterClient* dxCluster = m_dxCluster;
+        DxClusterClient* rbnClient = m_rbnClient;
+        WsjtxClient* wsjtxClient = m_wsjtxClient;
+        PotaClient* potaClient = m_potaClient;
+        EibiClient* eibiClient = m_eibiClient;
+        N1MMSpotClient* n1mmSpotClient = m_n1mmSpotClient;
+#ifdef HAVE_WEBSOCKETS
+        FreeDvClient* freedvClient = m_freedvClient;
+#endif
+        {
+            ShutdownTrace trace("spots.dx_cluster.disconnect");
+            QMetaObject::invokeMethod(dxCluster, [dxCluster] {
+                ShutdownTrace workerTrace("spots.dx_cluster.disconnect.worker");
+                dxCluster->disconnect();
+            },
+                                      Qt::BlockingQueuedConnection);
+        }
+        {
+            ShutdownTrace trace("spots.rbn.disconnect");
+            QMetaObject::invokeMethod(rbnClient, [rbnClient] {
+                ShutdownTrace workerTrace("spots.rbn.disconnect.worker");
+                rbnClient->disconnect();
+            },
+                                      Qt::BlockingQueuedConnection);
+        }
+        {
+            ShutdownTrace trace("spots.wsjtx.stop");
+            QMetaObject::invokeMethod(wsjtxClient, [wsjtxClient] {
+                ShutdownTrace workerTrace("spots.wsjtx.stop.worker");
+                wsjtxClient->stopListening();
+            },
+                                      Qt::BlockingQueuedConnection);
+        }
+        {
+            ShutdownTrace trace("spots.pota.stop");
+            QMetaObject::invokeMethod(potaClient, [potaClient] {
+                ShutdownTrace workerTrace("spots.pota.stop.worker");
+                potaClient->stopPolling();
+            },
+                                      Qt::BlockingQueuedConnection);
+        }
+        {
+            ShutdownTrace trace("spots.eibi.stop");
+            QMetaObject::invokeMethod(eibiClient, [eibiClient] {
+                ShutdownTrace workerTrace("spots.eibi.stop.worker");
+                eibiClient->setEnabled(false);
+            },
+                                      Qt::BlockingQueuedConnection);
+        }
+        {
+            ShutdownTrace trace("spots.n1mm.stop");
+            QMetaObject::invokeMethod(n1mmSpotClient,
+                                      [n1mmSpotClient] {
+                ShutdownTrace workerTrace("spots.n1mm.stop.worker");
+                n1mmSpotClient->stopListening();
+            },
+                                      Qt::BlockingQueuedConnection);
+        }
+#ifdef HAVE_WEBSOCKETS
+        {
+            ShutdownTrace trace("spots.freedv.stop");
+            QMetaObject::invokeMethod(freedvClient,
+                                      [freedvClient] {
+                ShutdownTrace workerTrace("spots.freedv.stop.worker");
+                freedvClient->stopConnection();
+            },
+                                      Qt::BlockingQueuedConnection);
+        }
+#endif
+    }
+
+    // Close and application teardown both take this path. Client deletion runs
+    // on the worker at QThread::finished, and the thread must exit before Qt
+    // destroys MainWindow's children.
+    {
+        ShutdownTrace trace("spots.thread.join");
+        m_spotThread->quit();
+        if (!m_spotThread->wait(3000)) {
+            trace.fail("thread_join_timeout");
+            m_spotThread->wait();
+        }
+    }
+    m_spotThread = nullptr;
+    m_dxCluster = nullptr;
+    m_rbnClient = nullptr;
+    m_wsjtxClient = nullptr;
+    m_potaClient = nullptr;
+    m_eibiClient = nullptr;
+    m_n1mmSpotClient = nullptr;
+#ifdef HAVE_WEBSOCKETS
+    m_freedvClient = nullptr;
+#endif
+}
 
 void MainWindow::wireSpotSubsystem()
 {
@@ -291,14 +392,18 @@ void MainWindow::wireSpotSubsystem()
 
     m_spotThread = new QThread(this);
     m_spotThread->setObjectName("SpotClients");
-    m_dxCluster->moveToThread(m_spotThread);
-    m_rbnClient->moveToThread(m_spotThread);
-    m_wsjtxClient->moveToThread(m_spotThread);
-    m_potaClient->moveToThread(m_spotThread);
-    m_eibiClient->moveToThread(m_spotThread);
-    m_n1mmSpotClient->moveToThread(m_spotThread);
+    const auto moveClient = [this](QObject* client) {
+        client->moveToThread(m_spotThread);
+        connect(m_spotThread, &QThread::finished, client, &QObject::deleteLater);
+    };
+    moveClient(m_dxCluster);
+    moveClient(m_rbnClient);
+    moveClient(m_wsjtxClient);
+    moveClient(m_potaClient);
+    moveClient(m_eibiClient);
+    moveClient(m_n1mmSpotClient);
 #ifdef HAVE_WEBSOCKETS
-    m_freedvClient->moveToThread(m_spotThread);
+    moveClient(m_freedvClient);
 #endif
     m_spotThread->start();
 

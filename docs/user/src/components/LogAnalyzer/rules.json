@@ -94,7 +94,7 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 7973,
+          "line": 8106,
           "text": "\"RadioModel: terminal GUI client registration failure\""
         }
       ]
@@ -111,12 +111,12 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 7894,
+          "line": 8027,
           "text": "RadioModel: this GUI client was force-disconnected by another client"
         },
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 7945,
+          "line": 8078,
           "text": "RadioModel: radio disconnected this session because another GUI client used the same ID"
         }
       ]
@@ -133,7 +133,7 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 7801,
+          "line": 7934,
           "text": "RadioModel: multiFLEX disabled, other clients present"
         }
       ]
@@ -167,7 +167,7 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 9174,
+          "line": 9309,
           "text": "consecutive pings unanswered — forcing disconnect"
         }
       ]
@@ -188,7 +188,7 @@
       "source": [
         {
           "file": "src/core/backends/flex/RadioConnection.cpp",
-          "line": 718,
+          "line": 729,
           "text": "qCDebug(lcConnection) << \"RX:\" << line;"
         },
         {
@@ -210,7 +210,7 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 8196,
+          "line": 8329,
           "text": "RadioModel: no VITA-49 UDP data received after 10s"
         }
       ]
@@ -227,7 +227,7 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 8174,
+          "line": 8307,
           "text": "RadioModel: UDP stream setup failed"
         },
         {
@@ -237,7 +237,7 @@
         },
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 8253,
+          "line": 8386,
           "text": "RadioModel: client udpport collision"
         }
       ]
@@ -452,7 +452,7 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 1496,
+          "line": 1498,
           "text": "RadioModel: dax_rx stream create for channel"
         },
         {
@@ -474,7 +474,7 @@
       "source": [
         {
           "file": "src/models/RadioModel.cpp",
-          "line": 12986,
+          "line": 13121,
           "text": "RadioModel: DAX TX create failed"
         }
       ]
@@ -530,7 +530,7 @@
       "source": [
         {
           "file": "src/core/TciIoWorker.cpp",
-          "line": 106,
+          "line": 117,
           "text": "TciServer: listen failed"
         }
       ]
@@ -547,7 +547,7 @@
       "source": [
         {
           "file": "src/gui/SpectrumWidget.cpp",
-          "line": 13422,
+          "line": 13402,
           "text": "\"SpectrumWidget: QRhi failure:\""
         },
         {
@@ -941,7 +941,7 @@
       "source": [
         {
           "file": "src/core/backends/hl2/Hl2Backend.cpp",
-          "line": 3452,
+          "line": 3502,
           "text": "HL2: could not open the UDP socket"
         }
       ]
@@ -961,7 +961,7 @@
       "source": [
         {
           "file": "src/core/backends/hl2/MetisClient.cpp",
-          "line": 552,
+          "line": 567,
           "text": "MetisClient: no EP6 for"
         }
       ]
