@@ -1,5 +1,6 @@
 #include "FramelessWindowTitleBar.h"
 #include "FramelessMoveHelper.h"
+#include "TabletUi.h"
 
 #include <QHBoxLayout>
 #include <QLabel>
@@ -38,6 +39,14 @@ FramelessWindowTitleBar::FramelessWindowTitleBar(const QString& title, QWidget* 
     : QWidget(parent)
 {
     theme::setContainer(this, QStringLiteral("titlebar"));
+    if (tabletUiEnabled()) {
+        auto* row = new QHBoxLayout(this);
+        row->setContentsMargins(0, 0, 0, 0);
+        auto* header = makeTabletPanelHeader(title, this);
+        m_titleLabel = header->findChild<QLabel*>(QStringLiteral("tabletPanelTitle"));
+        row->addWidget(header);
+        return;
+    }
     setFixedHeight(18);
     setAttribute(Qt::WA_StyledBackground, true);
     setStyleSheet(kBarStyle);
@@ -114,7 +123,7 @@ void FramelessWindowTitleBar::setTitleText(const QString& title)
 
 void FramelessWindowTitleBar::mousePressEvent(QMouseEvent* event)
 {
-    if (FramelessMoveHelper::start(this, event)) {
+    if (!tabletUiEnabled() && FramelessMoveHelper::start(this, event)) {
         return;
     }
     QWidget::mousePressEvent(event);
@@ -122,7 +131,7 @@ void FramelessWindowTitleBar::mousePressEvent(QMouseEvent* event)
 
 void FramelessWindowTitleBar::mouseMoveEvent(QMouseEvent* event)
 {
-    if (FramelessMoveHelper::move(this, event)) {
+    if (!tabletUiEnabled() && FramelessMoveHelper::move(this, event)) {
         return;
     }
     QWidget::mouseMoveEvent(event);
@@ -130,7 +139,7 @@ void FramelessWindowTitleBar::mouseMoveEvent(QMouseEvent* event)
 
 void FramelessWindowTitleBar::mouseReleaseEvent(QMouseEvent* event)
 {
-    if (FramelessMoveHelper::finish(this, event)) {
+    if (!tabletUiEnabled() && FramelessMoveHelper::finish(this, event)) {
         return;
     }
     QWidget::mouseReleaseEvent(event);
@@ -138,7 +147,7 @@ void FramelessWindowTitleBar::mouseReleaseEvent(QMouseEvent* event)
 
 void FramelessWindowTitleBar::mouseDoubleClickEvent(QMouseEvent* event)
 {
-    if (event->button() == Qt::LeftButton) {
+    if (!tabletUiEnabled() && event->button() == Qt::LeftButton) {
         FramelessMoveHelper::toggleMaximized(this);
         event->accept();
         return;

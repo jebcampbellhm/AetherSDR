@@ -32,8 +32,11 @@ hosted AetherSDR instance is not included.
 
 Automatic discovery on physical iPads requires Apple's multicast entitlement
 in the signed app. Direct-IP connections do not require that discovery entitlement.
-Hardware receive and transmit behavior still needs testing on the actual iPad
-and radio pair.
+For password-protected receivers, enter the password and connect successfully
+once to save it in the iPad Keychain. Afterward, use **Connect** on the saved
+radio. Leave the password field blank when editing to reuse the stored
+password. For nRSP-ST, the saved streaming username selects which password
+Keychain supplies.
 
 ## Using the touch controls
 
@@ -45,6 +48,7 @@ and radio pair.
 | **−** / **+** | Tune by the receiver's current tuning step |
 | **Mute** | Mute the selected receiver |
 | **Lock** | Lock frequency changes; unlock before tuning |
+| **Aether DSP** | Open AetherRX settings directly, including AetherNR and the receive DSP chain |
 | **Radios** | Add independent receivers and select which radio you hear |
 | **Receiver** | Adjust audio level, AGC threshold, and tuning step |
 | **Noise reduction** | Select NR2, RN2, NR4, NNR, or MNR; open **NR4 settings** |
@@ -59,10 +63,9 @@ an exact frequency with the keypad.
 
 Spread two fingers on the spectrum to narrow the visible frequency range.
 Pinch them together to widen it. The frequency between your fingers stays in
-place as you zoom. The bottom toolbar scrolls horizontally if its controls do
-not fit. The main tuning and
-receiver sheets have large touch controls; advanced desktop dialogs still
-vary in their suitability for touch.
+place as you zoom. **Aether DSP** stays visible on the bottom toolbar. Swipe
+the other toolbar controls horizontally if they do not fit. Aether DSP and
+Radio Setup open as panels. Tap **Close** at the top to return to the radio.
 NR2 may show an FFT optimization window the first time it is enabled. Let it
 finish; the result is cached for subsequent use. In Demo mode, tuning-step
 changes are not echoed by the simulated radio.

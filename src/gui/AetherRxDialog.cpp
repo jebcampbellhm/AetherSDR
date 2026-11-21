@@ -1,4 +1,7 @@
 #include "AetherRxDialog.h"
+#include "TabletUi.h"
+#include <QScrollArea>
+#include <QScroller>
 #include "AetherDspWidget.h"
 #include "AetherRxSettingsDialog.h"
 #include "ClientEqApplet.h"   // ClientEqApplet::Path
@@ -89,7 +92,7 @@ AetherRxDialog::Stage fromChainStage(AudioEngine::RxChainStage s)
 } // namespace
 
 AetherRxDialog::AetherRxDialog(AudioEngine* audio, QWidget* parent)
-    : CanonWindow(QStringLiteral("AetherRX"), parent, Kind::Workspace)
+    : CanonWindow(QStringLiteral("AetherRX"), parent, Kind::Workspace, /*tabletPanel=*/true)
     , m_audio(audio)
 {
     theme::setContainer(this, QStringLiteral("canon/aetherRx"));
@@ -105,20 +108,28 @@ AetherRxDialog::AetherRxDialog(AudioEngine* audio, QWidget* parent)
     // to fit; that is the trade for a window you can put somewhere. The
     // minimum is what the narrowest page (AetherNR's two-column radio row)
     // needs beside the tab column.
-    setMinimumSize(600, 400);
+    if (tabletUiEnabled()) {
+        setMinimumSize(320, 320);
+    } else {
+        setMinimumSize(600, 400);
+    }
     // The size is pinned while the size this window wants is still being
     // settled: without it, the first size anyone happened to leave it at is
     // the size they keep. The position is still restored and saved. To give
     // the size back to the operator, drop this; the geometry key underneath
     // has been recording it all along.
-    setLaunchSize(kLaunchSize);
-    FramelessResizer::install(this);
+    if (!tabletUiEnabled()) {
+        setLaunchSize(kLaunchSize);
+        FramelessResizer::install(this);
+    }
     AetherSDR::ThemeManager::instance().applyStyleSheet(bodyWidget(), canonBodyStyleSheet());
 
     auto* outer = new QVBoxLayout(bodyWidget());
     outer->setContentsMargins(14, 12, 14, 14);
     outer->setSpacing(10);
-    outer->addWidget(makeCanonHeader(QStringLiteral("AetherRX")));
+    if (!tabletUiEnabled()) {
+        outer->addWidget(makeCanonHeader(QStringLiteral("AetherRX")));
+    }
 
     auto* body = new QHBoxLayout;
     body->setContentsMargins(0, 0, 0, 0);
@@ -310,6 +321,7 @@ AetherRxDialog::AetherRxDialog(AudioEngine* audio, QWidget* parent)
     m_tabs->addFooterGearButton(
         tr("Settings"), QStringLiteral("aetherRxSettingsButton"),
         tr("Settings: save, load, import and export receive chain profiles."));
+    prepareTabletControls(m_tabs);
 
     // Pin every panel to its RX engine instance. Without this the EQ canvas
     // has no engine to enumerate bands for and collapses to its "(no EQ
@@ -405,6 +417,15 @@ void AetherRxDialog::addStage(Stage stage, const QString& label, QWidget* page)
     m_tabs->addStage(static_cast<int>(stage), label,
                      /*wantsCheckbox=*/stage != Output);
 
+    if (tabletUiEnabled()) {
+        prepareTabletControls(page);
+        auto* scroll = new QScrollArea(m_stack);
+        scroll->setWidgetResizable(true);
+        scroll->setFrameShape(QFrame::NoFrame);
+        scroll->setWidget(page);
+        QScroller::grabGesture(scroll->viewport(), QScroller::TouchGesture);
+        page = scroll;
+    }
     const int index = m_stack->addWidget(page);
     Q_ASSERT(index == stage);   // ids double as stack indices
     Q_UNUSED(index);

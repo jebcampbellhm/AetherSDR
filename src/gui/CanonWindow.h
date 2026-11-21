@@ -38,8 +38,9 @@ public:
     // setReturnClicksDefault()).
     enum class Kind { Dialog, Workspace };
 
+    // tabletPanel fills the parent window and presents its settings modally on iPad.
     explicit CanonWindow(const QString& title, QWidget* parent = nullptr,
-                         Kind kind = Kind::Dialog);
+                         Kind kind = Kind::Dialog, bool tabletPanel = false);
 
     // Reopen an existing window without losing its maximized/fullscreen state.
     void showAndActivate();

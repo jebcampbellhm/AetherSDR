@@ -31,6 +31,14 @@ if [ ! -f "$DEPS_PREFIX/lib/libfftw3f.a" ] || [ ! -f "$DEPS_PREFIX/lib/libopus.a
         bash "$ROOT/scripts/setup/setup-ios-deps.sh"
 fi
 
+if [ ! -f "$DEPS_PREFIX/lib/cmake/Qt6Keychain/Qt6KeychainConfig.cmake" ] ||
+   [ ! -f "$DEPS_PREFIX/lib/cmake/Qt6Keychain/.aether-ios-interactive-qos" ]; then
+    QT_IOS_ROOT="$QT_IOS_ROOT" QT_HOST_ROOT="$QT_HOST_ROOT" \
+        IOS_SDK="$SDK" IOS_ARCH="$ARCH" IOS_DEPLOYMENT_TARGET="$DEPLOYMENT" \
+        IOS_DEPS_WORK="$DEPS_WORK" IOS_DEPS_PREFIX="$DEPS_PREFIX" \
+        bash "$ROOT/scripts/setup/setup-ios-keychain.sh"
+fi
+
 # Also disable signing during CMake's initial compiler probes. A development
 # build can override this cache entry and set a team through the trailing args.
 "$QT_IOS_ROOT/bin/qt-cmake" -S "$ROOT" -B "$BUILD_DIR" -G Xcode \

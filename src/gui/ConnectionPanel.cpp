@@ -2767,7 +2767,21 @@ void ConnectionPanel::applySavedSourceSelection(const QString& ip, bool restoreF
     for (const QJsonValue& value : paths) {
         const QJsonObject path = value.toObject();
         const QJsonObject route = path.value("route").toObject();
-        if (path.value("host").toString() == trimmedIp && !route.isEmpty()) { profile = route; break; }
+        if (path.value("host").toString() != trimmedIp) {
+            continue;
+        }
+        if (!route.isEmpty()) {
+            profile = route;
+        }
+        const QString savedFamily = path.value("family").toString();
+        if (restoreFamily && !savedFamily.isEmpty()) {
+            QJsonObject identity = profile.value("identity").toObject();
+            identity["family"] = savedFamily;
+            profile["identity"] = identity;
+        }
+        if (!route.isEmpty() || (restoreFamily && !savedFamily.isEmpty())) {
+            break;
+        }
     }
     if (profile.isEmpty()) {
         refreshManualSourceOptions();
@@ -2783,8 +2797,12 @@ void ConnectionPanel::applySavedSourceSelection(const QString& ip, bool restoreF
     // parameter's note in the header. The bind settings below are restored on
     // both paths: they are not a control the operator is looking at, and an
     // address's VPN source path is a property of the address either way.
-    if (restoreFamily)
+    if (restoreFamily) {
         setManualFamily(familyFromProfile(profile));
+        if (familyFromProfile(profile) == QLatin1String(kFamilyNrsp)) {
+            m_manualNrspUserEdit->setText(profile.value("nrsp").toObject().value("username").toString());
+        }
+    }
     if (restoreFamily && familyFromProfile(profile) == QLatin1String(kFamilyWeb888)
         && m_web888PortSpin) {
         const int port = profile.value("web888").toObject().value("port").toInt(8073);
@@ -3183,6 +3201,12 @@ void ConnectionPanel::saveManualProfile(const QString& targetIp,
         profile["web888"] = receiver;
     }
 
+    if (currentManualFamily() == QLatin1String(kFamilyNrsp)) {
+        QJsonObject receiver;
+        receiver["username"] = m_manualNrspUserEdit->text().trimmed();
+        profile["nrsp"] = receiver;
+    }
+
     if (currentManualFamily() == QLatin1String(kFamilyIcom)) {
         QJsonObject icom;
         const quint16 basePort = icomBasePort != 0
@@ -3203,6 +3227,9 @@ void ConnectionPanel::onManualIpChanged(const QString& ip)
     const QString trimmed = ip.trimmed();
     m_manualConnectPending = false;
     if (trimmed != m_manualProfileIp) {
+        m_web888PasswordEdit->clear();
+        m_manualNrspPassEdit->clear();
+        m_manualNrspUserEdit->clear();
         // Typing an address must not discard a source path the operator has
         // already selected. The saved profile is useful for startup and for
         // choosing a recent address, but it must not silently turn an
@@ -5458,6 +5485,8 @@ void ConnectionPanel::restoreWorkspaceManual(const QJsonObject& path)
     latchIcomCredential(path.value("credentialId").toString(), path.value("legacyCredentials").toBool(),
         path.value("host").toString(), path.value("username").toString());
     m_manualIcomPassEdit->clear();
+    m_web888PasswordEdit->clear();
+    m_manualNrspPassEdit->clear();
     m_icomPasswordPrefilled = false;
     IcomCredentials::clearSession();
     m_manualIcomUserEdit->setText(path.value("username").toString());
@@ -5465,6 +5494,13 @@ void ConnectionPanel::restoreWorkspaceManual(const QJsonObject& path)
     m_manualIpEdit->setText(path.value("host").toString());
     applySavedSourceSelection(path.value("host").toString(), true);
     setManualFamily(path.value("family").toString());
+    const QJsonObject route = path.value("route").toObject();
+    if (currentManualFamily() == QLatin1String(kFamilyNrsp)) {
+        m_manualNrspUserEdit->setText(route.value("nrsp").toObject().value("username").toString());
+    } else if (currentManualFamily() == QLatin1String(kFamilyWeb888)) {
+        const int port = route.value("web888").toObject().value("port").toInt(8073);
+        m_web888PortSpin->setValue(port >= 1 && port <= 65535 ? port : 8073);
+    }
     updateManualFamilyHints();
     const int civIndex = m_manualIcomCivCombo->findData(path.value("civ").toString());
     if (civIndex >= 0) { m_manualIcomCivCombo->setCurrentIndex(civIndex); }

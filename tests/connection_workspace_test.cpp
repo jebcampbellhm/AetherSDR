@@ -773,6 +773,40 @@ int main(int argc, char** argv)
             && atB.first().toObject().value("serial").toString() == "nearby-only");
     }
     {
+        // Connect a saved route through the panel without a live nRSP peer.
+        // The backend receives the account name and a blank password so it
+        // can resolve that account through the credential store.
+        const QString host = QStringLiteral("192.0.2.61");
+        {
+            ConnectionPanel edit;
+            auto* type = edit.findChild<QComboBox*>("connectionManualRadioType");
+            type->setCurrentIndex(type->findData(QStringLiteral("nrsp")));
+            edit.findChild<QLineEdit*>("connectionManualIp")->setText(host);
+            edit.findChild<QLineEdit*>("connectionManualNrspUser")->setText("streamer");
+            edit.findChild<QLineEdit*>("connectionManualNrspPassword")->setText("fixture-secret");
+            edit.findChild<QPushButton*>("connectionSaveManual")->click();
+        }
+        ConnectionPanel freshPanel;
+        QJsonObject target;
+        for (const QJsonValue& value : freshPanel.connectionTargets()) {
+            if (value.toObject().value("path").toObject().value("host").toString() == host) {
+                target = value.toObject();
+                break;
+            }
+        }
+        const QJsonObject path = target.value("path").toObject();
+        check("nRSP route saves the streaming account without the password",
+              path.value("route").toObject().value("nrsp").toObject().value("username").toString() == "streamer"
+              && !QJsonDocument(freshPanel.workspaceSnapshot()).toJson().contains("fixture-secret")
+              && !settings.value("RoutedProfilesJson").toString().contains("fixture-secret"));
+        QSignalSpy connections(&freshPanel, &ConnectionPanel::connectWithOptionsRequested);
+        freshPanel.connectTarget(target);
+        const QVariantMap options = connections.isEmpty() ? QVariantMap() : connections.first().at(1).toMap();
+        check("saved nRSP Connect restores the username for password lookup",
+              connections.count() == 1 && options.value("nrsp.username").toString() == "streamer"
+              && options.value("nrsp.password").toString().isEmpty());
+    }
+    {
         // A migrated connection keeps the pre-workspace keychain password.
         QJsonObject state = ConnectionWorkspace::load();
         QJsonArray stations = state.value("stations").toArray();

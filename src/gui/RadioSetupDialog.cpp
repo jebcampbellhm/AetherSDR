@@ -1228,7 +1228,7 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
                                    QWidget* parent,
                                    Kat500Model* kat500, Kxpa100Model* kxpa100,
                                    RfkitConnection* rfkit)
-    : CanonWindow(QStringLiteral("Radio Setup"), parent, Kind::Workspace),
+    : CanonWindow(QStringLiteral("Radio Setup"), parent, Kind::Workspace, /*tabletPanel=*/true),
       m_model(model), m_audio(audio),
       m_tgxl(tgxl), m_pgxl(pgxl), m_ag(ag),
       m_kiwiSdrManager(kiwiSdrManager), m_acom(acom), m_spe(spe), m_vkamp(vkamp), m_lpMeter(lpMeter),
@@ -1239,11 +1239,12 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
     // so saved geometry carries over; it resizes from every edge. 40 px taller
     // than before for the canon header.
     setGeometryKey(QStringLiteral("RadioSetupDialogGeometry"));
-    // The width is fixed: the pages are laid out for it. The height is the
-    // operator's, from 720 up.
-    setFixedWidth(960);
-    setMinimumHeight(720);
-    FramelessResizer::install(this);
+    if (!tabletUiEnabled()) {
+        // Desktop pages use a fixed width and resize vertically.
+        setFixedWidth(960);
+        setMinimumHeight(720);
+        FramelessResizer::install(this);
+    }
     bodyWidget()->setObjectName(QStringLiteral("radioSetupBody"));
     applyCanonSheet(bodyWidget(), [] {
         return QString::fromLatin1(kRadioSetupStyle) + canonScrollBarRules() + canonSpinArrowRules() + canonIndicatorRules();
@@ -1252,7 +1253,9 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
     auto* layout = new QVBoxLayout(bodyWidget());
     layout->setContentsMargins(22, 18, 22, 20);
     layout->setSpacing(10);
-    layout->addWidget(makeCanonHeader(QStringLiteral("Radio Setup")));
+    if (!tabletUiEnabled()) {
+        layout->addWidget(makeCanonHeader(QStringLiteral("Radio Setup")));
+    }
 
     auto* search = new QLineEdit;
     search->setObjectName(QStringLiteral("radioSetupSearch"));
@@ -1262,7 +1265,7 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
     search->setAccessibleName(QStringLiteral("Search Radio Setup settings"));
     search->setAccessibleDescription(
         QStringLiteral("Type a feature, device, or setting name to filter the navigation list."));
-    search->setMinimumHeight(38);
+    search->setMinimumHeight(tabletUiEnabled() ? 48 : 38);
     layout->addWidget(search);
 
     auto* content = new QSplitter(Qt::Horizontal);
@@ -1279,6 +1282,10 @@ RadioSetupDialog::RadioSetupDialog(RadioModel* model, AudioEngine* audio,
     m_navigation->setAccessibleName(QStringLiteral("Radio Setup categories"));
     m_navigation->setAccessibleDescription(
         QStringLiteral("Use the arrow keys to move between categories and settings pages."));
+    if (tabletUiEnabled()) {
+        m_navigation->setStyleSheet(QStringLiteral("QTreeWidget::item { min-height: 40px; }"));
+        QScroller::grabGesture(m_navigation->viewport(), QScroller::TouchGesture);
+    }
     content->addWidget(m_navigation);
 
     auto* pageHost = new QWidget;

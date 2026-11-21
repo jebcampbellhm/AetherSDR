@@ -44,6 +44,7 @@ PersistentDialog::PersistentDialog(const QString& title,
 
 void PersistentDialog::setFramelessMode(bool on)
 {
+    on = on || tabletUiEnabled();
     m_framelessOn = on;
 
     const QRect geom = geometry();

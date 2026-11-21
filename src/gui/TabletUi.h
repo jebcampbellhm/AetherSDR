@@ -3,6 +3,7 @@
 #include <QtGlobal>
 
 class QWidget;
+class QString;
 
 namespace AetherSDR {
 
@@ -15,8 +16,9 @@ inline bool tabletUiEnabled()
 #endif
 }
 
+QWidget* makeTabletPanelHeader(const QString& title, QWidget* panel);
 void styleTabletSurface(QWidget* surface);
 void prepareTabletControls(QWidget* surface);
-void keepTabletWindowOnScreen(QWidget* window);
+void keepTabletWindowOnScreen(QWidget* window, bool fillParent = false);
 
 } // namespace AetherSDR

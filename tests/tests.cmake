@@ -13013,8 +13013,8 @@ foreach(_target IN LISTS _tablet_widget_targets)
         continue()
     endif()
     get_target_property(_sources ${_target} SOURCES)
-    if(("${_sources}" MATCHES "src/gui/(CanonWindow|PersistentDialog|CopyAssistPanel|CopyAssistSettingsDialog|ConnectionPanel|RadioSetupDialog)[.]cpp"
-        OR "${_sources}" MATCHES "TARGET_OBJECTS:aether_test_(canon_window|persistent_dialog)>")
+    if(("${_sources}" MATCHES "src/gui/(CanonWindow|PersistentDialog|FramelessWindowTitleBar|CopyAssistPanel|CopyAssistSettingsDialog|ConnectionPanel|RadioSetupDialog)[.]cpp"
+        OR "${_sources}" MATCHES "TARGET_OBJECTS:aether_test_(canon_window|persistent_dialog|frameless_title_bar)>")
        AND NOT "${_sources}" MATCHES "src/gui/TabletUi[.]cpp")
         target_sources(${_target} PRIVATE $<TARGET_OBJECTS:aether_test_tablet_ui>)
     endif()

@@ -42,14 +42,15 @@ const QAccessibilityHints* accessibilityHints()
 }
 } // namespace
 
-CanonWindow::CanonWindow(const QString& title, QWidget* parent, Kind kind)
+CanonWindow::CanonWindow(const QString& title, QWidget* parent, Kind kind, bool tabletPanel)
     : QDialog(parent)
     , m_returnClicksDefault(kind == Kind::Dialog)
 {
     setWindowTitle(title);
-    keepTabletWindowOnScreen(this);
-    setWindowFlags((kind == Kind::Workspace ? Qt::Window : Qt::Dialog)
+    keepTabletWindowOnScreen(this, tabletPanel);
+    setWindowFlags((kind == Kind::Workspace && !tabletUiEnabled() ? Qt::Window : Qt::Dialog)
                    | Qt::FramelessWindowHint);
+    if (tabletPanel && tabletUiEnabled()) setWindowModality(Qt::WindowModal);
     // A secondary top-level window: an open workspace must not keep the app
     // running once the main window has closed.
     if (kind == Kind::Workspace) {
@@ -65,15 +66,20 @@ CanonWindow::CanonWindow(const QString& title, QWidget* parent, Kind kind)
 
     auto* outer = new QVBoxLayout(this);
     outer->setContentsMargins(kInset, kInset, kInset, kInset);
+    if (tabletUiEnabled()) {
+        outer->addWidget(makeTabletPanelHeader(title, this));
+    }
     m_body = new QWidget(this);
     m_body->setObjectName(QStringLiteral("canonBody"));
     m_body->setAttribute(Qt::WA_TranslucentBackground);
     outer->addWidget(m_body);
 
     auto& tm = ThemeManager::instance();
-    m_close = makeCanonCloseButton(this);
-    m_close->setToolTip(QStringLiteral("Close (Esc)"));
-    connect(m_close, &QToolButton::clicked, this, &QDialog::close);
+    if (!tabletUiEnabled()) {
+        m_close = makeCanonCloseButton(this);
+        m_close->setToolTip(QStringLiteral("Close (Esc)"));
+        connect(m_close, &QToolButton::clicked, this, &QDialog::close);
+    }
 
     // QDialog handles Escape itself; a caption-less window gets no Close
     // shortcut from the platform, so ⌘W / Ctrl+W is wired here.
@@ -101,7 +107,9 @@ void CanonWindow::resizeEvent(QResizeEvent* event)
 {
     QDialog::resizeEvent(event);
     m_ground = QPixmap();
-    placeCanonCloseButton(m_close);
+    if (m_close) {
+        placeCanonCloseButton(m_close);
+    }
     // Native-window creation on first show() delivers move and resize events
     // before showEvent(); saving those would overwrite the last session's
     // geometry with the default one, so nothing is saved until placed.

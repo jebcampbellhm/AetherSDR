@@ -55,9 +55,6 @@ CanonWindow* touchSheet(const QString& title, QWidget* parent, QVBoxLayout** con
     auto* layout = new QVBoxLayout(sheet->bodyWidget());
     layout->setContentsMargins(20, 20, 20, 20);
     layout->setSpacing(12);
-    auto* heading = new QLabel(title, sheet);
-    heading->setAccessibleName(title);
-    layout->addWidget(heading);
     auto* scroll = new QScrollArea(sheet);
     scroll->setWidgetResizable(true);
     scroll->setFrameShape(QFrame::NoFrame);
@@ -68,9 +65,6 @@ CanonWindow* touchSheet(const QString& title, QWidget* parent, QVBoxLayout** con
     scroll->setWidget(body);
     QScroller::grabGesture(scroll->viewport(), QScroller::TouchGesture);
     layout->addWidget(scroll, 1);
-    auto* done = touchButton(QObject::tr("Done"), sheet);
-    QObject::connect(done, &QPushButton::clicked, sheet, &QDialog::accept);
-    layout->addWidget(done);
     styleTabletSurface(sheet->bodyWidget());
     const QSize available = parent->size();
     sheet->setLaunchSize(QSize(qMin(520, available.width() - 24),
@@ -189,7 +183,19 @@ void MainWindow::setupTabletUi()
     styleTabletSurface(header);
     shell->insertWidget(0, header);
 
-    auto* navigation = new QScrollArea(centralWidget());
+    auto* dock = new QWidget(centralWidget());
+    dock->setObjectName(QStringLiteral("tabletDock"));
+    auto* dockRow = new QHBoxLayout(dock);
+    dockRow->setContentsMargins(12, 0, 0, 0);
+    dockRow->setSpacing(0);
+    auto* dsp = touchButton(tr("Aether DSP"), dock);
+    dsp->setObjectName(QStringLiteral("tabletAetherDsp"));
+    dsp->setAccessibleDescription(tr("Open AetherRX receive audio settings."));
+    connect(dsp, &QPushButton::clicked, this, [this] { ensureAetherRxDialog(); });
+    dockRow->addWidget(dsp);
+    styleTabletSurface(dock);
+
+    auto* navigation = new QScrollArea(dock);
     navigation->setWidgetResizable(true);
     navigation->setFrameShape(QFrame::NoFrame);
     navigation->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
@@ -232,7 +238,8 @@ void MainWindow::setupTabletUi()
         button->ensurePolished();
         button->setMinimumWidth(qMax(kTouchTarget, button->sizeHint().width()));
     }
-    shell->addWidget(navigation);
+    dockRow->addWidget(navigation, 1);
+    shell->addWidget(dock);
 
     // Re-read the current slice instead of retaining one across band changes,
     // receiver deletion or session switches. This timer only paints live state.
@@ -402,10 +409,10 @@ void MainWindow::showTabletReceiver()
             slice->setAgcTKnobLevel(value);
         }
     });
-    auto* dsp = touchButton(tr("Open AetherRX"), sheet);
+    auto* dsp = touchButton(tr("Aether DSP settings"), sheet);
     connect(dsp, &QPushButton::clicked, this, [this, sheet] {
         sheet->accept();
-        toggleAetherRxDialog();
+        ensureAetherRxDialog();
     });
     layout->addWidget(dsp);
     layout->addStretch();
@@ -477,6 +484,12 @@ void MainWindow::showTabletNoiseReduction()
 #endif
         layout->addWidget(button);
     }
+    auto* dsp = touchButton(tr("Aether DSP settings"), sheet);
+    connect(dsp, &QPushButton::clicked, this, [this, sheet] {
+        sheet->accept();
+        ensureAetherRxDialog();
+    });
+    layout->addWidget(dsp);
     auto* settings = touchButton(tr("NR4 settings"), sheet);
     connect(settings, &QPushButton::clicked, this, [this, sheet] {
         const QPoint anchor = mapToGlobal(rect().center());

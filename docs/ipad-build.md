@@ -26,7 +26,9 @@ python3 -m aqt install-qt mac ios 6.12.0 ios \
 The setup script fetches the repository's pinned FFTW 3.3.11 and Opus 1.5.2
 sources, verifies SHA-256, and builds static libraries for the chosen SDK.
 Device and simulator dependency prefixes must remain separate even if both
-use arm64. It does not use Homebrew's macOS libraries for an iOS link.
+use arm64. Neither uses Homebrew’s macOS libraries for an iOS link. The iPad
+build script also builds the pinned QtKeychain 0.16.0 against the selected SDK
+so receiver passwords and SmartLink credentials can use the iPad Keychain.
 
 ## Generate and build with Xcode
 
@@ -48,7 +50,7 @@ Useful environment overrides:
 | --- | --- |
 | `IOS_BUILD_DIR` | Xcode project and output directory |
 | `IOS_DEPS_WORK` | Dependency source and build directory |
-| `IOS_DEPS_PREFIX` | SDK-specific installed FFTW and Opus prefix |
+| `IOS_DEPS_PREFIX` | SDK-specific prefix for FFTW, Opus, and QtKeychain |
 | `IOS_ARCH` | Device `arm64`; simulator architecture matching the Qt kit |
 | `QT_SIMULATOR_ROOT` | Simulator-specific Qt kit, overriding `QT_IOS_ROOT` for simulator builds |
 | `FFMPEG_DIR` | Source-built FFmpeg prefix when the Qt kit links static FFmpeg |

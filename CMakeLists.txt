@@ -450,7 +450,13 @@ endif()
 # REQUIRE_KEYCHAIN makes a missing Qt6Keychain a hard build failure rather than
 # a silent compile-out of SmartLink credential persistence — release/packaged
 # builds set it so an artifact can never ship without working persistence (#3639).
-if(REQUIRE_KEYCHAIN)
+if(IOS)
+    # Keep device and simulator credentials on their own native Keychain build.
+    # Never discover the desktop QtKeychain package through a cached prefix.
+    find_package(Qt6Keychain REQUIRED CONFIG
+        PATHS "${AETHER_IOS_DEPS}/lib/cmake/Qt6Keychain"
+        NO_DEFAULT_PATH NO_CMAKE_FIND_ROOT_PATH)
+elseif(REQUIRE_KEYCHAIN)
     find_package(Qt6Keychain REQUIRED)
 else()
     find_package(Qt6Keychain QUIET)
@@ -2943,6 +2949,27 @@ if(IOS)
         XCODE_ATTRIBUTE_TARGETED_DEVICE_FAMILY "2"
         XCODE_ATTRIBUTE_SUPPORTS_MACCATALYST "NO"
     )
+    set(_ipad_catalog "${CMAKE_CURRENT_SOURCE_DIR}/packaging/ios/Assets.xcassets")
+    set(_ipad_icon_dir "${CMAKE_CURRENT_BINARY_DIR}/ipad-icon")
+    set(_ipad_icon_resources
+        "${_ipad_icon_dir}/Assets.car"
+        "${_ipad_icon_dir}/AppIcon60x60@2x.png"
+        "${_ipad_icon_dir}/AppIcon76x76@2x~ipad.png")
+    string(TOLOWER "${AETHER_IOS_PLATFORM_NAME}" _ipad_asset_platform)
+    add_custom_command(OUTPUT ${_ipad_icon_resources}
+        COMMAND ${CMAKE_COMMAND} -E make_directory "${_ipad_icon_dir}"
+        COMMAND xcrun actool --compile "${_ipad_icon_dir}"
+            --platform "${_ipad_asset_platform}"
+            --minimum-deployment-target "${CMAKE_OSX_DEPLOYMENT_TARGET}"
+            --target-device ipad --app-icon AppIcon
+            --output-partial-info-plist "${_ipad_icon_dir}/Info.plist" "${_ipad_catalog}"
+        DEPENDS "${_ipad_catalog}/Contents.json"
+            "${_ipad_catalog}/AppIcon.appiconset/Contents.json"
+            "${_ipad_catalog}/AppIcon.appiconset/AppIcon.png"
+        COMMENT "Compiling AetherSDR’s iPad app icon" VERBATIM)
+    set_source_files_properties(${_ipad_icon_resources} PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+    target_sources(AetherSDR PRIVATE ${_ipad_icon_resources})
+
     target_link_libraries(aethercore PRIVATE
         "-framework AVFoundation" "-framework Accelerate"
         "-framework Foundation" "-framework UIKit")

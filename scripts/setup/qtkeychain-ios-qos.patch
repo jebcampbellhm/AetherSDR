@@ -1,0 +1,31 @@
+diff --git a/qtkeychain/keychain_apple.mm b/qtkeychain/keychain_apple.mm
+index 2b0abee..8f80404 100644
+--- a/qtkeychain/keychain_apple.mm
++++ b/qtkeychain/keychain_apple.mm
+@@ -155,7 +155,7 @@ - (void)keychainTaskFinishedWithError:(OSStatus)status
+ static void StartReadPassword(const QString &service, const QString &key,
+                               AppleKeychainInterface *const interface)
+ {
+-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
++    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+         NSDictionary *const query = @{
+             (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+             (__bridge NSString *)kSecAttrService : service.toNSString(),
+@@ -192,7 +192,7 @@ static void StartReadPassword(const QString &service, const QString &key,
+ static void StartWritePassword(const QString &service, const QString &key, const QByteArray &data,
+                                AppleKeychainInterface *const interface)
+ {
+-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
++    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+         NSDictionary *const query = @{
+             (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+             (__bridge NSString *)kSecAttrService : service.toNSString(),
+@@ -239,7 +239,7 @@ static void StartWritePassword(const QString &service, const QString &key, const
+ static void StartDeletePassword(const QString &service, const QString &key,
+                                 AppleKeychainInterface *const interface)
+ {
+-    dispatch_async(dispatch_get_global_queue(DISPATCH_QUEUE_PRIORITY_BACKGROUND, 0), ^{
++    dispatch_async(dispatch_get_global_queue(QOS_CLASS_USER_INITIATED, 0), ^{
+         NSDictionary *const query = @{
+             (__bridge NSString *)kSecClass : (__bridge NSString *)kSecClassGenericPassword,
+             (__bridge NSString *)kSecAttrService : service.toNSString(),

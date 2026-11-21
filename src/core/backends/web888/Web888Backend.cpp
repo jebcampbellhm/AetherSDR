@@ -6,7 +6,6 @@
 #include <QTimer>
 #include <QPointer>
 
-#include <QUrl>
 #include <algorithm>
 #include <cmath>
 #include <cstring>
@@ -218,11 +217,8 @@ void Web888Backend::connectRadio(const RadioConnectRequest& request)
     m_saveCredentials = false;
     m_endpoint = request.params.value(QStringLiteral("web888.endpoint")).toString();
     if (m_endpoint.isEmpty()) {
-        QUrl url;
-        url.setScheme(QStringLiteral("http"));
-        url.setHost(request.host);
-        url.setPort(request.port == 0 ? 8073 : request.port);
-        m_endpoint = url.toString();
+        m_endpoint = NetworkReceiverCredentials::httpEndpoint(
+            request.host.trimmed(), request.port == 0 ? 8073 : request.port);
     }
     if (request.params.contains(QStringLiteral("web888.password"))) {
         m_password = request.params.value(QStringLiteral("web888.password")).toString();
